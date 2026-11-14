@@ -1,0 +1,29 @@
+# Game data: NEVER commit disk images or anything extracted from them
+*.adf
+*.ADF
+disks/
+build/
+reference/
+out/
+config.toml
+crash.log
+*.log
+
+# Python / uv / build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+.Python
+dist/
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.import_linter_cache/
+.coverage
+coverage.xml
+htmlcov/
+.agents/

@@ -1,0 +1,6 @@
+# Normalise text files; keep shaders and Python LF in the repository.
+* text=auto
+*.py text eol=lf
+*.vert text eol=lf
+*.frag text eol=lf
+*.adf binary

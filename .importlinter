@@ -1,0 +1,82 @@
+[importlinter]
+root_packages =
+    pymoonstone
+include_external_packages = True
+
+# ----------------------------------------------------------------------------
+# Contract 1: Strict Clean Architecture Layering
+# High-level modules may import low-level modules, never the reverse.
+# ----------------------------------------------------------------------------
+[importlinter:contract:layered_architecture]
+name = Strict Clean Architecture Layer Topology
+type = layers
+layers =
+    pymoonstone.cli
+    pymoonstone.app
+    pymoonstone.render
+    pymoonstone.assets
+    pymoonstone.sim
+
+# ----------------------------------------------------------------------------
+# Contract 2: Pure 50Hz PAL Simulation Core Isolation
+# The simulation kernel must remain 100% deterministic, fast, and serializable.
+# Zero C-extension rendering, windowing, audio, or disk I/O dependencies.
+# ----------------------------------------------------------------------------
+[importlinter:contract:pure_simulation_core]
+name = Pure 50Hz Simulation Core (Zero Hardware/Framework Imports)
+type = forbidden
+source_modules =
+    pymoonstone.sim
+forbidden_modules =
+    pygame
+    moderngl
+    PIL
+    amitools
+    pathlib
+    shutil
+    subprocess
+    socket
+    random
+    time
+    datetime
+    os
+    io
+    threading
+    secrets
+    uuid
+    pymoonstone.assets
+    pymoonstone.render
+    pymoonstone.app
+    pymoonstone.cli
+
+# ----------------------------------------------------------------------------
+# Contract 3: Headless Asset Pipeline Isolation
+# ADF/OFS extraction and Amiga bitplane decoding must run headlessly in CI
+# without requiring an OpenGL context or SDL2 display initialization.
+# ----------------------------------------------------------------------------
+[importlinter:contract:headless_asset_pipeline]
+name = Headless Asset Extractor (Forbidden from importing SDL2/OpenGL)
+type = forbidden
+source_modules =
+    pymoonstone.assets
+forbidden_modules =
+    pygame
+    moderngl
+    pymoonstone.render
+    pymoonstone.app
+    pymoonstone.cli
+
+# ----------------------------------------------------------------------------
+# Contract 4: Renderer Independence from Application Host
+# ModernGL shaders and framebuffer passes must not depend on pygame event loops.
+# ----------------------------------------------------------------------------
+[importlinter:contract:renderer_independence]
+name = ModernGL Renderer Independence from SDL2/Pygame Host
+type = forbidden
+source_modules =
+    pymoonstone.render
+forbidden_modules =
+    pygame
+    amitools
+    pymoonstone.app
+    pymoonstone.cli

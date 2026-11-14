@@ -1,0 +1,139 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pymoonstone"
+version = "0.1.0"
+description = "Clean-room Python 3.12+ reimplementation of Moonstone: A Hard Days Knight (1991) with a deterministic 50Hz simulation core."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [
+    { name = "Senior Systems Architect" }
+]
+dependencies = [
+    "pygame-ce>=2.5.2",
+    "moderngl>=5.10.0",
+    "esper>=3.2",
+    "pydantic>=2.9.0",
+    "numpy>=2.1.0",
+    "pillow>=10.4.0",
+    "amitools>=0.7.0",
+]
+
+[project.scripts]
+pymoonstone = "pymoonstone.cli.main:main"
+pymoonstone-extract = "pymoonstone.cli.extract:main"
+pymoonstone-inspect = "pymoonstone.cli.inspect_assets:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.7.0",
+    "mypy>=1.13.0",
+    "import-linter>=2.1",
+    "radon>=6.0.1",
+    "vulture>=2.13",
+    "pip-audit>=2.7.3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pymoonstone"]
+
+# ============================================================================
+# RUFF: Linting, Formatting, Import Sorting & Complexity Gate
+# ============================================================================
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+exclude = ["reference", "disks", "build"]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "UP",    # pyupgrade
+    "ANN",   # flake8-annotations
+    "SIM",   # flake8-simplify
+    "TCH",   # flake8-type-checking
+    "TID",   # flake8-tidy-imports
+    "PTH",   # flake8-use-pathlib
+    "RUF",   # Ruff-specific rules
+    "C90",   # McCabe cyclomatic complexity
+    "T20",   # flake8-print (forbid stray print statements in library code)
+]
+# ANN101/ANN102 (self/cls annotations) were removed from ruff in 0.8; nothing to ignore.
+ignore = []
+
+[tool.ruff.lint.mccabe]
+# Enforce maximum cyclomatic complexity of 10 per function/method
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["T20"]
+"src/pymoonstone/cli/**/*.py" = ["T20"]
+"scripts/**/*.py" = ["T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pymoonstone"]
+combine-as-imports = true
+
+# ============================================================================
+# MYPY: Strict Static Type Verification
+# ============================================================================
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "src"
+packages = ["pymoonstone"]
+strict = true
+warn_unreachable = true
+warn_unused_ignores = true
+warn_return_any = true
+ warn_redundant_casts = true
+disallow_untyped_defs = true
+disallow_any_unimported = false
+no_implicit_reexport = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "moderngl.*",
+    "amitools.*",
+    "esper.*",
+]
+ignore_missing_imports = true
+
+# ============================================================================
+# PYTEST: Deterministic & Headless Test Configuration
+# ============================================================================
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=pymoonstone",
+    "--cov-report=term-missing",
+]
+markers = [
+    "sim: Pure deterministic 50Hz simulation tests (zero I/O or GPU required)",
+    "adf: Tests requiring original Amiga .adf disk images in ./disks/",
+    "gl: Tests requiring an active OpenGL 3.3 context",
+]
+
+# ============================================================================
+# VULTURE: Dead-Code Detection
+# ============================================================================
+[tool.vulture]
+paths = ["src/pymoonstone"]
+min_confidence = 80
+sort_by_size = true
