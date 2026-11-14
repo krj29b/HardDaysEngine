@@ -38,13 +38,17 @@ the gate parses its JSON output and fails on rank ≥ C.
 divisors in `sim`.
 
 ## ADR-006: 320×256 PAL canvas, 320×200 game area
-**Status:** PROPOSED (2026-11-14). Confirm in Phase 4.
+**Status:** ACCEPTED (2026-11-15)
 **Context:** All Moonstone pictures are 320×200. The brief asks for a 320×256 canvas.
-**Decision (proposed):** Keep the 320×256 canvas and place the 320×200 area at y = 28, drawn 1:1.
-The unused border remains available for debug read-outs.
+**Decision:** Keep the 320×256 virtual canvas (`CANVAS_WIDTH = 320`, `CANVAS_HEIGHT = 256`) and place the 320×200 game viewport at `GAME_OFFSET_Y = 28`, drawn 1:1. The top and bottom 28-pixel borders remain available for HUD/debug read-outs.
 
 ## ADR-007: Python 3.12 pinned for development
 **Status:** ACCEPTED (2026-11-14)
 **Context:** The host default is Python 3.14. `requires-python` is `>=3.12`.
 **Decision:** `.python-version` = 3.12, so uv provisions the interpreter that mypy targets
 (`python_version = "3.12"`) and the version CI uses.
+
+## ADR-008: Disjoint per-module task ownership for multi-agent (`/teamwork`) execution
+**Status:** ACCEPTED (2026-11-15)
+**Context:** Parallel worker agents operating in `workspace: "share"` worktrees can cause merge conflicts if multiple tasks edit the same source or test file simultaneously.
+**Decision:** Every task in Phases 5–8 (`T5.1`–`T8.3`) specifies explicit, disjoint source and test file paths in `IMPLEMENTATION_PLAN.md` and `PROGRESS.md`. Workers claim a single `T<id>` and modify only its owned files; shared index files (`__init__.py` and `PROGRESS.md` status merges) are coordinated when landing branches.
