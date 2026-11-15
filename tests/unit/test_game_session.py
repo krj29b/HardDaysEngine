@@ -39,6 +39,7 @@ def _frame_p1(
     run: bool = False,
     confirm: bool = False,
     pause: bool = False,
+    skip_intro: bool = False,
 ) -> InputFrame:
     return InputFrame(
         players={
@@ -51,6 +52,7 @@ def _frame_p1(
                 run=run,
                 confirm=confirm,
                 pause=pause,
+                skip_intro=skip_intro,
             )
         }
     )
@@ -126,9 +128,10 @@ def _build_scripted_campaign_frames() -> list[InputFrame]:
     frames.append(_frame_p1(confirm=True))
     # Tick 1: Knight Select (keep 1 knight) -> Overworld
     frames.append(_frame_p1(confirm=True))
-    # Tick 2-3: Overworld, cycle move to wilderness node 11 and confirm move
+    # Tick 2-4: Overworld, edge-triggered cycle to wilderness node 11 and confirm move
     # Start node for RED is 10 with neighbors (0, 1, 11); index 2 is 11 (wilderness).
     frames.append(_frame_p1(dx=1))
+    frames.append(_frame_p1())
     frames.append(_frame_p1(dx=1))
     frames.append(_frame_p1(confirm=True))
     # Walk right in combat and slash repeatedly to defeat the monster.
@@ -148,6 +151,7 @@ def test_end_to_end_session_and_replay_determinism(tmp_path: Path) -> None:
     probe = GameSession(seed=chosen_seed, start_scene=GameScene.OVERWORLD)
     # Verify our seed triggers combat when moving RED from 10 -> 11 -> 21 if needed.
     probe.step_tick(_frame_p1(dx=1))
+    probe.step_tick(_frame_p1())
     probe.step_tick(_frame_p1(dx=1))
     probe.step_tick(_frame_p1(confirm=True))
 
@@ -377,3 +381,253 @@ def test_combat_dagger_throw_and_palette_fx_step() -> None:
     assert session.knight_combat[KnightId.RED].daggers == start_daggers - 1
     assert len(session.active_encounter.knight_projectiles) == 1
     assert session.palette_fx.vbl_count == start_vbl + 1
+
+
+def test_intro_skip_input() -> None:
+    session = GameSession(seed=3, start_scene=GameScene.TITLE)
+    session.step_tick(_frame_p1(skip_intro=True))
+    assert session.scene == GameScene.KNIGHT_SELECT
+
+
+def test_overworld_edge_triggered_direction_and_repeat() -> None:
+    session = GameSession(seed=7, start_scene=GameScene.OVERWORLD)
+    assert session.selected_move_index == 0
+
+    # Holding dx=1 for 6 ticks (a normal human tap) cycles only once.
+    for _ in range(6):
+        session.step_tick(_frame_p1(dx=1))
+    assert session.selected_move_index == 1
+
+    # Releasing and tapping again cycles to 2.
+    session.step_tick(_frame_p1())
+    session.step_tick(_frame_p1(dx=1))
+    assert session.selected_move_index == 2
+
+    # Holding past the initial repeat cooldown (12 ticks) repeats once.
+    for _ in range(12):
+        session.step_tick(_frame_p1(dx=1))
+    assert session.selected_move_index == 0
+
+
+def test_overworld_road_budget_and_end_turn() -> None:
+    from pymoonstone.sim.overworld import (
+        MapSiteInput,
+        NodeKind,
+        RegionId,
+        build_overworld_graph_from_sites,
+        create_campaign,
+    )
+
+    sites = (
+        MapSiteInput(
+            site_id=0, x=60, y=50, kind=NodeKind.START, region_id=RegionId.FOREST, neighbors=(1,)
+        ),
+        MapSiteInput(
+            site_id=1,
+            x=80,
+            y=50,
+            kind=NodeKind.ROAD,
+            region_id=RegionId.FOREST,
+            neighbors=(0, 2),
+        ),
+        MapSiteInput(
+            site_id=2,
+            x=100,
+            y=50,
+            kind=NodeKind.ROAD,
+            region_id=RegionId.FOREST,
+            neighbors=(1, 3),
+        ),
+        MapSiteInput(
+            site_id=3,
+            x=160,
+            y=100,
+            kind=NodeKind.STONEHENGE,
+            region_id=RegionId.VALLEY,
+            neighbors=(2,),
+        ),
+    )
+    graph = build_overworld_graph_from_sites(sites, dragon_route=(2,))
+    session = GameSession(seed=1, start_scene=GameScene.OVERWORLD)
+    session.overworld = create_campaign((KnightId.RED,), graph=graph, seed=1)
+    assert session.overworld.moves_remaining == 4
+
+    # Single road hop decrements moves_remaining without ending the day or popping NEW_DAY.
+    session.step_tick(_frame_p1(confirm=True))
+    assert session.overworld.day == 1
+    assert session.overworld.moves_remaining == 3
+    assert session.scene == GameScene.OVERWORLD
+
+    # Pressing weapon_switch ends the turn voluntarily and advances the day.
+    session.step_tick(_frame_p1(weapon_switch=True))
+    assert session.overworld.day == 2
+    assert session.scene == GameScene.NEW_DAY
+
+
+def test_overworld_home_castle_valley_and_maths_tower_triggers() -> None:
+    from pymoonstone.sim.overworld import EncounterTrigger, MoonPhase, TriggerKind
+
+    session = GameSession(seed=1, start_scene=GameScene.OVERWORLD)
+    kstate = session.knight_combat[KnightId.RED]
+    kstate.hp = 50
+    session.overworld.knights[KnightId.RED].lives = 2
+
+    session._handle_overworld_triggers(
+        KnightId.RED,
+        (
+            EncounterTrigger(
+                kind=TriggerKind.HOME_CASTLE,
+                knight_id=KnightId.RED,
+                node_id=10,
+                day=1,
+                moon_phase=MoonPhase.NEW_MOON,
+            ),
+        ),
+    )
+    assert kstate.lives == 2
+    assert kstate.hp == kstate.max_hp
+    assert session.last_status == "HOME CASTLE"
+
+    session._handle_overworld_triggers(
+        KnightId.RED,
+        (
+            EncounterTrigger(
+                kind=TriggerKind.VALLEY_OF_THE_GODS,
+                knight_id=KnightId.RED,
+                node_id=28,
+                day=1,
+                moon_phase=MoonPhase.NEW_MOON,
+            ),
+        ),
+    )
+    assert kstate.lives == 3
+    assert kstate.xp > 0
+    assert "VALLEY BLESSING" in session.last_status
+
+    prev_xp = kstate.xp
+    session._handle_overworld_triggers(
+        KnightId.RED,
+        (
+            EncounterTrigger(
+                kind=TriggerKind.MATHS_TOWER,
+                knight_id=KnightId.RED,
+                node_id=30,
+                day=1,
+                moon_phase=MoonPhase.NEW_MOON,
+            ),
+        ),
+    )
+    assert kstate.xp > prev_xp
+    assert kstate.gold > 0
+    assert "MATHS TOWER" in session.last_status
+
+
+def test_combat_sfx_keys_and_region_arena_selection() -> None:
+    from pymoonstone.assets.arena import DecodedArena
+    from pymoonstone.assets.palette import default_combat_palette
+    from pymoonstone.assets.picture import DecodedPicture
+    from pymoonstone.sim.knight_combat import KnightAction
+    from pymoonstone.sim.overworld import EncounterTrigger, MoonPhase, TriggerKind
+    from pymoonstone.sim.types import EntityId, Pos25D
+
+    requested_arenas: list[str] = []
+    played_sfx: list[str] = []
+
+    class _FakeBundle:
+        def build_overworld_graph(self) -> None:
+            return None
+
+        def get_mog_tables(self) -> None:
+            return None
+
+        def get_arena(self, name: str) -> tuple[DecodedArena, DecodedPicture]:
+            requested_arenas.append(name)
+            arena = DecodedArena(name=name, region=0, is_lair=False, obstacles=(), tiles=())
+            pic = DecodedPicture(
+                width=320,
+                height=200,
+                planes=5,
+                packed_size=0,
+                raw_palette=b"",
+                raw_planes=b"",
+                palette=default_combat_palette(),
+                pixels=np.zeros((200, 320), dtype=np.uint8),
+            )
+            return arena, pic
+
+    session = GameSession(seed=7, start_scene=GameScene.OVERWORLD)
+    with (
+        patch.object(session, "asset_bundle", _FakeBundle()),
+        patch.object(
+            session, "_try_play_sample", side_effect=lambda *names: played_sfx.extend(names)
+        ),
+    ):
+        # Wandering monsters across the 4 regions pick fo1.t, gl1.t, sw1.t, wa1.t.
+        for node_id in (11, 21, 31, 41):
+            session._select_combat_arena(
+                EncounterTrigger(
+                    kind=TriggerKind.WANDERING_MONSTER,
+                    knight_id=KnightId.RED,
+                    node_id=node_id,
+                    day=1,
+                    moon_phase=MoonPhase.NEW_MOON,
+                )
+            )
+        # Lairs across the 4 regions pick fol1.t, gll1.t, swl1.t, wal1.t.
+        for lair_idx, node_id in enumerate((12, 22, 32, 42)):
+            session._select_combat_arena(
+                EncounterTrigger(
+                    kind=TriggerKind.LAIR_BOSS,
+                    knight_id=KnightId.RED,
+                    node_id=node_id,
+                    day=1,
+                    moon_phase=MoonPhase.NEW_MOON,
+                    lair_index=lair_idx,
+                )
+            )
+        assert requested_arenas == [
+            "fo1.t",
+            "gl1.t",
+            "sw1.t",
+            "wa1.t",
+            "fol1.t",
+            "gll1.t",
+            "swl1.t",
+            "wal1.t",
+        ]
+
+        # Start combat and verify COMBAT_SFX_KEYS are used.
+        session._start_combat(
+            EncounterTrigger(
+                kind=TriggerKind.WANDERING_MONSTER,
+                knight_id=KnightId.RED,
+                node_id=11,
+                day=1,
+                moon_phase=MoonPhase.NEW_MOON,
+            ),
+            KnightId.RED,
+        )
+        assert session.active_encounter is not None
+        kstate = session.knight_combat[KnightId.RED]
+        session._spawn_knight_dagger(kstate, session.active_encounter)
+        assert "throw" in played_sfx
+
+        # Block and hurt/death SFX.
+        kstate.action = KnightAction.BLOCK
+        session._damage_knight_with_fx(
+            kstate,
+            session.active_encounter,
+            10,
+            EntityId(100),
+            Pos25D(x=kstate.x + 10, y=kstate.y, z=0),
+        )
+        assert "block" in played_sfx
+        kstate.action = KnightAction.IDLE
+        session._damage_knight_with_fx(
+            kstate,
+            session.active_encounter,
+            10,
+            EntityId(100),
+            Pos25D(x=kstate.x + 10, y=kstate.y, z=0),
+        )
+        assert "hurt" in played_sfx
