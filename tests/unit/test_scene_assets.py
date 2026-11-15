@@ -28,6 +28,7 @@ from pymoonstone.assets.tables import (
     SynthSequenceTables,
 )
 from pymoonstone.sim.knight_combat import KnightAction
+from pymoonstone.sim.monster_ai import MonsterArchetype
 from pymoonstone.sim.overworld import NodeKind
 from pymoonstone.sim.types import KnightId
 
@@ -144,9 +145,17 @@ def test_build_overworld_graph_maps_sites_and_all_nodes() -> None:
         combat_actions=CombatActionTables(right_offsets=(0,) * 11, left_offsets=(0,) * 11),
         lair_region=LairRegionMetadata(
             map_sites=sites,
-            creature_nodes=(
-                CreatureNodeRecord(0, 1, 1, 60, 50, 0, "fol1.t"),
-                CreatureNodeRecord(6, 2, 1, 240, 50, 0, "gl1.t"),
+            creature_nodes=tuple(
+                CreatureNodeRecord(
+                    idx,
+                    (idx // 6) + 1,
+                    1,
+                    60 if (idx // 6) % 2 == 0 else 240,
+                    50 if idx < 12 else 150,
+                    0,
+                    "fol1.t",
+                )
+                for idx in range(24)
             ),
             encounter_bands=(EncounterBandRecord(limit=50, kind=0),),
         ),
@@ -164,6 +173,10 @@ def test_build_overworld_graph_maps_sites_and_all_nodes() -> None:
 
     graph = bundle.build_overworld_graph()
     assert graph is not None
+    assert len(graph.nodes) == 35
+    assert graph.moves_per_turn == 3
+    assert graph.nodes[0].kind == NodeKind.ROAD
+    assert graph.nodes[29].kind == NodeKind.ROAD
     assert graph.nodes[21].kind == NodeKind.START
     assert graph.nodes[22].kind == NodeKind.START
     assert graph.nodes[23].kind == NodeKind.START
@@ -173,6 +186,7 @@ def test_build_overworld_graph_maps_sites_and_all_nodes() -> None:
     assert graph.nodes[27].kind == NodeKind.STONEHENGE
     assert 28 in graph.nodes
     assert 30 in graph.nodes
+    assert len(graph.dragon_patrol_route) == 4
 
 
 def test_compose_knight_sprites_and_select_knight_frame() -> None:
@@ -201,3 +215,44 @@ def test_compose_knight_sprites_and_select_knight_frame() -> None:
     sprites = bundle.compose_knight_sprites(0, KnightAction.OVERHEAD_SLASH, 6, x=120, y=95, z=0)
     assert len(sprites) == 1
     assert sprites[0].frame.meta.width == 54
+
+
+def test_get_monster_cels_and_compose_monster_sprites_loads_all_slots() -> None:
+    def _make_cel(width: int, height: int) -> DecodedCel:
+        frame = CelFrame(
+            meta=CelFrameMeta(
+                index=0,
+                data_offset=0,
+                width=width,
+                height=height,
+                hot_and_flags=0x01,
+                plane_bits=0x1F,
+            ),
+            pixels=np.ones((height, width), dtype=np.uint8),
+            mask=np.ones((height, width), dtype=bool),
+        )
+        return DecodedCel(
+            frame_count=1, packed_size=0, unpacked_bits=0, frames=(frame,), raw_planes=b""
+        )
+
+    bundle = GameAssetBundle(disk_set=cast("DiskSet", _StubDiskSet()))
+    bundle.cels["troggspear1.cel"] = _make_cel(20, 18)
+    bundle.cels["troggspear2.cel"] = _make_cel(24, 22)
+    bundle.cels["dragon1.cel"] = _make_cel(40, 30)
+    bundle.cels["dragon2.cel"] = _make_cel(42, 32)
+    bundle.cels["dragon5.cel"] = _make_cel(16, 16)
+
+    trogg_cels = bundle.get_monster_cels(MonsterArchetype.TROGG_SPEAR)
+    assert len(trogg_cels) == 2
+    trogg_sprites = bundle.compose_monster_sprites(
+        MonsterArchetype.TROGG_SPEAR, 12, attacking=True, x=200, y=95, order=10
+    )
+    assert [sp.frame.meta.width for sp in trogg_sprites] == [20, 24]
+    assert [sp.order for sp in trogg_sprites] == [10, 11]
+
+    dragon_cels = bundle.get_monster_cels(MonsterArchetype.DRAGON)
+    assert len(dragon_cels) == 3
+    dragon_sprites = bundle.compose_monster_sprites(
+        MonsterArchetype.DRAGON, 0, attacking=False, x=220, y=90
+    )
+    assert [sp.frame.meta.width for sp in dragon_sprites] == [40, 42, 16]

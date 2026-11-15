@@ -411,3 +411,37 @@ def test_town_scroll_rendering_avoids_overlapping_text_and_aligns_highlight() ->
     fb_font = _RecordingFont()
     render_location_menu(renderer, wd_state, knight, ow, fb_font, bundle=None)
     assert any("+ MYSTIC" in line for line in fb_font.lines)
+
+
+def test_waterdeep_sublocation_keeps_waterdeep_backdrop_and_draws_dark_panel() -> None:
+    ow = _make_overworld()
+    knight = _make_knight()
+    renderer = _FakeSceneRenderer()
+    bundle = _FakeBundle(
+        {
+            "WaterDeep.PIV": _make_pic(fill=9),
+            "HighWood.PIV": _make_pic(fill=4),
+        }
+    )
+
+    # Entering SHOP from WATERDEEP must keep WaterDeep.PIV (fill=9), never HighWood.PIV (fill=4).
+    wd_shop = LocationMenuState(
+        location=LocationKind.SHOP,
+        parent_location=LocationKind.WATERDEEP,
+    )
+    font = _RecordingFont()
+    render_location_menu(renderer, wd_shop, knight, ow, font, bundle=bundle)
+    assert "WaterDeep.PIV" in bundle.requested[-1]
+    assert "HighWood.PIV" not in bundle.requested[-1]
+    # Background outside the menu panel retains WaterDeep.PIV pixel value (9).
+    assert int(renderer.canvas[28, 0]) == 9
+    # Dark filled panel behind menu options clears bright background to darkest index (0).
+    assert int(renderer.canvas[40, 20]) == 0
+    # Entering SHOP from HIGHWOOD uses HighWood.PIV (fill=4).
+    hw_shop = LocationMenuState(
+        location=LocationKind.SHOP,
+        parent_location=LocationKind.HIGHWOOD,
+    )
+    render_location_menu(renderer, hw_shop, knight, ow, font, bundle=bundle)
+    assert "HighWood.PIV" in bundle.requested[-1]
+    assert int(renderer.canvas[28, 0]) == 4

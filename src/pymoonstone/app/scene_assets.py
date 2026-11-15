@@ -54,12 +54,42 @@ _ARCHETYPE_CELS: dict[MonsterArchetype, tuple[str, ...]] = {
     MonsterArchetype.RATMAN: ("RATMEN1.CEL", "RATMEN2.CEL"),
     MonsterArchetype.MUDMAN: ("Mudmen1.CEL", "Mudmen2.CEL"),
     MonsterArchetype.BEASTMAN: ("be1.c", "be2.c"),
-    MonsterArchetype.DEMON: ("Demon1.CEL", "Demon2.CEL"),
+    MonsterArchetype.DEMON: ("Demon1.CEL", "Demon2.CEL", "Demon3.CEL", "Demon4.CEL"),
     MonsterArchetype.TROLL: ("TROLL1.CEL", "TROLL2.CEL"),
-    MonsterArchetype.BALOK: ("Balok1.CEL", "Balok2.CEL"),
-    MonsterArchetype.DRAGON: ("DRAGON1.CEL", "DRAGON2.CEL"),
-    MonsterArchetype.GUARDIAN: ("HE1.ob", "HE2.ob"),
+    MonsterArchetype.BALOK: ("Balok1.CEL", "Balok2.CEL", "Balok3.CEL"),
+    MonsterArchetype.DRAGON: ("DRAGON1.CEL", "DRAGON2.CEL", "DRAGON5.CEL"),
+    MonsterArchetype.GUARDIAN: ("HE1.ob", "HE2.ob", "HE3.ob"),
 }
+
+_CANONICAL_ROAD_SITES: tuple[tuple[int, int, int], ...] = (
+    # Forest (top-left quadrant)
+    (0, 48, 36),
+    (1, 88, 34),
+    (2, 126, 48),
+    (3, 54, 72),
+    (4, 92, 68),
+    # Glen (top-right quadrant)
+    (5, 194, 48),
+    (6, 232, 34),
+    (7, 272, 36),
+    (8, 228, 68),
+    (9, 266, 72),
+    # Swamp (bottom-left quadrant)
+    (10, 54, 128),
+    (11, 92, 132),
+    (12, 48, 164),
+    (13, 88, 166),
+    (14, 126, 152),
+    # Wasteland (bottom-right quadrant)
+    (15, 228, 132),
+    (16, 266, 128),
+    (17, 194, 152),
+    (18, 232, 166),
+    (19, 272, 164),
+    # Central Valley approaches
+    (20, 140, 88),
+    (29, 180, 112),
+)
 
 _LAIR_ARENAS: tuple[str, ...] = ("fol1.t", "fo1.t", "gl1.t", "fol2.t")
 
@@ -208,10 +238,22 @@ class GameAssetBundle:
         preferred = f"KN{(knight_index % 4) + 1}.ob"
         return self.get_cel(preferred, "KN4.ob", "KN1.ob")
 
+    def get_monster_cels(self, archetype: MonsterArchetype) -> tuple[DecodedCel, ...]:
+        """Return all available cel slots for ``archetype`` in slot order."""
+        candidates = _ARCHETYPE_CELS.get(archetype, ("TROLL1.CEL", "TROLL2.CEL"))
+        loaded: list[DecodedCel] = []
+        for name in candidates:
+            cel = self.get_cel(name)
+            if cel is not None and cel.frames:
+                loaded.append(cel)
+        return tuple(loaded)
+
     def get_monster_cel(self, archetype: MonsterArchetype) -> DecodedCel | None:
         """Return the primary cel for ``archetype``."""
-        candidates = _ARCHETYPE_CELS.get(archetype, ("TROLL1.CEL",))
-        return self.get_cel(*candidates, "TROLL1.CEL")
+        cels = self.get_monster_cels(archetype)
+        if cels:
+            return cels[0]
+        return self.get_cel("TROLL1.CEL")
 
     def preload_audio(self, audio: AudioEngine) -> None:
         """Load available ``.a`` sample banks and register addressable combat SFX keys."""
@@ -336,12 +378,17 @@ class GameAssetBundle:
             33: NodeKind.LAIR,
             34: NodeKind.LAIR,
         }
-        sites = tuple(
+        site_list = [
             MapSiteInput(
                 site_id=site.site_id, x=site.x, y=site.y, kind=site_kinds.get(site.site_id)
             )
             for site in mog_tables.lair_region.map_sites
-        )
+        ]
+        existing_ids = {site.site_id for site in site_list}
+        for road_id, rx, ry in _CANONICAL_ROAD_SITES:
+            if road_id not in existing_ids:
+                site_list.append(MapSiteInput(site_id=road_id, x=rx, y=ry, kind=road_kind))
+        sites = tuple(site_list)
         nodes = mog_tables.lair_region.creature_nodes
         lairs = tuple(
             (idx, nodes[idx * 6].map_x, nodes[idx * 6].map_y)
@@ -352,7 +399,12 @@ class GameAssetBundle:
             EncounterBand(limit=band.limit, kind=band.kind)
             for band in mog_tables.lair_region.encounter_bands
         )
-        return build_overworld_graph_from_sites(sites, lairs=lairs, encounter_bands=bands)
+        return build_overworld_graph_from_sites(
+            sites,
+            lairs=lairs,
+            encounter_bands=bands,
+            moves_per_turn=3,
+        )
 
     def compose_knight_sprites(
         self,
@@ -401,6 +453,41 @@ class GameAssetBundle:
                 flipped=piece.flipped,
                 layer=layer,
                 order=order + idx,
+            )
+            if sp is not None:
+                sprites.append(sp)
+        return sprites
+
+    def compose_monster_sprites(
+        self,
+        archetype: MonsterArchetype,
+        tick_count: int,
+        *,
+        attacking: bool = False,
+        x: int,
+        y: int,
+        z: int = 0,
+        flipped: bool = False,
+        layer: int = 2,
+        order: int = 0,
+    ) -> list[SceneSprite]:
+        """Build multi-part monster :class:`SceneSprite`s across all cel slots."""
+        cels = self.get_monster_cels(archetype)
+        if not cels:
+            fallback = self.get_cel("TROLL1.CEL")
+            cels = (fallback,) if fallback is not None and fallback.frames else ()
+        sprites: list[SceneSprite] = []
+        for slot_idx, cel in enumerate(cels):
+            fidx = select_monster_frame(cel, tick_count, attacking)
+            sp = make_sprite(
+                cel,
+                fidx,
+                x=x,
+                y=y,
+                z=z,
+                flipped=flipped,
+                layer=layer,
+                order=order + slot_idx,
             )
             if sp is not None:
                 sprites.append(sp)
