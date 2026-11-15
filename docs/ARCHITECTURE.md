@@ -512,6 +512,59 @@ on up to **10 concurrent job slots**:
     `+40`: `u32 ulAttackList` (`60` bytes = 6 × 10-byte hit entries), `+44`: `u32 ulHurtList`
     (`60` bytes = 6 × 10-byte hurt entries), `+48`: `u16 uwPaused`.
 
+### 7.4 Starting Cinematic & `program` Scene Engine (`S_2` / `intro.stile`)
+The `program` executable drives the starting cinematic (`introRun`) and ending cinematic (`endingRun`)
+using data tables in Hunk 2 (`S_2`, `12,288` bytes) and the `.stile` vertical scroll map:
+
+- **Vertical Panorama Tilemap (`intro.stile`, `960` bytes = `480` `BE16` words):**
+  - Defines a `10 × 48` grid of `32 × 25` pixel blocks (`320 × 1200` pixels total) assembled from
+    three `320 × 200` `.piv` tile-atlas images (`[bg1a.piv, bg1c.piv, bg1b.piv]`, each holding
+    $10 \times 8 = 80$ blocks).
+  - For each word `code`: `picture_index = code // 80` (`0..2`), `tile_index = code % 80`,
+    `src_row = tile_index // 10`, `src_col = tile_index % 10`.
+  - `progress` (`0..1000`) is the vertical scroll offset $Y \in [0, 1000]$ into the `320 × 1200`
+    panorama: `progress = 0` shows the full moon in the starry sky (`y = 0..199`), scrolling down
+    through the treetop canopy (`bg1c.piv` blocks) to `progress = 1000` (`bg1b.piv` forest floor,
+    `y = 1000..1199`).
+- **Calligraphy Font (`bold.f`) & `S_2` Text Records:**
+  - Character lookup table at `S_2[11744:11848]` (`104` bytes) maps `ord(ch) - 0x20` to a glyph
+    frame index in `bold.f`. Frame `0x49` (`73`, `305 × 54`) is the `"MOONSTONE: A Hard Days Knight"`
+    title banner blitted at top-left `(9, 60)`.
+  - Each glyph advances $X$ by `frame.width - 2` (`advanceBias = -2`).
+  - Text linked-list nodes in `S_2` (`14` bytes, `>IHHHI`):
+    `(string_offset, x, y, style, next_node_offset)`. When `style & 1`, the line is horizontally
+    centered on `320` px (`x = ((320 - line_width) & 0xFFFF) >> 1`).
+  - Credit pages on the `progress = 0` moon screen (`S_2` offsets `11884`, `11912`, `11954`,
+    `11996`, `12066`, `12024`) animate palette indices `(5, 9, 10, 11, 12)` (`0x0000`, `0x0FED`,
+    `0x0DC9`, `0x0B95`, `0x0842`) while keeping the moon backdrop visible.
+- **`program` `S_2` Animation Bytecode (`animRun`):**
+  - Uses 5 cel slots (`[au1.cel, li1.cel, ha1.cel, dw1.cel, da1.cel]`).
+  - `AnimKindA` jobs spawn at `(x=160, y=0, z=100, flags=1)` (unmirrored); `AnimKindB` jobs spawn
+    at `(x=120, y=0, z=100, flags=3)` (horizontally mirrored, `flags & 2`).
+  - Draw opcodes `0x00..0x1F` (`6` bytes `[op, frame, dy_s8, d3, dx_be16]`):
+    `slot = (op & 0x1F) >> 2`. Top-left screen position is `sx = x - dx - width` when mirrored
+    (`flags & 2`), else `sx = x + dx`; `sy = y + z + dy`. When `d3 & 0x10`, the cel is also stamped
+    permanently into the scene's `shown` background buffer. Multiple draw opcodes execute within a
+    single frame until the 2-byte `0xFF <next>` marker (`0xFF 0x00` = end of frame, `0xFF 0xFF` =
+    end of script).
+  - Control opcodes: `0x80 <u8>` sets/toggles `flags`; `0x84 <u8 mode> <BE32 target>` jumps (`mode=3`)
+    or defers jump until end of frame; `0x88 <u8 count>` starts a frame loop; `0xB4 0x00 <BE32 fn>`
+    triggers lightning palette flashes (`S_0[3918:3982]` `kFlashA` and `S_0[3982:4046]` `kFlashB`).
+  - Foreground occlusion cel `ov1.cel`: frames `0` (`0, 56`) and `3` (`51, 134`) (plus `1` at
+    `157, 104` and `2` at `297, 82` in phase 1) are blitted over the playfield after job draws.
+- **Story Sequence Order (`introRun`):**
+  1. `mindscape` logo (`Mindscape` screen).
+  2. Moon backdrop (`intro.stile` at `progress = 0`) with `bold.f[0x49]` title logo and 6 credit pages.
+  3. `intro.stile` vertical camera pan from `progress = 0` (moon) to `1000` (`bg1b.piv` forest floor).
+  4. Scene `001B` (`bg1b.piv`, speed `8`): 5 staggered druids carrying torches (`S_2[5636]`, `12` frames apart).
+  5. Scene `001C` (`bg2.piv` + `ov1.cel` phase 1, speed `8`): 5 staggered druids approaching Stonehenge (`S_2[5056]`, `8` frames apart).
+  6. Scene `001A` (`bg3.piv`, speed `6`): Stonehenge circle (`S_2[6996, 7034, 6818, 6594]`), `PAIRS` (`S_2[7078, 7592]`), and central altar (`S_2[8312]`).
+  7. Scene `002C` (`bg4.piv` + `S_2[584]`, then `bg5a.piv` + `S_2[2804]`, speed `6`): High Druid raising crescent amulet and invoking the cloud vortex with lightning flashes.
+  8. Scene `002D` (`bg2a.piv` + `S_2[4932]` + `ov1.cel` phase 2, speed `6`): Knight drawing broadsword before Stonehenge.
+  9. Scene `002F` (`bg3.piv` + `S_2[6996, 7034, 6958, 7554, 7942, 8568, 8582]`, speed `8`): Knight entering the Stonehenge circle.
+  10. Scene `002E` (`bg5a.piv` + `S_2[1022]`, speed `6`): High Druid dubbing the kneeling knight.
+  11. Caption `00AA` (`message.piv` + `S_2[120]` text list): *"The druids sent their best knights to Stonehenge so they may be dubbed into the Quest for the MOONSTONE"*.
+
 ---
 
 ## 8. Palette Architecture (`T2.3`, `T2.8`)

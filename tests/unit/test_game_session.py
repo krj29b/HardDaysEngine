@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pygame
 
 from pymoonstone.app.game import GameScene, GameSession, run_headless_session
@@ -15,6 +16,7 @@ from pymoonstone.app.input import (
     load_replay,
     save_replay,
 )
+from pymoonstone.app.intro_player import assemble_stile_panorama
 from pymoonstone.cli.main import main
 from pymoonstone.sim.types import KnightId
 
@@ -217,3 +219,15 @@ def test_cli_headless_record_and_replay(
     out2 = capsys.readouterr().out.strip()
     assert rc2 == 0
     assert out1 == out2
+
+
+def test_assemble_stile_panorama_vertical_scroll() -> None:
+    pic_a = np.full((200, 320), 3, dtype=np.uint8)
+    pic_c = np.full((200, 320), 7, dtype=np.uint8)
+    pic_b = np.full((200, 320), 11, dtype=np.uint8)
+    words = [0] * 160 + [80] * 160 + [160] * 160
+    pano = assemble_stile_panorama(words, (pic_a, pic_c, pic_b))
+    assert pano.shape == (1200, 320)
+    assert int(pano[0, 0]) == 3
+    assert int(pano[450, 0]) == 7
+    assert int(pano[1100, 0]) == 11

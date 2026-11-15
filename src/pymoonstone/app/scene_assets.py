@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pymoonstone.app.intro_player import IntroCinematicPlayer
 from pymoonstone.assets.arena import DecodedArena, composite_arena_background, decode_arena
 from pymoonstone.assets.audio import DecodedModule, decode_cmp_module, decode_sample_bank
 from pymoonstone.assets.cel import DecodedCel, decode_cel
@@ -64,6 +65,15 @@ class GameAssetBundle:
     cels: dict[str, DecodedCel] = field(default_factory=dict)
     _test_pack: tuple[DecodedPicture, ...] | None = None
     _failed_names: set[str] = field(default_factory=set)
+    _intro_player: IntroCinematicPlayer | None = None
+    _intro_checked: bool = False
+
+    def get_intro_player(self) -> IntroCinematicPlayer | None:
+        """Lazily build and cache the ``program`` starting cinematic player (§7.4)."""
+        if not self._intro_checked:
+            self._intro_checked = True
+            self._intro_player = IntroCinematicPlayer.try_build(self)
+        return self._intro_player
 
     def _get_test_pack(self) -> tuple[DecodedPicture, ...]:
         if self._test_pack is None:
@@ -257,7 +267,11 @@ def build_intro_cinematic_frame(
     tick_count: int,
 ) -> tuple[npt.NDArray[np.uint8] | None, tuple[RGBColor, ...], list[SceneSprite]]:
     """Build background, faded palette, and animated sprites for the 50 Hz start cinematic."""
-    # 24-second (1200-tick) looping sequence across Mindscape, bg1a, bg1b, and bg1c.
+    player = bundle.get_intro_player()
+    if player is not None:
+        bg, pal = player.render_tick(bundle, tick_count)
+        return bg, pal, []
+
     cycle_tick = tick_count % 1200
     sprites: list[SceneSprite] = []
     anim_step = tick_count // 5
@@ -272,45 +286,14 @@ def build_intro_cinematic_frame(
             sprites,
         )
 
-    if cycle_tick < 520:
-        local = cycle_tick - 160
-        pic = bundle.get_picture("bg1a.PIV")
-        if pic is None:
-            return None, default_combat_palette(), sprites
-        _append_cel_sprite(sprites, bundle, "au1.cel", anim_step, x=160, y=148, order=0)
-        _append_cel_sprite(sprites, bundle, "ha1.cel", anim_step, x=104, y=170, order=1)
-        _append_cel_sprite(sprites, bundle, "dw1.cel", anim_step, x=216, y=172, order=2)
-        _append_cel_sprite(sprites, bundle, "li1.cel", anim_step, x=160, y=116, order=3)
-        return (
-            pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
-            _fade_palette(pic.palette, local, 360),
-            sprites,
-        )
-
-    if cycle_tick < 880:
-        local = cycle_tick - 520
-        pic = bundle.get_picture("bg1b.PIV", "bg1a.PIV")
-        if pic is None:
-            return None, default_combat_palette(), sprites
-        dragon_x = 40 + ((local * 240) // 360)
-        _append_cel_sprite(sprites, bundle, "dg1.cel", anim_step, x=dragon_x, y=96, order=0)
-        _append_cel_sprite(sprites, bundle, "Klift1.CEL", anim_step, x=156, y=172, order=1)
-        _append_cel_sprite(sprites, bundle, "da1.cel", anim_step, x=168, y=128, order=2)
-        _append_cel_sprite(sprites, bundle, "li1.cel", anim_step, x=160, y=104, order=3)
-        return (
-            pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
-            _fade_palette(pic.palette, local, 360),
-            sprites,
-        )
-
-    local = cycle_tick - 880
-    pic = bundle.get_picture("bg1c.PIV", "bg1a.PIV")
+    local = cycle_tick - 160
+    pic = bundle.get_picture("bg1a.PIV", "bg1b.PIV", "bg1c.PIV")
     if pic is None:
         return None, default_combat_palette(), sprites
-    _append_cel_sprite(sprites, bundle, "au1.cel", anim_step, x=160, y=136, order=0)
-    _append_cel_sprite(sprites, bundle, "li1.cel", anim_step, x=160, y=108, order=1)
+    _append_cel_sprite(sprites, bundle, "au1.cel", anim_step, x=160, y=148, order=0)
+    _append_cel_sprite(sprites, bundle, "li1.cel", anim_step, x=160, y=116, order=1)
     return (
         pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
-        _fade_palette(pic.palette, local, 320),
+        _fade_palette(pic.palette, local, 1040),
         sprites,
     )

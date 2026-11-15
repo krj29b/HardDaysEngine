@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from pymoonstone.app.scene_assets import GameAssetBundle, build_intro_cinematic_frame
 from pymoonstone.assets import (
     DiskSet,
     composite_arena_background,
@@ -110,3 +111,27 @@ def test_real_full_extraction_manifest(adf_dir: Path, tmp_path: Path) -> None:
     assert len(manifest.modules) == 2
     assert len(manifest.executables) == 4  # Crystal, mog, nb, program
     assert (out_dir / "manifest.json").is_file()
+
+
+def test_real_intro_cinematic_player_all_scenes(adf_dir: Path) -> None:
+    ds = DiskSet.from_directory(adf_dir)
+    bundle = GameAssetBundle(ds)
+    player = bundle.get_intro_player()
+    assert player is not None
+    assert player.panorama.shape == (1200, 320)
+    assert len(player.credit_frames) == 6
+
+    # Sample across Mindscape, Title, Credits, Wipe, Story Scenes 001B..002E, and 00AA Caption
+    sample_ticks = (30, 180, 320, 900, 1400, 1900, 2400, 2900, 3100, 3300, 3550, 3750, 3950)
+    prev_bg = None
+    distinct_frames = 0
+    for tick in sample_ticks:
+        bg, pal, sprites = build_intro_cinematic_frame(bundle, tick)
+        assert bg is not None
+        assert bg.shape == (200, 320)
+        assert len(pal) == 32
+        assert sprites == []
+        if prev_bg is None or not (bg == prev_bg).all():
+            distinct_frames += 1
+        prev_bg = bg
+    assert distinct_frames >= 10

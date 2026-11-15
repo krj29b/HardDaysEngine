@@ -740,9 +740,10 @@ class GameSession:
                     scene_renderer.compose_scene(background=bg, sprites=sprites, border_index=0)
                 else:
                     self._compose_picture_or_solid(scene_renderer, "bg1a.PIV", "mindscape")
+                    font.draw_text(scene_renderer.canvas, "PRESS ENTER", 116, 236, color_index=31)
             else:
                 self._compose_picture_or_solid(scene_renderer, "bg1a.PIV", "mindscape")
-            font.draw_text(scene_renderer.canvas, "PRESS ENTER", 116, 236, color_index=31)
+                font.draw_text(scene_renderer.canvas, "PRESS ENTER", 116, 236, color_index=31)
         elif self.scene == GameScene.KNIGHT_SELECT:
             self._compose_picture_or_solid(scene_renderer, "ch.piv")
             font.draw_text(
