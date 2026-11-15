@@ -242,6 +242,7 @@ class MoonstoneRenderer:
         hit_frame: HitFrame | None = None,
         *,
         show_overlay: bool = True,
+        top_left: bool = False,
     ) -> list[OverlayLine]:
         """Render the background, sprite, and optional hitbox/hurtbox overlay into `canvas_fbo`."""
         self.canvas_fbo.use()
@@ -259,8 +260,12 @@ class MoonstoneRenderer:
             and sprite_frame.meta.width > 0
             and sprite_frame.meta.height > 0
         ):
-            draw_x = sprite_x - (sprite_frame.meta.width // 2) - sprite_frame.meta.hot_x
-            draw_y = PLAYFIELD_Y_OFFSET + sprite_y - (sprite_frame.meta.height // 2)
+            if top_left:
+                draw_x = sprite_x
+                draw_y = PLAYFIELD_Y_OFFSET + sprite_y
+            else:
+                draw_x = sprite_x - (sprite_frame.meta.width // 2) - sprite_frame.meta.hot_x
+                draw_y = PLAYFIELD_Y_OFFSET + sprite_y - (sprite_frame.meta.height // 2)
             self._draw_sprite(sprite_frame, draw_x, draw_y)
             if show_overlay:
                 lines = build_frame_overlay(draw_x, draw_y, sprite_frame, hit_frame)

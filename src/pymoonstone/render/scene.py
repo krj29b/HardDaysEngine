@@ -126,6 +126,7 @@ class SceneSprite:
     mirrored: bool = False
     dx: int = 0
     dy: int = 0
+    top_left: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -165,6 +166,8 @@ def sort_sprites_painter(sprites: Sequence[SceneSprite]) -> list[SceneSprite]:
 
 def compute_sprite_draw_origin(sprite: SceneSprite) -> tuple[int, int]:
     """Compute top-left canvas ``(draw_x, draw_y)`` applying ``y - z`` altitude and mirroring."""
+    if sprite.top_left:
+        return sprite.x + sprite.dx, PLAYFIELD_Y_OFFSET + sprite.y - sprite.z + sprite.dy
     w = sprite.frame.meta.width
     h = sprite.frame.meta.height
     hot_x = sprite.frame.meta.hot_x

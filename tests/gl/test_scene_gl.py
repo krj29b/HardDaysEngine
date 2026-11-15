@@ -26,6 +26,7 @@ from pymoonstone.render.scene import (
     SceneRenderer,
     SceneSprite,
     apply_palette_fx,
+    compute_sprite_draw_origin,
     default_bitmap_font,
     render_combat_hud,
     render_overworld_hud,
@@ -221,6 +222,33 @@ def test_bitmap_font_cel_loaders_and_hud_rendering_gl() -> None:
         rgba_overworld = renderer.read_canvas_rgba()
         assert int(rgba_overworld[:PLAYFIELD_Y_OFFSET, :, :3].max()) > 0
         assert int(rgba_overworld[PLAYFIELD_Y_OFFSET + 200 :, :, :3].max()) > 0
+    finally:
+        scene.release()
+        renderer.release()
+        ctx.release()
+
+
+def test_scene_top_left_anchored_sprite_ignores_hotspot_and_centering() -> None:
+    frame = _make_solid_frame(12, 10, 6, hot_x=3)
+    sp = SceneSprite(frame=frame, x=50, y=60, z=4, dx=-5, dy=7, mirrored=True, top_left=True)
+    assert compute_sprite_draw_origin(sp) == (45, PLAYFIELD_Y_OFFSET + 63)
+
+    ctx = moderngl.create_standalone_context(require=330)
+    renderer = MoonstoneRenderer(ctx)
+    scene = SceneRenderer(renderer)
+    try:
+        palette = default_combat_palette()
+        scene.set_palette(palette)
+        bg = np.full((200, 320), 1, dtype=np.uint8)
+        scene.compose_scene(background=bg, sprites=[sp])
+        scene.flush_to_fbo()
+
+        rgba = renderer.read_canvas_rgba()
+        # Top-left pixel at (45, 28 + 63) must be sprite color, while (44, 28 + 63) is background
+        assert tuple(int(c) for c in rgba[PLAYFIELD_Y_OFFSET + 63, 45, :3]) == palette[6]
+        assert tuple(int(c) for c in rgba[PLAYFIELD_Y_OFFSET + 63, 44, :3]) == palette[1]
+        assert tuple(int(c) for c in rgba[PLAYFIELD_Y_OFFSET + 62, 45, :3]) == palette[1]
+        assert tuple(int(c) for c in rgba[PLAYFIELD_Y_OFFSET + 72, 56, :3]) == palette[6]
     finally:
         scene.release()
         renderer.release()

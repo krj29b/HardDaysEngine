@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from pymoonstone.assets import decode_cel, decode_picture, parse_collide_hit
+from pymoonstone.assets.cel import CelFrame, CelFrameMeta
 from pymoonstone.cli.inspect_assets import main as inspect_cli_main
 from pymoonstone.cli.main import main as main_cli
 from pymoonstone.render import CANVAS_HEIGHT, CANVAS_WIDTH, MoonstoneRenderer
@@ -103,3 +104,38 @@ def test_inspector_cli_headless_and_screenshot(tmp_path: Path) -> None:
     )
     assert rc2 == 0
     assert shot2.read_bytes() == shot1.read_bytes()
+
+
+def test_moderngl_renderer_top_left_sprite_ignores_hotspot_and_centering() -> None:
+    ctx = moderngl.create_standalone_context(require=330)
+    renderer = MoonstoneRenderer(ctx)
+    try:
+        pic = decode_picture(build_synthetic_picture(planes=5, fill_index=2))
+        renderer.upload_background(pic.pixels, pic.palette)
+
+        pixels = np.full((12, 16), 6, dtype=np.uint8)
+        frame = CelFrame(
+            meta=CelFrameMeta(
+                index=0,
+                data_offset=0,
+                width=16,
+                height=12,
+                hot_and_flags=0x31,
+                plane_bits=0x1F,
+            ),
+            pixels=pixels,
+            mask=pixels != 0,
+        )
+        # Verify top_left=True places the sprite's top-left at (40, PLAYFIELD_Y_OFFSET + 30)
+        lines = renderer.render_to_canvas(
+            frame, sprite_x=40, sprite_y=30, show_overlay=False, top_left=True
+        )
+        assert lines == []
+
+        rgba = renderer.read_canvas_rgba()
+        assert tuple(int(c) for c in rgba[30 + 28, 40, :3]) == pic.palette[6]
+        assert tuple(int(c) for c in rgba[30 + 28, 39, :3]) == pic.palette[2]
+        assert tuple(int(c) for c in rgba[29 + 28, 40, :3]) == pic.palette[2]
+    finally:
+        renderer.release()
+        ctx.release()
