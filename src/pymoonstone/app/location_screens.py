@@ -416,13 +416,20 @@ def step_location_menu(
     return LocationStepResult(state.left, "idle", state.status_message)
 
 
+def _brightest_color_index(palette: Sequence[tuple[int, int, int]]) -> int:
+    limit = min(len(palette), 32)
+    if limit <= 1:
+        return 1
+    return max(range(1, limit), key=lambda idx: sum(palette[idx]))
+
+
 def _compose_backdrop(
     scene_renderer: SceneRenderTarget,
     bundle: PictureBundle | None,
     names: tuple[str, ...],
     *,
     fill_index: int = 1,
-) -> None:
+) -> int:
     if bundle is not None:
         pic = bundle.get_picture(*names)
         if pic is not None:
@@ -432,12 +439,14 @@ def _compose_backdrop(
                 sprites=(),
                 border_index=0,
             )
-            return
+            return _brightest_color_index(pic.palette)
     bg: npt.NDArray[np.uint8] = np.full(
         (PLAYFIELD_HEIGHT, CANVAS_WIDTH), np.uint8(fill_index), dtype=np.uint8
     )
-    scene_renderer.set_palette(default_combat_palette())
+    pal = default_combat_palette()
+    scene_renderer.set_palette(pal)
     scene_renderer.compose_scene(background=bg, sprites=(), border_index=0)
+    return 31
 
 
 def render_location_menu(
@@ -450,25 +459,24 @@ def render_location_menu(
     bundle: PictureBundle | None = None,
 ) -> None:
     """Render the active location backdrop, menu options, and knight stats."""
-    _compose_backdrop(scene_renderer, bundle, location_backdrop_names(state.location))
+    fg = _compose_backdrop(scene_renderer, bundle, location_backdrop_names(state.location))
     canvas = scene_renderer.canvas
     title = _LOCATION_TITLES.get(state.location, "LOCATION")
-    font.draw_text(canvas, title, 8, 8, color_index=31)
+    font.draw_text(canvas, title, 8, 8, color_index=fg)
     font.draw_text(
-        canvas, f"GOLD:{knight.gold} HP:{knight.hp}/{knight.max_hp}", 136, 8, color_index=30
+        canvas, f"GOLD:{knight.gold} HP:{knight.hp}/{knight.max_hp}", 136, 8, color_index=fg
     )
-    font.draw_text(canvas, f"DAY {overworld.day}", 8, 240, color_index=29)
+    font.draw_text(canvas, f"DAY {overworld.day}", 8, 240, color_index=fg)
 
     options = menu_options_for_location(state, knight)
     start_y = 44
     for idx, label in enumerate(options):
         selected = idx == (state.cursor % len(options))
         prefix = "+ " if selected else "  "
-        color = 31 if selected else 30
-        font.draw_text(canvas, f"{prefix}{label}", 24, start_y + idx * 14, color_index=color)
+        font.draw_text(canvas, f"{prefix}{label}", 24, start_y + idx * 14, color_index=fg)
 
     if state.status_message:
-        font.draw_text(canvas, state.status_message[:36], 16, 206, color_index=31)
+        font.draw_text(canvas, state.status_message[:36], 16, 206, color_index=fg)
 
 
 def render_status_screen(
@@ -480,24 +488,24 @@ def render_status_screen(
     bundle: PictureBundle | None = None,
 ) -> None:
     """Render the knight character status sheet on ``ch.piv`` (or solid fallback)."""
-    _compose_backdrop(scene_renderer, bundle, ("ch.piv",))
+    fg = _compose_backdrop(scene_renderer, bundle, ("ch.piv",))
     canvas = scene_renderer.canvas
     ow_knight = overworld.knights.get(knight.knight_id)
     keys_mask = ow_knight.keys_mask if ow_knight is not None else knight.keys
     stones_mask = ow_knight.moonstones_mask if ow_knight is not None else knight.moonstones
     phase_label = overworld.moon_phase.name.replace("_", " ")
 
-    font.draw_text(canvas, f"KNIGHT: {knight.knight_id.name}", 24, 40, color_index=31)
-    font.draw_text(canvas, f"HP: {knight.hp}/{knight.max_hp}", 24, 60, color_index=30)
+    font.draw_text(canvas, f"KNIGHT: {knight.knight_id.name}", 24, 40, color_index=fg)
+    font.draw_text(canvas, f"HP: {knight.hp}/{knight.max_hp}", 24, 60, color_index=fg)
     font.draw_text(
-        canvas, f"STAMINA: {knight.stamina}/{knight.max_stamina}", 24, 76, color_index=30
+        canvas, f"STAMINA: {knight.stamina}/{knight.max_stamina}", 24, 76, color_index=fg
     )
-    font.draw_text(canvas, f"LIVES: {knight.lives}", 24, 92, color_index=30)
-    font.draw_text(canvas, f"GOLD: {knight.gold}", 24, 108, color_index=30)
-    font.draw_text(canvas, f"XP: {knight.xp}", 24, 124, color_index=30)
-    font.draw_text(canvas, f"KEYS MASK: {keys_mask:04b}", 24, 144, color_index=29)
-    font.draw_text(canvas, f"MOONSTONES MASK: {stones_mask:04b}", 24, 160, color_index=29)
-    font.draw_text(canvas, f"DAY {overworld.day}: {phase_label}", 24, 184, color_index=31)
+    font.draw_text(canvas, f"LIVES: {knight.lives}", 24, 92, color_index=fg)
+    font.draw_text(canvas, f"GOLD: {knight.gold}", 24, 108, color_index=fg)
+    font.draw_text(canvas, f"XP: {knight.xp}", 24, 124, color_index=fg)
+    font.draw_text(canvas, f"KEYS MASK: {keys_mask:04b}", 24, 144, color_index=fg)
+    font.draw_text(canvas, f"MOONSTONES MASK: {stones_mask:04b}", 24, 160, color_index=fg)
+    font.draw_text(canvas, f"DAY {overworld.day}: {phase_label}", 24, 184, color_index=fg)
 
 
 def render_new_day_screen(
@@ -508,8 +516,8 @@ def render_new_day_screen(
     bundle: PictureBundle | None = None,
 ) -> None:
     """Render the New Day lunar banner on ``ch.piv`` (or solid fallback)."""
-    _compose_backdrop(scene_renderer, bundle, ("ch.piv",))
+    fg = _compose_backdrop(scene_renderer, bundle, ("ch.piv",))
     canvas = scene_renderer.canvas
     phase_label = overworld.moon_phase.name.replace("_", " ")
-    font.draw_text(canvas, f"DAY {overworld.day}", 120, 96, color_index=31)
-    font.draw_text(canvas, phase_label, 80, 124, color_index=30)
+    font.draw_text(canvas, f"DAY {overworld.day}", 120, 96, color_index=fg)
+    font.draw_text(canvas, phase_label, 80, 124, color_index=fg)

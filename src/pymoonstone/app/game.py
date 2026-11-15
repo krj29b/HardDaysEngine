@@ -1020,7 +1020,7 @@ class GameSession:
         )
         font.draw_text(
             scene_renderer.canvas,
-            f"NODE:{ow_k.node_id}->{target}",
+            f"NODE:{ow_k.node_id} TO {target}",
             104,
             246,
             color_index=31,

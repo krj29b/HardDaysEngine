@@ -26,6 +26,7 @@ from pymoonstone.sim.monster_ai import MonsterArchetype
 from pymoonstone.sim.overworld import (
     EncounterBand,
     MapSiteInput,
+    NodeKind,
     OverworldGraph,
     build_overworld_graph_from_sites,
 )
@@ -252,8 +253,19 @@ class GameAssetBundle:
         mog_tables = self.get_mog_tables()
         if mog_tables is None or len(mog_tables.lair_region.map_sites) < 4:
             return None
+        site_kinds = {
+            21: NodeKind.START,
+            22: NodeKind.START,
+            23: NodeKind.START,
+            24: NodeKind.START,
+            25: NodeKind.HIGHWOOD,
+            26: NodeKind.WATERDEEP,
+            27: NodeKind.STONEHENGE,
+        }
         sites = tuple(
-            MapSiteInput(site_id=site.site_id, x=site.x, y=site.y)
+            MapSiteInput(
+                site_id=site.site_id, x=site.x, y=site.y, kind=site_kinds.get(site.site_id)
+            )
             for site in mog_tables.lair_region.map_sites
         )
         nodes = mog_tables.lair_region.creature_nodes

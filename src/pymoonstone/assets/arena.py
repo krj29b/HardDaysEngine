@@ -169,7 +169,9 @@ def composite_arena_background(
     fg_sheet = test_pictures[5 if (arena.region & 2) == 0 else 6]
     fg_tile_offset = 40 if (arena.region & 1) == 1 else 0
 
-    canvas = hud_pic.pixels.copy()
+    canvas = (
+        test_pictures[7].pixels.copy() if len(test_pictures) >= 8 else np.zeros_like(hud_pic.pixels)
+    )
     for op in arena.tiles:
         if op.kind == 0x0300:
             _blit_tile_cookie_cut(
