@@ -584,3 +584,132 @@ def test_adf_overworld_marker_frames_and_highlight_palette(adf_dir: Path) -> Non
         flag_frame = mi_cel.frames[expected_slot + 15]
         assert any(sp.frame == active_frame for sp in renderer.sprites)
         assert any(sp.frame == flag_frame for sp in renderer.sprites)
+
+
+def _find_shortest_path(
+    session: GameSession,
+    start_node: int,
+    target_kind: NodeKind,
+) -> list[int]:
+    queue: list[tuple[int, list[int]]] = [(start_node, [])]
+    visited = {start_node}
+    while queue:
+        cur, path = queue.pop(0)
+        node = session.overworld.graph.nodes[cur]
+        if cur != start_node and node.kind == target_kind:
+            return path
+        for nbr in node.neighbors:
+            if nbr not in visited:
+                visited.add(nbr)
+                queue.append((nbr, [*path, nbr]))
+    return []
+
+
+def test_overworld_renders_monster_dens_and_moves_dragon() -> None:
+    mi_cel = _make_cel(9, 5, frames=42)
+    sites = (
+        MapSiteInput(site_id=0, x=160, y=100, kind=NodeKind.STONEHENGE, neighbors=(1, 2, 25)),
+        MapSiteInput(site_id=1, x=220, y=100, kind=NodeKind.ROAD, neighbors=(0, 2, 25)),
+        MapSiteInput(
+            site_id=2,
+            x=48,
+            y=120,
+            kind=NodeKind.LAIR,
+            region_id=0,
+            lair_index=0,
+            creature_type=24,
+            defence=1,
+            arena_script="fo1.t",
+            neighbors=(0, 1, 25),
+        ),
+        MapSiteInput(site_id=25, x=26, y=156, kind=NodeKind.START, neighbors=(0, 1, 2)),
+    )
+    ow_graph = build_overworld_graph_from_sites(sites, moves_per_turn=3)
+
+    class _OverworldDenBundle(_StubCombatBundle):
+        def get_cel(self, *names: str) -> DecodedCel | None:
+            for name in names:
+                if name.casefold() == "mi.c":
+                    return mi_cel
+            return super().get_cel(*names)
+
+        def build_overworld_graph(self) -> object:
+            return ow_graph
+
+    session = GameSession(players=(KnightId.RED,), start_scene=GameScene.OVERWORLD)
+    session.asset_bundle = cast("GameAssetBundle", _OverworldDenBundle())
+    session._reset_campaign(1)
+
+    moves = legal_moves(session.overworld, KnightId.RED)
+    den_idx = moves.index(2)
+    non_den_idx = next(i for i, nid in enumerate(moves) if nid != 2)
+
+    session.selected_move_index = non_den_idx
+    unselected_frames = {sp.frame.meta.index for sp in session._overworld_sprites()}
+    assert 20 in unselected_frames
+
+    session.selected_move_index = den_idx
+    highlighted_frames = {sp.frame.meta.index for sp in session._overworld_sprites()}
+    assert 31 in highlighted_frames
+    assert any(
+        sp.frame.meta.index in range(34, 42) and sp.top_left for sp in session._overworld_sprites()
+    )
+
+    dragon_start = (session.overworld.dragon.x, session.overworld.dragon.y)
+    for _ in range(10):
+        session.step_tick(InputFrame())
+    assert (session.overworld.dragon.x, session.overworld.dragon.y) != dragon_start
+
+    session.selected_move_index = legal_moves(session.overworld, KnightId.RED).index(2)
+    session.step_tick(_p1_frame(confirm=True, kid=KnightId.RED))
+    assert session.scene == GameScene.COMBAT
+    assert session.active_encounter is not None
+    assert session.active_encounter.trigger.kind == TriggerKind.WANDERING_MONSTER
+
+    session._handle_combat_victory(session.active_encounter)
+    assert session.scene == GameScene.OVERWORLD
+    assert 2 in session.overworld.cleared_lair_nodes
+    assert session.overworld.knights[KnightId.RED].keys_mask & 1 == 1
+    post_frames = {sp.frame.meta.index for sp in session._overworld_sprites()}
+    assert 20 not in post_frames and 31 not in post_frames
+
+
+@pytest.mark.adf
+def test_adf_overworld_monster_dens_and_flying_dragon(adf_dir: Path) -> None:
+    from pymoonstone.assets.adf import DiskSet
+
+    disks = DiskSet.from_directory(adf_dir)
+    session = GameSession(players=(KnightId.BLUE,), start_scene=GameScene.OVERWORLD, disk_set=disks)
+    den_nodes = [n for n in session.overworld.graph.nodes.values() if n.kind == NodeKind.LAIR]
+    assert len(den_nodes) == 20
+
+    sprites = session._overworld_sprites()
+    den_sprites = [sp for sp in sprites if sp.frame.meta.index in (20, 31)]
+    assert len(den_sprites) == 20
+    assert all(sp.top_left for sp in den_sprites)
+    assert any(sp.frame.meta.index in range(34, 42) and sp.top_left for sp in sprites)
+
+    start_pos = (session.overworld.dragon.x, session.overworld.dragon.y)
+    for _ in range(12):
+        session.step_tick(InputFrame())
+    assert (session.overworld.dragon.x, session.overworld.dragon.y) != start_pos
+
+    path = _find_shortest_path(
+        session, session.overworld.knights[KnightId.BLUE].node_id, NodeKind.LAIR
+    )
+    assert path
+    for target in path:
+        if session.scene == GameScene.COMBAT:
+            break
+        if session.scene == GameScene.NEW_DAY:
+            session.step_tick(_p1_frame(confirm=True, kid=KnightId.BLUE))
+        moves = legal_moves(session.overworld, KnightId.BLUE)
+        assert target in moves
+        session.selected_move_index = moves.index(target)
+        session.step_tick(_p1_frame(confirm=True, kid=KnightId.BLUE))
+
+    assert session.scene == GameScene.COMBAT
+    assert session.active_encounter is not None
+    arena_name = session._arena_name_for_trigger(session.active_encounter.trigger)
+    assert arena_name.endswith(".t") and not arena_name.endswith(".t.t")
+    assert session.active_encounter.encounter.monsters

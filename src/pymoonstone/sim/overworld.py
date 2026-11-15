@@ -113,6 +113,9 @@ class MapSiteInput:
     region_id: int | None = None
     neighbors: tuple[int, ...] = ()
     lair_index: int = -1
+    creature_type: int = 0
+    defence: int = 0
+    arena_script: str = ""
 
 
 @dataclass(slots=True, frozen=True)
@@ -208,11 +211,18 @@ class KnightOverworldState:
 
 @dataclass(slots=True)
 class DragonState:
-    """Patrolling Dragon state on the overworld map."""
+    """Patrolling and flying Dragon state on the overworld map."""
 
     node_id: int
     patrol_index: int = 0
     active: bool = True
+    x: int = 10
+    y: int = 100
+    speed_x: int = 2
+    speed_y: int = 1
+    timer: int = 100
+    anim_phase: int = 0
+    facing_left: bool = False
 
 
 @dataclass(slots=True)
@@ -229,6 +239,7 @@ class OverworldState:
     day: int = 1
     moves_remaining: int = 1
     claimed_moonstones_mask: int = 0
+    cleared_lair_nodes: set[int] = field(default_factory=set)
     winner: KnightId | None = None
     game_over: bool = False
     last_triggers: tuple[EncounterTrigger, ...] = field(default=())
@@ -608,6 +619,9 @@ def _build_site_and_lair_nodes(
             y=site.y,
             neighbors=tuple(sorted(adj[site.site_id])),
             lair_index=lair_idx,
+            creature_type=site.creature_type,
+            defence=site.defence,
+            arena_script=site.arena_script,
         )
     for lid, (lair_index, lx, ly) in lair_entries.items():
         nodes[lid] = OverworldNode(
@@ -742,12 +756,21 @@ def create_campaign(
 
     route = active_graph.dragon_patrol_route
     dragon_start = route[0] if route else active_graph.stonehenge_node_id
+    dnode = active_graph.nodes.get(dragon_start)
+    dx = dnode.x if dnode is not None else 10
+    dy = dnode.y if dnode is not None else 100
     return OverworldState(
         graph=active_graph,
         prng=SimPrng(seed),
         turn_order=order,
         knights=knight_states,
-        dragon=DragonState(node_id=dragon_start, patrol_index=0, active=True),
+        dragon=DragonState(
+            node_id=dragon_start,
+            patrol_index=0,
+            active=True,
+            x=dx,
+            y=dy,
+        ),
         moves_remaining=active_graph.moves_per_turn,
     )
 
@@ -803,13 +826,70 @@ def step_dragon_patrol(state: OverworldState) -> int:
         next_idx = (state.dragon.patrol_index + 1) % len(route)
         state.dragon.patrol_index = next_idx
         state.dragon.node_id = route[next_idx]
-        return state.dragon.node_id
-
-    neighbors = state.graph.neighbors(state.dragon.node_id)
-    if neighbors:
-        choice = state.prng.rand_range(len(neighbors))
-        state.dragon.node_id = neighbors[choice]
+    else:
+        neighbors = state.graph.neighbors(state.dragon.node_id)
+        if neighbors:
+            choice = state.prng.rand_range(len(neighbors))
+            state.dragon.node_id = neighbors[choice]
+    dnode = state.graph.nodes.get(state.dragon.node_id)
+    if dnode is not None:
+        state.dragon.x = dnode.x
+        state.dragon.y = dnode.y
     return state.dragon.node_id
+
+
+def _update_dragon_coords(dragon: DragonState, target_y: int) -> None:
+    dragon.timer -= 1
+    if dragon.timer < 0:
+        dragon.timer = 100
+    dragon.x += dragon.speed_x
+    if dragon.timer > 60:
+        if dragon.y < target_y:
+            dragon.y += dragon.speed_y
+        elif dragon.y > target_y:
+            dragon.y -= dragon.speed_y
+        dragon.anim_phase = (dragon.anim_phase + 1) & 0x0F
+    if dragon.x > 304:
+        dragon.x = 300
+        dragon.speed_x = -abs(dragon.speed_x)
+        dragon.facing_left = True
+    elif dragon.x < -10:
+        dragon.x = -6
+        dragon.speed_x = abs(dragon.speed_x)
+        dragon.facing_left = False
+    if dragon.y > 192:
+        dragon.y = 0
+    elif dragon.y < 0:
+        dragon.y = 192
+
+
+def step_dragon_flight(
+    state: OverworldState,
+    target_y: int | None = None,
+) -> EncounterTrigger | None:
+    """Advance continuous overworld Dragon flight by one step (ARCHITECTURE.md §5, §7)."""
+    if not state.dragon.active or state.game_over:
+        return None
+    cur_node = state.graph.nodes.get(state.current_knight.node_id)
+    ty = target_y if target_y is not None else (cur_node.y if cur_node is not None else 100)
+    _update_dragon_coords(state.dragon, ty)
+    if state.graph.nodes:
+        nearest = min(
+            state.graph.nodes.values(),
+            key=lambda n: (_dist2(state.dragon.x, state.dragon.y, n.x, n.y), n.node_id),
+        )
+        state.dragon.node_id = nearest.node_id
+    if cur_node is None or cur_node.kind == NodeKind.START:
+        return None
+    if abs(state.dragon.x - cur_node.x) <= 10 and abs(state.dragon.y - cur_node.y) <= 8:
+        return EncounterTrigger(
+            kind=TriggerKind.DRAGON_INTERCEPT,
+            knight_id=state.current_knight_id,
+            node_id=cur_node.node_id,
+            day=state.day,
+            moon_phase=state.moon_phase,
+        )
+    return None
 
 
 def _roll_wilderness_encounter(
@@ -916,6 +996,8 @@ def _collect_location_trigger(
     """Evaluate the site/wilderness trigger for ``node``."""
     phase = state.moon_phase
     if node.kind == NodeKind.LAIR and node.lair_index >= 0:
+        if node.node_id in state.cleared_lair_nodes:
+            return None
         if can_enter_lair(state, knight_id, node.lair_index):
             return EncounterTrigger(
                 kind=TriggerKind.LAIR_BOSS,
@@ -925,6 +1007,17 @@ def _collect_location_trigger(
                 moon_phase=phase,
                 lair_index=node.lair_index,
                 creature_type=node.creature_type,
+            )
+        if node.arena_script:
+            return EncounterTrigger(
+                kind=TriggerKind.WANDERING_MONSTER,
+                knight_id=knight_id,
+                node_id=node.node_id,
+                day=state.day,
+                moon_phase=phase,
+                lair_index=node.lair_index,
+                creature_type=node.creature_type,
+                encounter_kind=max(1, node.creature_type),
             )
         return None
     if node.kind == NodeKind.STONEHENGE:

@@ -70,7 +70,7 @@ _CANONICAL_ROAD_SITES: tuple[tuple[int, int, int], ...] = (
     (4, 92, 68),
     # Glen (top-right quadrant)
     (5, 194, 48),
-    (6, 232, 34),
+    (6, 256, 22),
     (7, 272, 36),
     (8, 228, 68),
     (9, 266, 72),
@@ -89,6 +89,18 @@ _CANONICAL_ROAD_SITES: tuple[tuple[int, int, int], ...] = (
     # Central Valley approaches
     (20, 140, 88),
     (29, 180, 112),
+)
+
+_REGION_DEN_SLOTS: tuple[tuple[int, tuple[int, ...]], ...] = (
+    # Each entry: (region_lair_index, (node_ids mapped to mog creature_nodes block))
+    # Block 0 (fol1..fol5.t, bottom-left on Amiga map)
+    (0, (31, 11, 12, 13, 14)),
+    # Block 1 (wal1..wal5.t, top-right on Amiga map)
+    (1, (32, 5, 7, 8, 9)),
+    # Block 2 (swl1..swl5.t, bottom-right on Amiga map)
+    (2, (33, 16, 17, 18, 19)),
+    # Block 3 (gll1..gll5.t, top-left on Amiga map)
+    (3, (34, 1, 2, 3, 4)),
 )
 
 _LAIR_ARENAS: tuple[str, ...] = ("fol1.t", "fo1.t", "gl1.t", "fol2.t")
@@ -121,6 +133,66 @@ def _extract_8svx_chunks(pcm: bytes) -> list[tuple[bytes, int]]:
             chunks.append(decode_iff_8svx(pcm[idx:end]))
         pos = max(idx + 12, end)
     return chunks
+
+
+def _den_specs_by_node(cnodes_len: int) -> dict[int, tuple[int, int]]:
+    den_specs: dict[int, tuple[int, int]] = {}
+    for lair_idx, slots in _REGION_DEN_SLOTS:
+        for slot_offset, node_id in enumerate(slots):
+            rec_idx = lair_idx * 6 + slot_offset
+            if rec_idx < cnodes_len:
+                den_specs[node_id] = (lair_idx, rec_idx)
+    return den_specs
+
+
+def _build_site_and_den_inputs(
+    mog_tables: MogRuntimeTables,
+    site_kinds: dict[int, NodeKind],
+    road_kind: NodeKind,
+) -> list[MapSiteInput]:
+    canonical_by_id = {rid: (rx, ry) for rid, rx, ry in _CANONICAL_ROAD_SITES}
+    site_list: list[MapSiteInput] = [
+        MapSiteInput(
+            site_id=site.site_id,
+            x=site.x,
+            y=site.y,
+            kind=site_kinds.get(site.site_id),
+        )
+        for site in mog_tables.lair_region.map_sites
+    ]
+    used_ids = {site.site_id for site in site_list}
+    used_coords = {(site.x, site.y) for site in site_list}
+
+    cnodes = mog_tables.lair_region.creature_nodes
+    den_specs = _den_specs_by_node(len(cnodes))
+
+    for node_id in sorted({*canonical_by_id, *den_specs}):
+        if node_id in used_ids:
+            continue
+        if node_id in den_specs:
+            lair_idx, rec_idx = den_specs[node_id]
+            cnode = cnodes[rec_idx]
+            coord = (cnode.map_x, cnode.map_y)
+            if coord in used_coords and node_id in canonical_by_id:
+                coord = canonical_by_id[node_id]
+            used_coords.add(coord)
+            site_list.append(
+                MapSiteInput(
+                    site_id=node_id,
+                    x=coord[0],
+                    y=coord[1],
+                    kind=NodeKind.LAIR,
+                    lair_index=lair_idx,
+                    creature_type=cnode.creature_type,
+                    defence=cnode.defence,
+                    arena_script=cnode.arena_script,
+                )
+            )
+            continue
+        rx, ry = canonical_by_id[node_id]
+        used_coords.add((rx, ry))
+        site_list.append(MapSiteInput(site_id=node_id, x=rx, y=ry, kind=road_kind))
+    return site_list
 
 
 @dataclass(slots=True)
@@ -378,30 +450,13 @@ class GameAssetBundle:
             33: NodeKind.LAIR,
             34: NodeKind.LAIR,
         }
-        site_list = [
-            MapSiteInput(
-                site_id=site.site_id, x=site.x, y=site.y, kind=site_kinds.get(site.site_id)
-            )
-            for site in mog_tables.lair_region.map_sites
-        ]
-        existing_ids = {site.site_id for site in site_list}
-        for road_id, rx, ry in _CANONICAL_ROAD_SITES:
-            if road_id not in existing_ids:
-                site_list.append(MapSiteInput(site_id=road_id, x=rx, y=ry, kind=road_kind))
-        sites = tuple(site_list)
-        nodes = mog_tables.lair_region.creature_nodes
-        lairs = tuple(
-            (idx, nodes[idx * 6].map_x, nodes[idx * 6].map_y)
-            for idx in range(4)
-            if idx * 6 < len(nodes)
-        )
+        sites = tuple(_build_site_and_den_inputs(mog_tables, site_kinds, road_kind))
         bands = tuple(
             EncounterBand(limit=band.limit, kind=band.kind)
             for band in mog_tables.lair_region.encounter_bands
         )
         return build_overworld_graph_from_sites(
             sites,
-            lairs=lairs,
             encounter_bands=bands,
             moves_per_turn=3,
         )
@@ -526,14 +581,15 @@ def make_sprite(
     flipped: bool = False,
     layer: int = 2,
     order: int = 0,
+    top_left: bool = False,
 ) -> SceneSprite | None:
     """Build a :class:`SceneSprite` from ``cel`` at ``frame_index``."""
     if not cel.frames:
         return None
     idx = frame_index % len(cel.frames)
     frame = cel.frames[idx]
-    clamped_x = max(0, min(CANVAS_WIDTH - 1, x))
-    clamped_y = max(0, min(PLAYFIELD_HEIGHT - 1, y))
+    clamped_x = x if top_left else max(0, min(CANVAS_WIDTH - 1, x))
+    clamped_y = y if top_left else max(0, min(PLAYFIELD_HEIGHT - 1, y))
     return SceneSprite(
         frame=frame,
         x=clamped_x,
@@ -544,6 +600,7 @@ def make_sprite(
         layer=layer,
         order=order,
         mirrored=flipped,
+        top_left=top_left,
     )
 
 

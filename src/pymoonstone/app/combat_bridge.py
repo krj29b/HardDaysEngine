@@ -91,6 +91,20 @@ _LAIR_MINIONS: tuple[MonsterArchetype, ...] = (
     MonsterArchetype.BEASTMAN,
 )
 
+# Byte offsets into mog's LAB_08C8 creature arena handler table (ARCHITECTURE.md §5).
+_MOG_CREATURE_OFFSET_ARCHETYPES: dict[int, MonsterArchetype] = {
+    0: MonsterArchetype.BEASTMAN,
+    4: MonsterArchetype.MUDMAN,
+    8: MonsterArchetype.DEMON,
+    20: MonsterArchetype.DRAGON,
+    24: MonsterArchetype.TROGG_AXE,
+    28: MonsterArchetype.TROGG_AXE,
+    32: MonsterArchetype.TROGG_SPEAR,
+    36: MonsterArchetype.RATMAN,
+    48: MonsterArchetype.BALOK,
+    64: MonsterArchetype.TROLL,
+}
+
 
 def _archetype_for_trigger(trigger: EncounterTrigger) -> MonsterArchetype:
     if trigger.kind == TriggerKind.DRAGON_INTERCEPT:
@@ -101,29 +115,82 @@ def _archetype_for_trigger(trigger: EncounterTrigger) -> MonsterArchetype:
     return _WANDERING_ARCHETYPES[trigger.encounter_kind % len(_WANDERING_ARCHETYPES)]
 
 
+def _is_mog_offset_table(nodes: Sequence[CreatureNodeRecord]) -> bool:
+    return len(nodes) == 24 and any(n.creature_type >= len(MonsterArchetype) for n in nodes)
+
+
+def _node_search_slice(
+    trigger: EncounterTrigger,
+    nodes: Sequence[CreatureNodeRecord],
+    *,
+    mog_table: bool,
+) -> Sequence[CreatureNodeRecord]:
+    if mog_table and 0 <= trigger.lair_index < 4:
+        start = trigger.lair_index * 6
+        return nodes[start : start + 6]
+    return nodes
+
+
+def _match_node_by_type(
+    creature_type: int,
+    nodes: Sequence[CreatureNodeRecord],
+) -> CreatureNodeRecord | None:
+    if creature_type <= 0:
+        return None
+    for node in nodes:
+        if node.creature_type == creature_type:
+            return node
+    return None
+
+
+def _lair_node_at(
+    lair_index: int,
+    nodes: Sequence[CreatureNodeRecord],
+    *,
+    mog_table: bool,
+) -> CreatureNodeRecord | None:
+    if lair_index < 0:
+        return None
+    idx = lair_index * 6 if (mog_table and lair_index < 4) else lair_index
+    return nodes[idx] if idx < len(nodes) else None
+
+
 def _find_creature_node(
     trigger: EncounterTrigger,
     nodes: Sequence[CreatureNodeRecord],
 ) -> CreatureNodeRecord | None:
     if not nodes:
         return None
-    if 0 <= trigger.lair_index < len(nodes):
-        return nodes[trigger.lair_index]
-    if 0 <= trigger.node_id < len(nodes):
-        return nodes[trigger.node_id]
-    if trigger.creature_type > 0:
-        for node in nodes:
-            if node.creature_type == trigger.creature_type:
-                return node
-    return None
+    mog_table = _is_mog_offset_table(nodes)
+    if mog_table and trigger.lair_index < 0 and trigger.creature_type == 0:
+        return None
+    matched = _match_node_by_type(
+        trigger.creature_type,
+        _node_search_slice(trigger, nodes, mog_table=mog_table),
+    )
+    if matched is not None:
+        return matched
+    by_lair = _lair_node_at(trigger.lair_index, nodes, mog_table=mog_table)
+    if by_lair is not None:
+        return by_lair
+    return (
+        nodes[trigger.node_id] if not mog_table and trigger.node_id in range(len(nodes)) else None
+    )
 
 
 def _resolve_node_archetype(
     trigger: EncounterTrigger,
     node: CreatureNodeRecord | None,
+    *,
+    mog_table: bool = False,
 ) -> MonsterArchetype:
     base = _archetype_for_trigger(trigger)
     if trigger.kind == TriggerKind.DRAGON_INTERCEPT or node is None:
+        return base
+    if mog_table and node.creature_type in _MOG_CREATURE_OFFSET_ARCHETYPES:
+        candidate = _MOG_CREATURE_OFFSET_ARCHETYPES[node.creature_type]
+        if trigger.kind != TriggerKind.LAIR_BOSS or candidate.value >= MonsterArchetype.TROLL.value:
+            return candidate
         return base
     if 0 <= node.creature_type < len(MonsterArchetype):
         candidate = MonsterArchetype(node.creature_type)
@@ -138,8 +205,10 @@ def _build_monster_params(
 ) -> MonsterParams:
     if mog_tables is None:
         return default_monster_params(_archetype_for_trigger(trigger))
-    node = _find_creature_node(trigger, mog_tables.lair_region.creature_nodes)
-    archetype = _resolve_node_archetype(trigger, node)
+    nodes = mog_tables.lair_region.creature_nodes
+    mog_table = _is_mog_offset_table(nodes)
+    node = _find_creature_node(trigger, nodes)
+    archetype = _resolve_node_archetype(trigger, node, mog_table=mog_table)
     if node is None:
         return default_monster_params(archetype)
     return params_from_creature_node(

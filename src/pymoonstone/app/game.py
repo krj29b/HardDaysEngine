@@ -99,11 +99,14 @@ from pymoonstone.sim.overworld import (
     TriggerKind,
     create_campaign,
     end_turn,
+    grant_lair_key,
     legal_moves,
     move_knight,
     resolve_lair_victory,
     resolve_maths_tower,
     resolve_valley_of_the_gods,
+    step_dragon_flight,
+    step_dragon_patrol,
 )
 from pymoonstone.sim.palette_fx import PaletteFxState, pack_rgb12
 from pymoonstone.sim.prng import DEFAULT_SEED
@@ -155,6 +158,11 @@ _REGION_WANDERING_ARENAS: dict[int, str] = {
 _REGION_LAIR_ARENAS: tuple[str, ...] = ("fol1.t", "gll1.t", "swl1.t", "wal1.t")
 _OW_REPEAT_INITIAL_TICKS = 12
 _OW_REPEAT_STEP_TICKS = 6
+_MI_LAIR_FRAME = 20
+_MI_LAIR_HIGHLIGHT_FRAME = 31
+_MI_DRAGON_BASE = 34
+_MI_DRAGON_COUNT = 8
+_MI_PLACE_IDS: frozenset[int] = frozenset({21, 22, 23, 24, 25, 26, 27, 28, 30})
 
 # Knight class tunic ramps for combat palette indices 6..8 (ARCHITECTURE.md §8.1).
 _KNIGHT_COMBAT_TUNIC_WORDS: dict[KnightId, tuple[int, int, int]] = {
@@ -649,6 +657,15 @@ class GameSession:
         self._ow_prev_fire = inp.fire
         if inp.confirm or fire_edge:
             self._confirm_overworld_move(kid, moves[self.selected_move_index % len(moves)])
+        else:
+            self._step_idle_dragon(kid)
+
+    def _step_idle_dragon(self, kid: KnightId) -> None:
+        if self.tick_count % 2 != 0:
+            return
+        dragon_trig = step_dragon_flight(self.overworld)
+        if dragon_trig is not None:
+            self._handle_overworld_triggers(kid, (dragon_trig,))
 
     def _open_location(self, knight_id: KnightId, location: LocationKind) -> None:
         self.location_knight_id = knight_id
@@ -795,9 +812,10 @@ class GameSession:
 
     def _arena_name_for_trigger(self, trigger: EncounterTrigger) -> str:
         node = self.overworld.graph.nodes.get(trigger.node_id)
+        if node is not None and node.arena_script:
+            script = node.arena_script
+            return script if script.lower().endswith(".t") else f"{script}.t"
         if trigger.kind == TriggerKind.LAIR_BOSS:
-            if node is not None and node.arena_script:
-                return f"{node.arena_script}.t"
             lair_idx = max(0, trigger.lair_index)
             return _REGION_LAIR_ARENAS[lair_idx % len(_REGION_LAIR_ARENAS)]
         region_id = node.region_id if node is not None else int(RegionId.FOREST)
@@ -1174,12 +1192,35 @@ class GameSession:
         self.scene = GameScene.KNIGHT_SELECT
         self.last_status = "PRACTICE COMPLETE"
 
+    def _award_non_lair_victory(
+        self,
+        active: ActiveEncounter,
+        lead_id: KnightId,
+        kstate: KnightState,
+    ) -> None:
+        kstate.xp += 25
+        kstate.gold += 15
+        ow_k = self.overworld.knights[lead_id]
+        ow_k.xp = kstate.xp
+        ow_k.gold = kstate.gold
+        if (
+            active.trigger.kind == TriggerKind.WANDERING_MONSTER
+            and 0 <= active.trigger.lair_index < 4
+        ):
+            grant_lair_key(self.overworld, lead_id, active.trigger.lair_index)
+            kstate.keys = ow_k.keys_mask
+        elif active.trigger.kind == TriggerKind.DRAGON_INTERCEPT:
+            step_dragon_patrol(self.overworld)
+
     def _handle_combat_victory(self, active: ActiveEncounter) -> None:
         if self.practice_mode:
             self._finish_practice_combat()
             return
         lead_id = active.knight_ids[0]
         kstate = self.knight_combat[lead_id]
+        node = self.overworld.graph.nodes.get(active.trigger.node_id)
+        if node is not None and node.kind == NodeKind.LAIR:
+            self.overworld.cleared_lair_nodes.add(node.node_id)
         if active.trigger.kind == TriggerKind.LAIR_BOSS and active.trigger.lair_index >= 0:
             resolve_lair_victory(self.overworld, lead_id, active.trigger.lair_index)
             distribute_lair_loot(
@@ -1189,11 +1230,7 @@ class GameSession:
                 overworld=self.overworld,
             )
         else:
-            kstate.xp += 25
-            kstate.gold += 15
-            ow_k = self.overworld.knights[lead_id]
-            ow_k.xp = kstate.xp
-            ow_k.gold = kstate.gold
+            self._award_non_lair_victory(active, lead_id, kstate)
         self.active_encounter = None
         self.scene = GameScene.OVERWORLD
         self.last_status = "ENCOUNTER WON"
@@ -1282,7 +1319,13 @@ class GameSession:
             "claimed_stones": self.overworld.claimed_moonstones_mask,
             "winner": int(self.overworld.winner) if self.overworld.winner is not None else None,
             "game_over": self.overworld.game_over,
-            "dragon": [self.overworld.dragon.node_id, self.overworld.dragon.patrol_index],
+            "dragon": [
+                self.overworld.dragon.node_id,
+                self.overworld.dragon.patrol_index,
+                self.overworld.dragon.x,
+                self.overworld.dragon.y,
+                int(self.overworld.dragon.facing_left),
+            ],
             "knights": knights_payload,
             "encounter": encounter_payload,
         }
@@ -1397,6 +1440,56 @@ class GameSession:
         if fsp is not None:
             sprites.append(fsp)
 
+    def _selected_target_node_id(self, active_kid: KnightId) -> int | None:
+        moves = legal_moves(self.overworld, active_kid)
+        if not moves:
+            return None
+        return moves[self.selected_move_index % len(moves)]
+
+    def _highlighted_overworld_nodes(self, target_node_id: int | None) -> set[int]:
+        highlighted = {
+            self.overworld.knights[kid].node_id
+            for kid in self.overworld.turn_order
+            if self.overworld.knights[kid].alive
+        }
+        if target_node_id is not None:
+            highlighted.add(target_node_id)
+        return highlighted
+
+    def _build_site_marker_sprite(
+        self,
+        mi_cel: DecodedCel,
+        node_id: int,
+        is_highlighted: bool,
+    ) -> SceneSprite | None:
+        node = self.overworld.graph.nodes[node_id]
+        frame_count = len(mi_cel.frames)
+        if node.kind == NodeKind.LAIR and node_id not in self.overworld.cleared_lair_nodes:
+            use_hl = is_highlighted and frame_count > _MI_LAIR_HIGHLIGHT_FRAME
+            frame_id = _MI_LAIR_HIGHLIGHT_FRAME if use_hl else _MI_LAIR_FRAME
+            return make_sprite(
+                mi_cel, frame_id, x=node.x, y=node.y, layer=2, order=50 + node_id, top_left=True
+            )
+        if node_id in _MI_PLACE_IDS and frame_count > node_id and is_highlighted:
+            return make_sprite(
+                mi_cel, node_id, x=node.x, y=node.y, layer=1, order=80 + node_id, top_left=True
+            )
+        return None
+
+    def _append_lair_and_place_markers(
+        self,
+        mi_cel: DecodedCel,
+        target_node_id: int | None,
+        sprites: list[SceneSprite],
+    ) -> None:
+        if not mi_cel.frames:
+            return
+        highlighted = self._highlighted_overworld_nodes(target_node_id)
+        for node_id in sorted(self.overworld.graph.nodes):
+            sp = self._build_site_marker_sprite(mi_cel, node_id, node_id in highlighted)
+            if sp is not None:
+                sprites.append(sp)
+
     def _overworld_sprites(self) -> list[SceneSprite]:
         if self.asset_bundle is None:
             return []
@@ -1410,6 +1503,8 @@ class GameSession:
         mi_cel = self.asset_bundle.get_cel("mi.c")
         if mi_cel is not None:
             active_kid = self.overworld.current_knight_id
+            target_node_id = self._selected_target_node_id(active_kid)
+            self._append_lair_and_place_markers(mi_cel, target_node_id, sprites)
             for idx, kid in enumerate(self.overworld.turn_order):
                 ow_k = self.overworld.knights[kid]
                 if not ow_k.alive:
@@ -1429,16 +1524,27 @@ class GameSession:
     def _append_dragon_marker(self, sprites: list[SceneSprite]) -> None:
         if self.asset_bundle is None:
             return
-        dnode = self.overworld.graph.nodes.get(self.overworld.dragon.node_id)
-        if dnode is None:
-            return
+        dragon = self.overworld.dragon
         mi_cel = self.asset_bundle.get_cel("mi.c")
-        if mi_cel is not None:
-            dframe = 34 + ((self.tick_count // 8) % 5)
-            dsp = make_sprite(mi_cel, dframe, x=dnode.x - 12, y=dnode.y - 10, layer=3, order=99)
+        if mi_cel is not None and mi_cel.frames:
+            span = min(_MI_DRAGON_COUNT, max(1, len(mi_cel.frames) - _MI_DRAGON_BASE))
+            dframe = _MI_DRAGON_BASE + ((dragon.anim_phase + (self.tick_count // 6)) % span)
+            dsp = make_sprite(
+                mi_cel,
+                dframe,
+                x=dragon.x,
+                y=dragon.y - 6,
+                flipped=dragon.facing_left,
+                layer=3,
+                order=99,
+                top_left=True,
+            )
             if dsp is not None:
                 sprites.append(dsp)
                 return
+        dnode = self.overworld.graph.nodes.get(dragon.node_id)
+        if dnode is None:
+            return
         dragon_cel = self.asset_bundle.get_cel("DRAGON1.CEL")
         if dragon_cel is not None:
             dsp = make_sprite(dragon_cel, 0, x=dnode.x, y=dnode.y, layer=3, order=99)
