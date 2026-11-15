@@ -191,8 +191,9 @@ Rules for the whole phase:
   read or write has an offset, width and meaning, with the conflicts between sources noted.
 - **T11.3 Spec: fights (§10):** arena set-up per fight kind, creature definitions (cel slots, hit
   sets, sound bank, record initialisation, spawn lists, waves), the fight loop order and end timers,
-  contact and damage rules, the engine routines scripts call, the nine AI handlers, the fight
-  palette assembly, the HUD.
+  contact and damage rules, the engine routines scripts call, the fight palette assembly, the
+  on-screen feedback. The nine AI handlers and the knight's hurt rules get a one-line row in
+  §10.16 here; each is specified in full by the task that implements it (T11.9, T11.10a to i).
 - **T11.4 Spec: overworld and turns (§11):** map frame order, movement and clipping, terrain mask,
   move budget, proximity scan and node menu, lair visibility, dragon flight, turn scheduler, clock
   and moon, computer-controlled knights.
@@ -207,9 +208,10 @@ Rules for the whole phase:
   scene row. Remove `default_combat_palette` from the fight path and the colour literals in
   `app/game.py`. *Accept:* in every arena, index 5 equals the backdrop picture's entry; no RGB
   literal for tunic or creature colours remains in `src/`; sheet reviewed for all four regions.
-- **T11.7 Creature definitions (`assets/tables.py`):** decode, from located tables rather than a
-  code scan, each creature's cel slot list, hit sets, sound bank, script tables, type byte, hit
-  points and tunables, plus the lair-to-creature table. *Accept:* for every creature, every draw
+- **T11.7 Creature definitions (`assets/tables.py`):** decode each creature's cel slot list, hit
+  sets, sound bank, script tables, type byte, hit points and tunables, the arena rows, spawn
+  lists and the lair-to-arena table, as §10.15 specifies: data by offset, code operands at
+  CRC-identified positions with the instruction word checked, no unchecked pattern scan. *Accept:* for every creature, every draw
   instruction reachable from its scripts names a slot that is loaded and a frame inside that cel
   (no modulo, no slot fallback); the `adf` test walks all scripts and asserts this.
 - **T11.8 Fight engine (`sim/fight.py`, replaces the replay in `app/combat_bridge.py`):** ten jobs
@@ -230,7 +232,8 @@ Rules for the whole phase:
   decided outcome; the creature dies through its hurt script's death branch; sheet shows the whole
   creature in idle, walk, attack, hurt and death.
 - **T11.11 Fight loop and outcomes (`sim/fight.py`, `app/game.py`):** frame pacing, end timers,
-  waves, defeat settlement and lives, the practice fight (knight against knight), the original HUD.
+  waves, defeat settlement and lives, the practice fight (knight against knight), the low-health
+  palette pulse (the original has no bars or score).
   *Accept:* win and loss both return to the caller with the right record changes; practice returns
   to the title; the hit flash leaves the HUD colours alone.
 

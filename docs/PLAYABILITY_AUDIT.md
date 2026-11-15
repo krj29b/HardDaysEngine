@@ -280,9 +280,13 @@ then wired to them:
 4. **Creatures render as scrambled parts** (Trogg, Balok), as a stretched knight-like figure
    (Ratman) or as stripes (Beastman): `_draws_to_pieces` ignores the frame-set opcode `$C0`, wraps
    out-of-range frame numbers with a modulo and substitutes slot 0 for a missing cel slot.
-5. **Creature script tables are guessed**: `parse_monster_script_tables` scans `S_0` code
-   heuristically and keys records by values (24, 28, 32, ...) that are then mapped to archetypes by
-   a hand-written dict. Seven of eleven records have no action scripts at all.
+5. **Creature definitions are mapped to the wrong creatures**: `parse_monster_script_tables`
+   reads the creature initialisers out of `S_0` code (necessary: the original keeps those values
+   as code operands) and keys records by type byte, but `_ARCHETYPE_CREATURE_TYPE` assigns six of
+   them to the wrong creature (§9.9 of the spec). The scan is unchecked pattern matching, and
+   the fixed scripts that most creature AIs play by themselves are not located at all, so seven
+   of eleven records have no action scripts. *(Corrected 2026-11-15: the first version of this
+   item called the scan itself a guess.)*
 6. **Fight HUD is invented** (HP / ST bars, score), and the hit flash recolours the HUD.
 7. **Town sub-screens**: no smith, market or temple sheet, no item icons (`ki.cel`), no pointer
    (`po.cel`); Highwood's "High Temple" button is not selectable; dice, healer and mystic show the

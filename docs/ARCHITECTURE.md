@@ -840,3 +840,315 @@ Armour: `$1B` padded, `$1C` mail, `$1D` plate, `$1E` battle.
   wrong creature: it treats 24 as the spear Trogg (it is an axe Trogg), 32 as the Ratmen (it is
   the spear Trogg), 36 as the Troll (it is the Ratmen), 0 as Balok (it is the flyer), 44 as the
   flyer (it is a dragon-arena object) and 64 as the Guardian (it is the Troll). T11.7 replaces it.
+
+---
+
+## 10. Fights (`T11.3`)
+
+A fight is a loop over at most ten jobs (§9.6). Each job runs one fight script (§7.2) for one
+actor (§9.2). The script produces the actor's sprites, its attack and hurt lists and its motion;
+a per-type **handler** chooses the next script. There is no other fighter state: no timers
+outside the record, no separate animation table. `sim/` implements this section; `app/` only
+reads the draw lists.
+
+Sources: the reference project's fight loop, arena set-up, script engine, contact and damage
+code. Where this section names a number that the original holds as data or as an immediate in
+`mog` code (hit points, reach, colours, spawn lists, step sizes, the wave cut table), the
+implementation reads it from the user's `mog` (§10.15) and the number is given here only to pin
+the behaviour.
+
+### 10.1 Ways into a fight
+
+| Entry | Trigger | Set-up | After the fight |
+|---|---|---|---|
+| Creature lair | Node menu on a lair | Arena of the lair's `handler_offset` (§10.3) | Lost: temple sheet. Won: +1 progress, loot sheet. `creatures_left` is written back to the lair. |
+| Knight meets knight | Node menu on another knight, or a computer knight's arrival | Both knights get type `$0C`; the first uses port 1 (`input_port` 2), the second port 0 (`input_port` 1); a computer knight keeps its own type | Meeting sheet for the winner, temple sheet when both lost (§12) |
+| Dragon | The dragon touches the current knight on the map | Dragon arena | Hoard sheet on a win; the turn is used up |
+| Valley guardian | The valley with all four keys | Guardian arena (§10.3, last row) | §12 |
+| Practice | Title menu | Knight 0 on port 1 against knight 1 on port 0, player count forced to 2 | Back to the title |
+
+With the travel mark set (§11) a lair is looted without a fight.
+
+### 10.2 Common set-up
+
+Every creature arena starts the same way, in this order:
+
+1. Show the next line of the loading-text cycle on `message.piv`.
+2. Build the arena picture for the current **region code** (0 forest, 4 glen, 8 swamp, `$C`
+   wasteland; §4.3 composes it) and its obstacle table. The **low edge** is the largest `y` of
+   the obstacle records, starting from 30.
+3. Free all 20 fight-pool actors, all jobs and all dagger trajectories.
+4. Place the attacker: the current knight becomes the first fighter at `x = 250`, `height = 0`,
+   `y = 100`, facing left (3); its script tables are set to the knight tables (§10.9) and a job
+   starts with the knight's **enter** script.
+
+### 10.3 The creature arenas
+
+Nine set-up routines, reached through a table that a lair's `handler_offset` indexes. Each one
+sets, in this order: optional region override, common set-up (§10.2), creature cel set and sound
+bank, pokes into the knight's script tables, the wave cells, wave scaling (§10.6), the first
+wave (§10.5), the fight palette for its scene code (§10.13).
+
+| Arena | Creature type | Cel files (creature frame list) | Alive at once / in all | First wave | Next creature | Scene code | Notes |
+|---|---|---|---|---|---|---|---|
+| Flyer | `$00` | `be1.c`, `be2.c` | 1 / 3 | whole list | alternating | `$00` | Three pokes: knight action 28 and hurt entries 28 and 32 |
+| Mudmen | `$04` | `Mudmen1.CEL`, `Mudmen2.CEL` | 1 / 2 | one entry | alternating, one at a time | `$04` | Forces region code 8 |
+| Trogg, axe | `$18` | `TROGGAxe1.CEL`, `TROGGAxe2.CEL` | 1 / 3 | whole list | alternating | `$18` | |
+| Trogg, axe (second kind) | `$1C` | same | 1 / 3 | whole list | alternating | `$18` | Shorter reach |
+| Trogg, spear | `$20` | `TROGGSpear1.CEL`, `TROGGSpear2.CEL` | 1 / 3 | whole list | alternating | `$20` | Pokes knight actions 16 and 28 |
+| Ratmen | `$24` | `RATMEN1.CEL`, `RATMEN2.CEL` | 2 / 2 | whole list | alternating | `$24` | One extra creature object is on the field from the start; pokes knight actions 16 and 28 |
+| Balok | `$30` | `Balok1.CEL`, `Balok3.CEL`, `Balok2.CEL`, plus `KN5.ob` | 1 / 2 | whole list (one entry at `x = -60`, facing right) | one at a time | `$30` | Pokes the target's hurt entry 8 |
+| Troll | `$40` | `TROLL1.CEL`, `TROLL2.CEL`, plus `KN5.ob` | 1 / 1 | one entry | alternating | `$40` | Never more than two alive; pokes the target's hurt entry 8 |
+| Guardian | `$08` | `Demon1.CEL`..`Demon4.CEL` | 1 / 1 | the guardian itself | none | `$08` | Own routine: default obstacle table, pokes the knight's hurt entry 32, reserves a second record |
+
+The dragon fight loads `DRAGON1.CEL`, `DRAGON2.CEL`, `DRAGON5.CEL` plus `KN5.ob` and uses scene
+code `$14`. Knight duels load `HE1.ob`..`HE3.ob` and use scene code `$0C`.
+
+A creature cel set is tagged with its type so a repeat fight skips the load; Mudmen, dragon and
+guardian always reload. The knights' frame list holds `KN1.ob`, `KN2.ob`, `KN3.ob` in slots 0..2
+and `KN4.ob` (the weapon set, the one with a hit set) in slot 3; slot 4 takes `KN5.ob` in the
+fights that load it. T11.7 confirms slot order per creature from the loader when it decodes the
+definitions.
+
+A **poke** replaces one entry of the knight's action or hurt script table for this fight, which
+is how a knight gets creature-specific reactions (being grabbed, being carried).
+
+### 10.4 Creature record initialisation
+
+When a creature is spawned, its type's initialiser fills the new actor: `action_scripts`,
+`hurt_scripts`, `damage_table`, `walk_scripts`, `frame_list` (the creature list), `type`,
+`input_port = 4`, `idle_script`, `after_hit_script`, `reach_x`, `too_close_x`, `depth_reach`,
+`hp` and `hp_max`. A creature whose AI plays fixed scripts by itself leaves `action_scripts`
+unset.
+
+Examples that pin the model: the first axe Trogg has reach 100, too-close 90, depth 5 and 20 hit
+points; the second kind reach 70 and too-close 65. The Ratmen have 5 hit points, reach 40,
+too-close 30, and their initialiser also rewrites two entries of their damage table; at moon
+frame 45 they get 7 hit points and stronger entries, at frame 49 they get 12.
+
+### 10.5 Spawning
+
+- **Spawn lists** are records of four words `{x, height, y, facing}` in `mog` data. Spawning one
+  creature takes the next free fight-pool actor, copies the four words, runs the initialiser and
+  starts a job with the actor's idle script. `alive_now` goes up by one.
+- **Entry lane.** Starting a job overrides the actor's `y` with one of three depth lanes. A
+  counter steps 1, 2, 3, 1, ... (increment, mask with 3, skip zero). With `E` the arena's low
+  edge and `g = 200 - E` (16-bit):
+  - counter 3: `E + (g >> 1) - 47`
+  - counter 2: `E + (g >> 2) - 47`
+  - counter 1: `E + (g >> 1) + (g >> 2) - 47`
+- **First wave.** "Whole list" spawns `max_alive` consecutive entries. "One entry" uses the
+  alternating routine once.
+- **Alternating** flips a toggle and spawns the first or the second entry of its list, so
+  creatures enter from alternate sides.
+- The Ratmen arena additionally spawns one object of type `$28` at the first lane before the
+  wave, running a fixed script.
+
+### 10.6 Wave size
+
+The arena sets `max_alive` and `total`; scaling then adjusts them for the current knight:
+
+1. If `strength > 3`: `max_alive += 1`.
+2. If `hp_max >= 30`: `total += 1`. If `hp_max >= 60`: `max_alive += 1`. If `hp_max >= 90`:
+   `total += 1`.
+3. In a lair fight `total` becomes the lair's `creatures_left`.
+4. Arenas that spawn one at a time force `max_alive = 1`; the Troll caps it at 2.
+5. If `total > 0`: compute the knight's damage for action 8 (§10.11) as a class 0..7 and look up
+   a signed cut in an 8 x 8 table (creature row by damage class) in `mog` data. `total - cut` is
+   stored only if it is positive.
+
+### 10.7 The fight frame
+
+One fight frame lasts 6 VBLs (§7.1). Before the first frame: action latch, warning jobs and key
+state are cleared, `fight_active = 1`, and the creature jobs' pause flags are toggled. Each
+frame, in this order:
+
+1. **Job pass** (§10.8): handlers choose scripts.
+2. **Script tick**: every running job executes its script up to the next frame marker (§7.2),
+   in ascending depth order, filling draw, attack and hurt lists and the actors' bounding boxes.
+3. Flip the screens.
+4. **Contact pass** (§10.10): links attackers and victims for the next job pass.
+5. Draw pass.
+6. Low-health warning (§10.14).
+7. End test: while `fight_active`, a first fighter with negative `hp` clears `fight_active` and
+   sets `end_timer = 50`. The pause key waits for another key.
+8. Wait for the frame budget.
+
+The loop runs while `fight_active` is set, then keeps running frames while `end_timer` counts
+down to zero (a byte decrement, so a timer of 0 would run 256 frames). Afterwards: defeats are
+settled (§9.3), the turn's move budget is marked spent, the bad-luck flag is cleared, all jobs
+are freed, and a lair fight writes `total` back to the lair's `creatures_left`.
+
+### 10.8 Job pass
+
+For every active job: if its owner has neither a `hit_target` nor an `attacker` link **and** its
+script is still running, nothing happens. Otherwise the handler for the job's type is called
+with the owner and returns one of:
+
+- **keep**: leave the job alone;
+- **end**: free the job and clear the owner's `active`;
+- **a script** plus position and facing: the job restarts on that script at that position.
+
+So a handler runs when a blow landed or was taken, or when a script reached its end marker.
+Every animation is one complete move.
+
+Handlers by type: knight `$0C`; flyer `$00`; brawler `$18`, `$1C`, `$20`; caster `$24`; dragon
+`$14`; dragon-arena object `$2C`; drake (Balok) `$30`; dagger `$34`; idle object `$28`; snatcher
+(Mudmen) `$04`; guardian `$08`; stalker (Troll) `$40`; computer knight `$10`.
+
+### 10.9 The knight handler
+
+Default next script: `idle_script`. Then, first match wins:
+
+1. `attacker` set: the hurt reaction for the attacker's type (§10.11).
+2. `hit_target` set: the hit reaction (carry on, stop, or be hurt back by a dragon in flight).
+3. Read the joystick word of the knight's port into `input`; `action = 0`. No input: idle.
+4. If this knight is the confused one (a failed scroll gamble), swap up with down and left with
+   right.
+5. **Fire held**: look up the direction bits (fire bit removed) in the action table for the
+   knight's facing (`kActionRight` / `kActionLeft`, §7.2); the result is the new `action`, and
+   the next script is `action_scripts[action]`.
+6. **Otherwise walk.** `anim_phase = (anim_phase + 1) & 3`. Step sizes come from three 4-entry
+   tables in `mog` indexed by the phase: up moves `y` by minus the up step, down by the down
+   step; right sets facing 1 and moves `x` by the side step, left sets facing 3 and moves by its
+   negative. Then, in order: the movement probe (§10.10) clears blocked direction bits, the arena
+   clip clears more, the obstacle probe clears more. The remaining bits are applied (up, down,
+   left, right; the direction block is 32 for up, 64 for down, and 0 as soon as a sideways bit
+   moved). If nothing moved, the phase is restored and the idle script plays. Otherwise the block
+   latch (bit 7 of `behaviour_flags`) is cleared and the next script is
+   `walk_scripts[direction block + phase * 4]`.
+
+The knight tables set at arena entry are the tables of §7.2 (idle, after-hit, nine actions, nine
+hurt reactions, walk blocks, damage and defence tables).
+
+### 10.10 Contact, movement probe, clipping
+
+**Contact pass.** Clear every actor's `hit_target` and `attacker`. For each active job, for each
+entry of its attack list, test against each hurt entry of every *other* active job whose depth is
+within 10 (§4.1), using the contact test of §4.2. The first hit stores the victim in the
+attacker's `hit_target`, the attacker in the victim's `attacker` and the contact point in the
+victim's `hit_x` / `hit_y`; the scan then moves to the next job (its remaining attack entries are
+not tested). Finally both lists of every job are emptied. An attacker cel without a registered
+hit set never hits.
+
+**Movement probe.** For a mover with horizontal step `s` and facing `f`, start with all four
+directions allowed. For every other active job's owner with a non-zero `box_min_x` and
+`hp > 0`:
+
+- If the two depths are within 10, and the mover is not beyond the other on its facing side (the
+  mover's `x` is not greater when facing right, not smaller when facing left): if the mover's
+  x-box shifted by `s` overlaps the other's x-box and the y-boxes overlap, the facing direction
+  is blocked.
+- If the depth difference is at most 20 and both the unshifted x-boxes and the y-boxes overlap:
+  down is blocked when the mover is behind (smaller depth), up when it is in front.
+
+Interval overlap is closed (touching counts).
+
+**Arena clip.** Left is cleared when `x + 25` (facing right) or `x - 25` (facing left) is below
+10, right when it is above 320, down when `y + 9 > 155`, up when `y < 30`.
+
+**Obstacle probe.** Every wall segment (§4.3) the mover would touch clears the matching
+direction bit, as described there.
+
+### 10.11 Damage and blocking
+
+**Damage dealt** by an attacker's current action: the entry of its `damage_table` for `action`,
+plus `strength`, plus the sword bonus (§9.7); doubled for action `$20`; doubled once more when
+the attacker holds a moonstone matching the moon frame (bits 0 or 3 with frame 46, bit 1 with 45,
+bit 2 with 49). 16-bit arithmetic.
+
+**Protection:** the result is shifted right by the defender's count in inventory slot `$08`
+(shift count modulo 64; 16 or more gives 0).
+
+**Blocking:** the defender's `defence_table` gives, per attacker action, the action the defender
+must be in to stop it. A defender in the `$1C` stance blocks once and sets the block latch; the
+latch is released by walking. Two fighters facing each other in the required action parry, with
+the clang sound.
+
+**Hurt reaction of a knight.** A table with one row per attacker type decides whether the block
+check runs, how hit points are taken (the attacker's computed damage, or a flat number for the
+flyer, drake, spear Trogg, stalker, guardian and dragon), side effects, and which script plays:
+normally `hurt_scripts[attacker's action]`, for some creatures a fixed script. The rows are
+specified with their handlers in §10.16.
+
+**Death.** Nothing outside the scripts kills an actor. Every hurt script contains the
+"jump if owner dead" opcode, which branches to a death sequence that calls the death-accounting
+routine (§10.12) once and ends with the kill opcode. A hurt-table entry of zero makes the handler
+return **end**: the actor is freed without death accounting.
+
+### 10.12 Death accounting and the end of a fight
+
+Scripts call four fight-level routines through the engine-call opcode:
+
+- **A fighter died.** If the first fighter's `hp <= 0`, end the fight. Otherwise `alive_now -= 1`
+  and `total -= 1`; if `total <= 0` and `alive_now == 0`, end the fight; else, while
+  `alive_now != max_alive` and `total > 0`, call the arena's next-creature routine.
+- **End the fight.** If still active: `end_timer = 35`, `fight_active = 0`.
+- **Mark the first fighter dead:** `hp = $FFFF`.
+- **Pause all** creature jobs (used by grab sequences).
+
+A second fighter's death is therefore signalled only through scripts; the end test of §10.7
+looks only at the first fighter.
+
+### 10.13 Fight palette
+
+Built when an arena finishes its set-up, from the backdrop picture's 32 colours:
+
+1. Copy the picture palette.
+2. Entries 9..15 take the seven colours of the **scene code** (§10.3). Scene `$0C` (a duel)
+   instead puts the second fighter's three class colours at 9..11. Scenes `$18` and `$20` pick
+   one of three sets by region code (`$C`, 0, others). Scene `$14` (dragon) also sets 29..31.
+   Scene `$40` sets six colours. Scene `$08` (guardian) takes 23 colours from a table.
+3. Fade out, copy the clean background to both screens.
+4. Entries 6..8 take the first fighter's class colours, by `kind`: 0 blue, 1 orange, 2 green,
+   3 red, anything else the dark black-knight set.
+5. Unless the scene is `$08`: region codes 8 and `$C` set entries 1..4 to a fixed four-colour
+   set; then entries 16..28 take the 13 colours of the region's table (one table each for 0, 4,
+   8, `$C`).
+6. Entry 0 is black. Entry 15 is blood red unless the scene is `$14`.
+7. Fade in to the result.
+
+Entry 5 and, outside the dragon scene, 29..31 always stay the picture's own.
+
+### 10.14 On-screen feedback
+
+The fight has no bars, numbers or score. When the first fighter's `hp` is 10 or less, three
+palette jobs start pulsing entries 6, 7 and 8 between their colour and a warning colour of the
+knight's class. In a duel (arena kinds `$0C` and `$10`) the opponent's low health pulses entries
+9, 10 and 11 the same way. Each pair of warnings starts once per fight.
+
+### 10.15 Reading the fight data from `mog`
+
+Script tables, spawn lists, step tables, region palette tables and the wave cut table are data
+in `mog` and are read by offset. Hit points, reach, alive / total counts, scene colours and
+class colours are **immediates inside 68k code** in hunk 0. They are read as operands at known
+positions:
+
+- `assets/tables.py` identifies the `mog` file by CRC-32 and holds, per known version, the hunk
+  offsets of each routine's operands (positions, not values).
+- Each operand read checks the instruction word in front of it; a mismatch raises an error
+  naming the routine, rather than returning a guess.
+- Relocated longs (script addresses) are resolved through the hunk's relocation table to an
+  offset in the target hunk.
+
+An unknown CRC is an error with a message that names the supported versions.
+
+### 10.16 Per-handler specifications
+
+The knight's hurt-rule rows and each creature handler are specified in this subsection by the
+task that implements them (T11.9, T11.10a to T11.10i), before the code:
+
+| Handler | Types | One-line behaviour | Task |
+|---|---|---|---|
+| Knight hurt rules | victim `$0C` | One row per attacker type (§10.11) | T11.9 |
+| Brawler | `$18`, `$1C`, `$20` | Walks up to the target and picks one of three attacks by distance; the spear type thrusts | T11.10a |
+| Caster | `$24` | Keeps its distance, throws daggers, grabs the first fighter and drops or slams it | T11.10b |
+| Snatcher | `$04` | Appears beside the first fighter, walks up, grabs and carries it off | T11.10c |
+| Flyer | `$00` | Crosses the arena between `x = -50` and `380` at the target's depth | T11.10d |
+| Stalker | `$40` | Follows the first fighter and strikes when in reach | T11.10e |
+| Drake | `$30` | Pounces in a dagger-style arc, grabs, flings | T11.10f |
+| Guardian | `$08` | Lunge, strike or jump by distance, then a grab | T11.10g |
+| Dragon and its object | `$14`, `$2C` | Walk, then melee or breath, or a flight arc, in two phases | T11.10h |
+| Computer knight | `$10` | Chooses between guarding and attacking by distance, last action and odds | T11.10i |
+| Dagger | `$34` | Runs its script along a trajectory until it leaves the screen or hits | T11.9 |
+| Idle object | `$28` | Clears its links and keeps its script | T11.8 |

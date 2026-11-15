@@ -77,7 +77,7 @@ code that passes its tests but does not reproduce the original; T11.24 corrects 
 |---|---|---|---|---|
 | T11.1 | Audit harness & scene smoke test | – | DONE | `app/audit.py` (rig, scenarios, contact sheets), `scripts/audit_shots.py` writes `build/audit/{intro,menu_map,places,fights}.png`. Smoke test is `adf` + `gl`, so the gate (`-m "not gl"`) does not run it: run `uv run pytest tests/adf/test_scene_smoke.py --no-cov`. Scenarios call `GameSession._open_location` / `_start_combat` and must be updated in the commit that replaces those. Fights cover creature types 0..3 only until T11.7 supplies the real list. |
 | T11.2 | Spec §9: game state records | – | DONE | `ARCHITECTURE.md` §9: actor, inventory, lair, map node, job, active-fight block, derived stats, transfer order, action / equipment / behaviour-type codes. §7.3 collapsed to a pointer (its offsets were partly wrong, §9.9). Open: display names of inventory slots `$00`, `$02`, `$08`..`$10` (T11.5, from `mog` strings); Finding: the archetype-to-type dict in `app/combat_bridge.py` maps six creatures to the wrong type. |
-| T11.3 | Spec §10: fights | T11.2 | TODO | |
+| T11.3 | Spec §10: fights | T11.2 | DONE | `ARCHITECTURE.md` §10: entries, common set-up, the nine arenas, record initialisation, spawning and lanes, wave scaling, frame order, job pass, knight handler, contact / movement probe / clipping, damage and blocking, death accounting, palette, low-health pulse, how fight data is read from `mog` (§10.15). The per-handler rules (§10.16) are written by T11.9 / T11.10a–i before their code. Findings: creature values are code operands in `mog` hunk 0, so T11.7 reads operands at CRC-identified positions; the original fight has no HUD bars. Audit §6.2 item 5 corrected. |
 | T11.4 | Spec §11: overworld & turns | T11.2 | TODO | |
 | T11.5 | Spec §12: places & sheets | T11.2 | TODO | |
 | T11.6 | Fight palette from data | T11.1, T11.3 | TODO | |
@@ -111,3 +111,4 @@ code that passes its tests but does not reproduce the original; T11.24 corrects 
 - 2026-11-15 · Claude · Audit v3 on real disks (`PLAYABILITY_AUDIT.md` §6), ADR-009 proposed, Phase 11 planned. References cloned into `reference/` (`Jarskih/moonstone-ace-public`, `joetsoi/OpenMoonstone`). No source changes.
 - 2026-11-15 · Claude · User accepted ADR-009. T11.1 done (audit harness, 6 smoke tests pass on real disks).
 - 2026-11-15 · Claude · T11.2 done (spec §9, no code changes).
+- 2026-11-15 · Claude · T11.3 done (spec §10, no code changes); T11.7 and T11.11 wording adjusted to it.
