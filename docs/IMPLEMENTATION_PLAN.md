@@ -240,12 +240,14 @@ Rules for the whole phase:
 #### 11C: Overworld
 - **T11.12 Map movement and proximity (`sim/overworld.py` rewritten, `app/`):** pixel position,
   edge clipping, terrain slow-down, move budget, map sprites, proximity scan with highlight, node
-  menu, lair records and visibility. The node graph and `_CANONICAL_ROAD_SITES` are deleted.
+  menu, lair records and visibility, and the original random number generator (§11.2) in place
+  of the LCG in `sim/prng.py`. The node graph and `_CANONICAL_ROAD_SITES` are deleted.
   *Accept:* holding a direction moves the knight one pixel per unblocked frame; stepping away from
   the start does not start a fight; standing on a lair or place lists it in the node menu.
 - **T11.13 Turns, clock and dragon (`sim/turns.py`):** turn hand-over, day and moon advance, the
   "Next Day" screen from `ch.piv`, dragon flight and attack on the map, game over when no human
-  knight is left. *Accept:* a four-knight round visits each knight once per day; the moon frame
+  knight is left. *Accept:* a round visits each of the four knights once and ends with "Next Day"; the day
+  counter and the moon step every fourth round (§11.12); the moon frame
   follows the phase table.
 - **T11.14 Computer-controlled knights on the map (`sim/ai_map.py`):** roam target, walk line,
   shopping wish, opponent choice, item use. *Accept:* seeded multi-day run is deterministic and the

@@ -1158,3 +1158,509 @@ task that implements them (T11.9, T11.10a to T11.10i), before the code:
 | Computer knight | `$10` | Chooses between guarding and attacking by distance, last action and odds | T11.10i |
 | Dagger | `$34` | Runs its script along a trajectory until it leaves the screen or hits | T11.9 |
 | Idle object | `$28` | Clears its links and keeps its script | T11.8 |
+
+---
+
+## 11. Overworld and Turns (`T11.4`)
+
+The overworld is one screen: the map picture with small sprites on it. Knights take turns. The
+knight whose turn it is moves one pixel per frame under joystick (or computer) control until a
+**move budget** is used up; a **proximity scan** lists what the knight is standing next to, and
+the fire button acts on that list. There are no paths, no nodes to hop between and no random
+encounters: a fight starts only from the node menu, from a computer knight's arrival, or from
+the dragon's touch. `sim/` implements this section; `app/` draws it and feeds the input word.
+
+Sources: the reference project's map loop, proximity scan, turn scheduler, lunar clock, dragon
+flight and computer-knight rules. Numbers that the original holds as data or as immediates in
+`mog` are read from the user's `mog` (§11.16); they appear here only to pin the behaviour.
+Comparisons are signed 16-bit unless stated; arithmetic wraps at 16 bits.
+
+### 11.1 State
+
+Besides the records of §9, the map keeps these cells (all words unless noted). In `sim/` they
+are fields of one overworld state object.
+
+| Cell | Meaning |
+|---|---|
+| `turn` | Index 0..3 of the knight record whose turn it is. |
+| `current` | The record of that knight (also the active-fight block's `current`). |
+| `spent`, `budget` | Move budget accounting (§11.6). |
+| `move` | The move word of this frame, same bits as the actor's `input` (§9.2): 0 right, 1 left, 2 down, 3 up, 4 fire. |
+| `terrain_counter`, `blocked` | Terrain slow-down (§11.6). |
+| `travel`, `ambush`, `saved_x`, `saved_y` | Map modes (§11.9). |
+| `arrivals` | Up to 10 rows `{key, kind}` built by the scan (§11.7). |
+| `dragon_touch` | Up to four knights whose box touches the dragon. |
+| `dragon_active`, `dragon_timer`, `dragon_speed_x`, `dragon_speed_y` | Dragon flight (§11.10). |
+| `skipped` | Knights passed over in a row by the scheduler (§11.11). |
+| `day`, `moon_index` | Clock (§11.12); `moon_frame` and `moon_subcount` live in the active-fight block (§9.6). |
+| `region_code` | Region of the tile the current knight stands on (§11.5); the arena set-up reads it (§10.2). |
+| `bad_luck` | Set by a failed gamble item, cleared after a fight (§10.7). |
+| Computer-knight cells | Walk line, roam list and target, shop wish and town target (§11.13). |
+
+Three more groups of words are written at every turn set-up but nothing reads them: the
+quarter and three-quarter marks of the budget, and three latches. They are not modelled.
+
+### 11.2 Random numbers
+
+The current `sim/prng.py` is a linear congruential generator and is **not** the original's.
+Every rule that draws needs the original generator, because the order and number of draws are
+part of the behaviour:
+
+- **State:** one 32-bit word.
+- **Draw:** repeat eight times: let `t` be the state rotated right by 3 bits, XORed with the
+  state; shift the state right by one bit and put bit 1 of `t` into bit 31. The new state is
+  the result of the draw; callers mask the bits they want from the low end.
+- **Percent draw:** one draw, low 7 bits; a value of 100 or more has 27 subtracted. The range
+  is 0..100.
+- **Seed:** the original picks one of four 32-bit seeds stored in `mog` data by the low two
+  bits of the video beam position at start-up. Here the index 0..3 comes from the replay seed.
+
+T11.12 replaces the generator (it is the first rule task that draws on the map); the fight
+engine uses the same one.
+
+### 11.3 New game
+
+In this order (the draws are consecutive):
+
+1. Scheduler cells cleared: `skipped`, `bad_luck`, `spent`, `turn`, `day` are 0;
+   `moon_frame = 45`, `moon_subcount = 0`.
+2. All four knight records become **computer knights**: `kind = 4`, `type = $10`,
+   `input_port = 4`, one of four fixed names, and map positions (15, 100), (300, 100),
+   (160, 20), (160, 180) for records 0..3.
+3. The dragon (record 4) gets one life, its creature initialisation, `type = $14`, facing 1,
+   `kind = 5`, and its hoard: four item rolls and one gold roll (§12) into its inventory.
+4. The market stock is cleared and filled by six item rolls; the count of slot `$08` then gets
+   2 added (§12).
+5. The 24 lairs and their loot inventories are cleared; each lair's `loot` is linked and
+   `occupied` cleared.
+6. **Keys.** The lairs form four groups of six (records 0..5, 6..11, 12..17, 18..23). One index
+   0..5 is drawn (low 3 bits of a draw, redrawn while above 5). The lair at that index in group
+   0 gets key mask 8, in group 1 mask 4, in group 2 mask 2, in group 3 mask 1.
+7. **Loot.** For each lair in order: a percent draw is compared against a four-band table in
+   `mog` (`{limit, kind}` pairs; the first band whose limit is not below the roll). Kind 1 is
+   one gold roll, kind 2 three item rolls, kind 3 one gold roll and two item rolls (§12).
+8. **Lair definitions** from four parallel 24-entry tables in `mog`: a long whose high word is
+   `handler_offset` and whose low word is the initial `creatures_left`; the map position
+   (`x`, `y` words); `param14` (word); `param16` (long).
+
+Knight selection (§12 owns the screen) then gives the first `player_count` records a human
+`kind` 0..3. A human knight gets its name and starting position by kind: kind 0 at (10, 10),
+kind 1 at (300, 5), kind 2 at (26, 180), kind 3 at (300, 185). All four records then get their
+inventory, the record defaults of §9.2 and the knight fight tables, and `tile_x = map_x >> 3`,
+`tile_y = map_y >> 3`.
+
+The map scene set-up that follows frees all jobs, stops the map colour jobs, sets up the turn
+(§11.11), recalculates all four knights' derived values (§9.3) and clears the key state.
+
+### 11.4 The map screen and its frame
+
+One map frame lasts **2 VBLs** (a fight frame lasts 6, §10.7).
+
+**Screen entry** (at the start of the game and after every menu action, place, fight, status
+sheet or turn change):
+
+1. Clear the key state.
+2. Build the background: the map picture, then the lair markers (§11.15), then the other
+   knights. Copy it to both screens.
+3. Set up the turn (§11.11). This recomputes `budget` but leaves `spent` alone.
+4. Run the move step (§11.5) with whatever the `move` word still holds.
+5. Draw the current knight and run the map jobs (the dragon), flip.
+6. Start the map colours if they are not running: fade to the map palette, one colour ramp and
+   one colour cycle (§11.15). Then, if the dragon is not active, try to spawn it (§11.10).
+
+Quirk kept: step 4 uses the stale move word, so a direction held when fire opened the menu
+moves the knight one more pixel on re-entry.
+
+**Each frame**, in this order:
+
+1. Stamp the frame start.
+2. **Decide the move word.**
+   - Human knight: run the terrain test (§11.6); if not blocked, read the joystick, else the
+     word is 0.
+   - Computer knight (`kind == 4`): the decision chain of §11.13, the terrain test,
+     `spent += 1`, and if not blocked one step of the walk line.
+3. **Charge the step** (human only): outside travel and ambush mode, if the word has any of
+   the four direction bits, `spent += 1`. The charge is made before clipping, so pushing
+   against the map edge costs budget; a frame blocked by terrain costs nothing.
+4. **Keys.** For a human knight: space opens the status sheet (sheet 9, §12; the map colours
+   are stopped first and the screen is re-entered afterwards); `E` sets `spent = budget`, which
+   ends the turn. For any knight: `Q` leaves for the farewell screen and the title.
+5. **Fire.** If the word has the fire bit: in ambush mode the map modes are cleared first; then
+   the node menu runs (§11.8). A non-zero result re-enters the screen.
+6. **Dragon.** If the dragon attacks the current knight (§11.10), the map colours stop and the
+   dragon encounter runs.
+7. **Budget.** If `spent < budget`: run the move step, draw the current knight and the map
+   jobs, flip, restore the background on the hidden screen, wait for the frame time, next
+   frame. Otherwise run the turn scheduler (§11.11): it either re-enters the screen for the
+   next knight or ends the game.
+
+### 11.5 Move step, clipping, tile
+
+The move step does nothing to the position when the move word is zero. Otherwise:
+
+1. **Clip** the word against the position before the step: at `x <= 0` clear left, at
+   `x >= 310` clear right, at `y <= 0` clear up, at `y >= 190` clear down. The clipped word is
+   written back.
+2. **Step** one pixel per remaining direction bit: right `x + 1`, left `x - 1`, up `y - 1`,
+   down `y + 1`. Opposite bits cancel. A diagonal moves one pixel on both axes for one unit of
+   budget.
+
+Then, always: recompute the tile and run the proximity scan (§11.7).
+
+**Tile.** With `w`, `h` the size of frame 0 of the map sprite set (§11.15):
+`tile_x = (map_x + (w >> 1)) >> 3`, `tile_y = (map_y + h) >> 3` (unsigned shifts). The tile is
+the 8 x 8 cell under the middle of the sprite's bottom edge. The **tile index** is
+`tile_y * 40 + tile_x`, used as a signed word index into two byte tables of `mog` data, one byte
+per cell of the 40 x 25 grid:
+
+- the **terrain mask** table (§11.6);
+- the **region** table: the region code (0, 4, 8, `$C`; §10.2) of the cell. It is read into
+  `region_code` at every turn set-up, so a fight uses the region of the tile the knight stood
+  on when the turn was last set up (screen entry, or the prologue of a place visit).
+
+### 11.6 Terrain and the move budget
+
+**Terrain test** (once per frame, before the move word is decided): `blocked` is cleared. In
+travel or ambush mode nothing else happens. Otherwise the tile is recomputed and the mask byte
+of its cell is read; a mask of 0 leaves the knight free. For a non-zero mask,
+`terrain_counter += 1` and the frame is blocked when `terrain_counter & mask` (mask
+sign-extended to a word) is non-zero. A mask of 1 lets every second frame through, a mask of 3
+every fourth. The counter is never reset.
+
+**Budget.** `budget = derived_endurance << 4` (§9.3), set by the turn set-up. With the starting
+values that is 96 units. A human turn ends when `spent >= budget`; each walking frame costs one
+unit, standing still costs nothing, and a turn has no time limit. A computer knight pays one
+unit per frame whatever it does. Places, fights and items end a turn by setting
+`spent = budget` (§10.7, §12).
+
+Quirk kept: because every screen entry recomputes `budget`, a budget doubled or halved by an
+item (§9.4, slot `$0A`) lasts only until the next screen entry.
+
+### 11.7 Proximity scan
+
+Run after every move step for the current knight at `(cx, cy)`. It rebuilds the arrival list
+and draws a highlight sprite over everything it lists.
+
+**Box test.** Two boxes touch when their x intervals and their y intervals both pass this
+test: with A = `[a0, a1]` and B = `[b0, b1]`, they pass when `b0 < a1` and `b1 >= a0` (B
+starting exactly at A's far edge does not count, B ending exactly at A's near edge does). An
+interval runs from the position to the position plus the width (or height) of a frame of the
+map sprite set.
+
+**Order.** The first five rows of the list are cleared (rows beyond stay as they were; quirk
+kept), then rows are appended:
+
+1. **Places** (skipped in travel mode): each map node (§9.5) in table order. A = the node at
+   its position with the size of the frame whose number is the node id; B = the knight with
+   the size of frame 0. A home village (`$15`..`$18`) counts only for the knight of kind
+   0..3 respectively. A hit draws frame `id` at the node and appends
+   `{key = x << 16 | y, kind = id}`.
+2. **Other knights** (skipped in travel mode): records 0..3 except the current one, in
+   order. A = the current knight, B = the other, both with frame 0's size. A hit draws the
+   other knight's highlight (frame `kind + 5`, or frame `$2A` when it has no lives) and appends
+   `{record, 1}`, or `{record, $21}` when it has no lives.
+3. **Dragon touch** (skipped in travel mode): the touch list is cleared; if the dragon is
+   active, each of the four knights (the current one included) whose box touches the dragon's
+   is put on the touch list and highlighted. A = the dragon with frame `$14`'s size at its
+   `x - 10`, `y`; B = the knight with frame 0's size. The dragon keeps its map position in the
+   fight fields `x` and `y` (§9.2), not in `map_x` / `map_y`.
+4. **Lairs** (also in travel mode): each of the 24 lairs with `map_x >= 0`. A = the lair with
+   frame 31's size, B = the knight. A hit draws frame 31 at the lair and appends `{lair, 2}`.
+
+A row whose key is zero ends the list.
+
+### 11.8 Node menu and dispatch
+
+Fire on the map runs the menu routine on the arrival list:
+
+- **No row:** nothing happens, result 0.
+- **One row:** it is dispatched at once.
+- **Travel mode:** the first row of kind 2 (a lair) is dispatched; if there is none, result 0.
+  (The search tests the kind before the end marker, so a stale kind 2 in the terminating row
+  counts; quirk kept.)
+- **Otherwise the menu:** the key state is cleared and a panel is drawn at (50, 100): frame
+  `$20` of the map sprite set as the panel, the knight's own frame (`kind`) at (55, 105), the
+  headline (the knight's name followed by the " may ..." string) at (65, 105), then one line
+  per row starting at y = 115 and 6 pixels apart at x = 55: the digit `1`, `2`, ..., a space,
+  and the row text. The text is the lair string for kind 2, the battle string plus the other
+  knight's name for kind 1, and for a place the entry `kind - $15` of a 14-entry string table.
+  All strings come from `mog` (§11.16). The menu then waits for a key `1`..`9` whose row
+  exists; other keys are ignored. There is no way to leave the menu without choosing.
+
+**Dispatch by the row's kind:**
+
+| Kind | Action |
+|---|---|
+| 1 or `$21` | Knight meets knight (§10.1, §12) with the current knight and the row's record. |
+| 2 | Lair entry with the row's lair (below). |
+| anything else | Place visit with the kind as the place id (§12). |
+
+The action's result goes back to the frame; non-zero re-enters the map screen.
+
+**Lair entry.** Without travel mode: the creature fight for the lair's `handler_offset`
+(§10.3). A lost fight shows the temple sheet and returns. A won fight gives `progress + 1` and
+shows the loot sheet (sheet 2, §12). In travel mode there is no fight: the loot sheet opens
+directly. After the loot sheet the lair is tidied (§11.9) and, in travel mode, the knight is
+put back on the saved position and the modes are cleared.
+
+### 11.9 Lair visibility and map modes
+
+**Visibility.** A lair is on the map while its `map_x` is not negative. After a lair's loot
+sheet (not in travel mode) the lair is hidden, both coordinates set to -1, when its `occupied`
+word is zero and all 24 bytes of its loot inventory are zero. A lair that still holds loot
+stays visible and can be entered again; `creatures_left` (§10.7) says how many creatures the
+next fight has. Hidden lairs are skipped by drawing and by the scan; the computer knights'
+roam list gives them the largest distance (§11.13).
+
+**Modes.** Two flags change how the current knight moves. Both are cleared at every turn end.
+
+| Mode | Set by | Effect |
+|---|---|---|
+| **Travel** | The position-mark item (§9.4 slot `$02`): flag set, position saved | Terrain never blocks, walking costs no budget, the scan lists only lairs, fire enters the first listed lair without a fight, and afterwards the knight is back on the saved position. Drawn with frame `kind + 10`. |
+| **Ambush** | A good roll of the teleport item (slot `$0C`): flag set, position saved | Terrain never blocks and walking costs no budget. Fire clears the modes before the menu runs, so the knight walks anywhere for free and then acts normally from there. Drawn with frame `kind + 15`. |
+
+A bad roll of the teleport item instead moves the knight to a random spot:
+`map_x = (draw & $FF) + 32`, `map_y = (draw & $7F) + 36`, x drawn first.
+
+### 11.10 The dragon
+
+**Spawn.** Tried at every map screen entry while `dragon_active` is 0. It happens when
+`day >= 2` and the dragon's `lives` byte is not negative (a slain dragon has `lives = $FF`).
+On spawn: all jobs are freed; the dragon record gets `x = 10`, `height = 0`, `y = 100`,
+facing 3, `type = $28`, `anim_phase = 0`; its frame list is the map sprite set in all five
+slots; a job starts with the first of the 16 flight scripts; `dragon_speed_x = 2`,
+`dragon_timer = 100`, `dragon_active = 1`. Then a target is drawn: the low 2 bits of a draw
+pick a record 0..3, redrawn until that knight has lives (the original loops for ever with
+nobody alive; here the loop is bounded and no target is set). The target goes into the
+dragon's `engaged_with`. `dragon_speed_y` is 1.
+
+**Flight** (the type `$28` handler, once per map frame while the map jobs run):
+
+1. `dragon_timer -= 1`; below zero it restarts at 100.
+2. While the timer is 60 or less the dragon **hovers**: `x += dragon_speed_x`, the hover
+   script plays, nothing else changes (no edge test).
+3. Otherwise it **flies**: `x += dragon_speed_x`. If the target's `map_y` differs from the
+   dragon's `y`, `y` moves by `dragon_speed_y` towards it. If `x > 350`: `x = 345`, bit 1 of
+   `facing` flips, the x speed negates. If `x <= -20`: `x = -10`, flip, negate. `y > 200`
+   becomes 0, `y < 0` becomes 200. `anim_phase` advances modulo 16 and selects the flight
+   script.
+
+With no target the target `map_y` reads as 0.
+
+**Attack.** Tested every frame (§11.4 step 6): the dragon's `lives` is not negative, it is
+active, its `engaged_with` is the current knight, and the current knight is on the touch list.
+Then the dragon encounter runs:
+
+- a computer knight loses one life and loses the encounter at once;
+- a knight that is frogged or has no lives loses at once;
+- otherwise the dragon fight (§10.1) decides.
+
+A lost encounter transfers loot to the dragon (§9.4 transfer order). A won fight marks the
+dragon slain (`lives = $FF`), gives the progress award and shows the hoard sheet (§12). Either
+way `spent = budget`.
+
+`dragon_active` is cleared by the arena reset that precedes every fight and by the prologue of
+every place visit (§12). The next screen entry then spawns the dragon again at its start
+position with a newly drawn target.
+
+### 11.11 Turn scheduler
+
+**Turn set-up** (every screen entry, every place visit, and inside the scheduler) for record
+`turn`: `input_port = 2`; `type = $0C` unless `kind == 4`; `budget = derived_endurance << 4`;
+`current` and the active-fight block's `current` take the record; the encounter kind is
+cleared; the tile is recomputed and `region_code` read (§11.5).
+
+**Turn change** (when `spent >= budget`): `skipped = 0`, then repeat this pass until it says
+play or game over:
+
+1. Clear the map modes (§11.9).
+2. `turn = (turn + 1) & 3`, `spent = 0`.
+3. If `turn` wrapped to 0, a **round** is over: run the clock (§11.12), then show the
+   "Next Day" screen.
+4. Turn set-up for the new record. Its `engaged_with` is cleared, and the computer-knight
+   cells for the town target, the walk line and the roam list are reset.
+5. Decide:
+   - `frog_days > 0` (signed byte): the knight is passed over; next pass.
+   - `lives > 0` (signed byte): **play**; the map screen is entered for this knight.
+   - `kind == 4`: a dead computer knight is passed over; next pass.
+   - otherwise (a human knight out of lives): `skipped += 1`; if `skipped == player_count`
+     the game is **over** (farewell screen, then the title), else next pass.
+
+A frogged knight does not count towards `skipped`. With every human frogged and no computer
+knight able to play, the passes run through rounds (each with its "Next Day" screen) until a
+curse runs out.
+
+### 11.12 Clock, moon and the "Next Day" screen
+
+The clock runs once per round (four turns), in this order:
+
+1. `moon_subcount += 1`. If it is now above 3: `moon_subcount = 0`, `day += 1`,
+   `moon_index = (moon_index + 1) & 7`, the **day turnover** runs, and `moon_frame` takes the
+   entry `moon_index` of the 8-byte moon table (§9.6).
+2. The **overnight** rule of §9.3 runs for all five records (curse and recency decay, then
+   regeneration).
+
+So the "Next Day" screen appears after every round and knights heal every round, while the
+counter called `day` here (the one the dragon's spawn tests) and the moon step once per four
+rounds. `moon_index` starts at 0 and `moon_frame` at 45; the cycle of eight moon steps takes
+32 rounds, and the dragon first appears after 8 rounds.
+
+**Day turnover**, for records 0..3 in order:
+
+- A computer knight (`kind == 4`): `recency = $FF`; if it has lives, a negative `gold` is
+  reset to 0 and it receives the wizard's gift roll (§12) as if it had visited him. Because its
+  `recency` is `$FF`, the curse outcome is rerolled, so the gift is always an item, a stat
+  point or gold.
+- Any knight whose `life_loss` is non-zero loses one life.
+
+**"Next Day" screen:** the map colours are stopped (fade out); the `ch.piv` picture is shown
+with the "Next Day" text from `mog` and the moon as frame `moon_frame` of `ki.cel` at
+(119, 12), under the map palette; the game waits for a fire press and release; the palette
+goes to black.
+
+### 11.13 Computer-controlled knights
+
+A knight of `kind == 4` runs this chain every frame of its turn, in this order. Every draw
+named here happens whether or not its result is used.
+
+1. **Roam list** (once per turn): for each of the 24 lairs, the Manhattan distance from the
+   knight (`|dx| + |dy|` on map positions, 16-bit), or `$FFFF` for a hidden lair. The list is
+   sorted by a bubble sort of 23 passes (pass *k* compares rows 0..22-*k* with their
+   successor) in which a row stays only if it is strictly smaller (unsigned) than the next
+   and its top bit is clear; equal rows swap.
+2. **Roam target** (every frame): the low 2 bits of a draw, redrawn while zero, pick row 1, 2
+   or 3 of the list (the second to fourth nearest). That lair is the roam target; a flag
+   records whether it is hidden.
+3. **Stat purchase:** with at least 3 `progress` points the knight buys one point of a picked
+   stat (the stat pick and its draws are specified in §12).
+4. **Rest item:** if `lives <= 3`, or `hp` is below a quarter of `hp_max`, and the knight owns
+   a piece of slot `$00`: one is used and its rest effect applies (§9.4).
+5. **Opponent:** the other three knights are sorted by Manhattan distance, nearest first
+   (stable). If the knight has no `engaged_with` yet, they are tried in that order, followed
+   by one empty fourth entry (quirk kept: it costs one more draw and engages nobody). A
+   candidate that is itself a computer knight is skipped without a draw. If the roam target
+   is hidden the first candidate is engaged at once; otherwise one draw decides: low 7 bits
+   of 25 or less engage, anything else moves on. Computer knights never pick each other;
+   knights out of lives are not excluded.
+6. **Scroll:** with an opponent engaged and a count in the inventory byte at offset 14 (slot
+   `$0E`), one piece is used, the good jingle plays and the meeting is settled without a
+   fight, the opponent as the loser (§9.4 transfer order).
+7. **Speed item:** with a count in slot `$0A`, an opponent engaged, and that opponent at a
+   Manhattan distance of at least `derived_endurance << 4`: the jingle plays, one piece is
+   used and `budget` doubles.
+8. **Shop wish** (the town target is cleared first). No wish with `gold <= 10`. Otherwise the
+   first of these that applies:
+   - a life (cost 25) when `gold > 25` and `lives <= 2`;
+   - armour, best first, at the smith's prices (battle 75, plate 50, mail 30): the first one
+     the gold pays for decides. It is wanted if the worn armour is worse (battle: if the worn
+     one is not exactly battle armour); if it is not wanted, the armour step ends without a
+     wish;
+   - a sword. With gold for the claymore (25): a knight that wears the claymore goes on to
+     the daggers; any other gets cost, kind and item set to the claymore, but the step does
+     not end there (quirk kept). Then, with gold for the broad sword (10) and a sword below
+     the broad sword, the cost becomes 10 and the wish stands, the item still naming the
+     claymore when the first half ran. So a knight with the starting sword and 25 or more
+     gold gets the claymore for 10, and a knight with the broad sword never gets one;
+   - daggers (cost 2) when it carries 5 or fewer.
+
+   When a wish stands, the **town target** is chosen: from the knight's tile, the Manhattan
+   distances to tiles (12, 7) and (37, 20); the second town if strictly nearer, with walk
+   target (297, 157), else the first with (94, 47).
+9. **Arrival**, tested against the arrival list of the last scan (at most its first seven
+   rows):
+   - With a town target: when a row of kind `$19` or `$1A` is listed, the turn ends
+     (`spent = budget`), the purchase is made and the target cleared. Nothing else is tested
+     while a town target is set.
+   - Else with an opponent engaged: if it is not listed, nothing more happens this frame. If
+     it is listed, the knights meet (§10.1) and the turn ends.
+   - Then (also with no opponent): if the roam target lair is listed, the turn ends. The
+     computer knight does not enter the lair.
+10. Terrain test (§11.6), `spent += 1`, and if not blocked one step of the **walk line**.
+
+Steps 5 to 8 are skipped while a gate word is set; in the original nothing sets it, so they
+always run.
+
+**Walk line.** Set up on the first walk step of a turn towards, in this priority: the engaged
+opponent's map position, the town target, the roam target lair's position. With `dx`, `dy` the
+differences target minus knight: the x bit is right for `dx >= 0`, else left; the y bit is
+down for `dy >= 0`, else up; the major axis is y when `|dy| > |dx|`, else x; the error starts
+at the major length. Each step moves along the major axis and subtracts the minor length from
+the error; when the error goes negative the major length is added back and the step also
+moves along the minor axis. The line is not recomputed during the turn, even if the target
+moves or changes, and the walker does not stop at the target: it keeps stepping until the
+budget runs out, an arrival ends the turn, or the map edge clips it. Standing exactly on the
+target it keeps stepping along x.
+
+**Purchase** (on arrival in town): `gold -= cost`, then by kind: a sword or an armour replaces
+the worn one (armour also recalculates `hp_max` and derived endurance); a life sets
+`hp = hp_max` and `lives += 1`; daggers run the loop below.
+
+Dagger loop (quirks kept): add one dagger; stop if `gold < 2`; stop if the 16-bit word made of
+the `daggers` byte and the `type` byte equals 10 (in practice never); else subtract 2 from the
+**high byte** of `gold` (512 gold) and repeat. The loop ends once the gold word is negative,
+usually after two daggers; the day turnover later resets negative gold to 0.
+
+A human knight's turn has none of this: the joystick word is the only input.
+
+### 11.14 Order of draws on the map
+
+For a deterministic replay the draws must happen in exactly this order. Per frame of a
+computer knight's turn: the roam target (one or more draws), the stat purchase (only when it
+has the points), the opponent draws (zero to four), then whatever the arrival triggers (a
+meeting draws, a purchase does not). Per screen entry: the dragon's target draws, only when it
+spawns. Per round: the wizard's gift rolls of the day turnover, only on a day change, for
+records 0..3 in order. A human knight's frame draws nothing by itself.
+
+### 11.15 Drawing
+
+- **Picture:** the map is picture 8 of `test` (§3.1), shown with its own palette.
+- **Sprites:** all map sprites are frames of `mi.c` (§3.2), drawn top-left at the given map
+  position. The node panel text uses the small font.
+- **Background layer** (rebuilt at screen entry): a marker, frame `$14`, at every visible
+  lair; then every knight except the current one at its map position: frame `kind` (0..4),
+  frame `kind + $2B` when frogged and alive, frame `$21` when out of lives.
+- **Per frame:** the current knight with frame `kind + 5`, plus 5 in travel mode, plus 10 in
+  ambush mode; the highlights the scan drew (§11.7); the dragon through its job's script.
+- **Colour jobs:** a ramp with parameters (`$1F`, `$FF`, step 1) and a cycle over entries
+  `$15..$17` (step 1, period `$18`). They run while the map is shown and are freed, with a
+  fade out, before any other screen. T11.12 specifies the ramp from the palette-job routine
+  (§8.2) before using it.
+
+Frame numbers used: 0..4 knights, 5..9 current or highlighted knight, 10..14 travel, 15..19
+ambush, `$14` (20) lair marker and dragon box, `$15`..`$1E` place highlights, 31 lair
+highlight, `$20` menu panel, `$21` dead knight, `$2A` dead knight highlighted, `$2B`..`$2F`
+frogged knights. Frame `$14` falls in the ambush range for kind 4; a computer knight never
+enters ambush mode, so the two uses do not meet. T11.12 checks every frame number against the
+real `mi.c` on a contact sheet.
+
+### 11.16 Reading the map data from `mog`
+
+Read as data by offset (found through the relocations of the code that loads them, §10.15):
+the map node table, the terrain mask and region tables (1000 bytes each), the four lair
+definition tables, the lair loot odds table, the moon table, the PRNG seed table, the 16
+dragon flight scripts and the hover script, the menu strings and the 14 place names, the
+"Next Day" text, the computer knights' names.
+
+Read as code operands with the instruction word checked (§10.15): the knights' starting
+positions, the smith prices the computer knight shops with, the town tiles and walk targets,
+the stat price, the dragon's spawn day.
+
+Rule constants that describe the screen or an algorithm stay in code: the clip limits, the
+frame time, the menu layout, the masks and thresholds of the draws.
+
+### 11.17 Notes and conflicts
+
+- The reference project's summary comment for the map loop names Esc as the end-turn key; its
+  code compares the translated key with the character codes of `E`, `Q` and space, and the
+  menu compares with digit characters, so the translation yields characters. This section
+  follows the code. T11.12 confirms it from the key translation table in `mog`.
+- §9.4 names slot `$12` as the scroll that avoids a duel (from the duel prologue) and slot
+  `$0E` as the item that opens the exchange sheet. The computer knight's scroll rule reads
+  the inventory byte at offset 14, which is slot `$0E`. Both are kept as the sources state
+  them; T11.5 settles the item names from the `mog` strings and T11.14 implements the offset
+  the rule reads.
+- A lock cell is tested in the frame's charge step and cleared after the valley fight; nothing
+  sets it. It is not modelled.
+- The plan's acceptance line for T11.13 ("a four-knight round visits each knight once per
+  day") is read as: each knight plays once per **round**, the "Next Day" screen follows every
+  round, and the day counter and the moon step every fourth round.
