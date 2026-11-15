@@ -8,6 +8,7 @@ from pymoonstone.sim.overworld import (
     ALL_MOONSTONES_MASK,
     DAYS_PER_LUNAR_CYCLE,
     EncounterBand,
+    MapSiteInput,
     MoonPhase,
     NodeKind,
     OverworldGraph,
@@ -15,6 +16,7 @@ from pymoonstone.sim.overworld import (
     RegionId,
     TriggerKind,
     build_default_overworld_graph,
+    build_overworld_graph_from_sites,
     can_enter_lair,
     collect_moonstone,
     create_campaign,
@@ -229,3 +231,127 @@ def test_stonehenge_ritual_and_victory_condition() -> None:
     assert legal_moves(state) == ()
     with pytest.raises(ValueError, match="victory"):
         move_knight(state, 1)
+
+
+@pytest.mark.sim
+def test_build_overworld_graph_from_sites_and_lairs() -> None:
+    sites = (
+        MapSiteInput(site_id=10, x=160, y=100),  # center -> Stonehenge
+        MapSiteInput(site_id=11, x=115, y=90, kind=NodeKind.HIGHWOOD),
+        MapSiteInput(site_id=12, x=205, y=110, kind=NodeKind.WATERDEEP),
+        MapSiteInput(site_id=13, x=55, y=45),  # Forest
+        MapSiteInput(site_id=14, x=265, y=45),  # Glen
+        MapSiteInput(site_id=15, x=55, y=165),  # Swamp
+        MapSiteInput(site_id=16, x=265, y=165),  # Wasteland
+    )
+    lairs = (
+        (0, 25, 20),
+        (1, 295, 20),
+        (2, 25, 185),
+        (3, 295, 185),
+    )
+    bands = (EncounterBand(limit=30, kind=1), EncounterBand(limit=70, kind=2))
+    graph = build_overworld_graph_from_sites(
+        sites,
+        lairs=lairs,
+        dragon_route=(13, 14, 16, 15),
+        encounter_bands=bands,
+    )
+
+    assert graph.stonehenge_node_id == 10
+    assert graph.node(10).kind == NodeKind.STONEHENGE
+    assert graph.node(10).region_id == RegionId.VALLEY
+    assert graph.node(11).kind == NodeKind.HIGHWOOD
+    assert graph.node(12).kind == NodeKind.WATERDEEP
+    assert graph.node(13).region_id == RegionId.FOREST
+    assert graph.node(14).region_id == RegionId.GLEN
+    assert graph.node(15).region_id == RegionId.SWAMP
+    assert graph.node(16).region_id == RegionId.WASTELAND
+    assert graph.dragon_patrol_route == (13, 14, 16, 15)
+    assert graph.encounter_bands == bands
+    assert set(graph.start_nodes) == {
+        KnightId.RED,
+        KnightId.BLUE,
+        KnightId.GREEN,
+        KnightId.YELLOW,
+    }
+
+    lair_nodes = [n for n in graph.nodes.values() if n.kind == NodeKind.LAIR]
+    assert len(lair_nodes) == 4
+    assert {n.lair_index for n in lair_nodes} == {0, 1, 2, 3}
+
+    # Graph is symmetric and fully connected from Stonehenge
+    visited: set[int] = set()
+    queue = [graph.stonehenge_node_id]
+    while queue:
+        cur = queue.pop()
+        if cur in visited:
+            continue
+        visited.add(cur)
+        for nbr in graph.neighbors(cur):
+            assert cur in graph.neighbors(nbr)
+            if nbr not in visited:
+                queue.append(nbr)
+    assert visited == set(graph.nodes)
+
+
+@pytest.mark.sim
+def test_build_overworld_graph_from_sites_explicit_and_errors() -> None:
+    with pytest.raises(ValueError, match="empty"):
+        build_overworld_graph_from_sites(())
+
+    with pytest.raises(ValueError, match="Duplicate"):
+        build_overworld_graph_from_sites((MapSiteInput(1, 10, 10), MapSiteInput(1, 20, 20)))
+
+    with pytest.raises(ValueError, match="lair_index"):
+        build_overworld_graph_from_sites((MapSiteInput(1, 160, 100),), lairs=((4, 10, 10),))
+
+    with pytest.raises(ValueError, match="Dragon route"):
+        build_overworld_graph_from_sites((MapSiteInput(1, 160, 100),), dragon_route=(99,))
+
+    with pytest.raises(ValueError, match="Neighbor"):
+        build_overworld_graph_from_sites((MapSiteInput(1, 160, 100, neighbors=(99,)),))
+
+    # Single-site graph is valid
+    single = build_overworld_graph_from_sites((MapSiteInput(5, 160, 100),))
+    assert single.stonehenge_node_id == 5
+    assert single.neighbors(5) == ()
+
+    # Explicit neighbors and explicit Stonehenge override center heuristic
+    explicit = build_overworld_graph_from_sites(
+        (
+            MapSiteInput(1, 160, 100, neighbors=(2,)),
+            MapSiteInput(2, 50, 50, kind=NodeKind.STONEHENGE, region_id=RegionId.FOREST),
+        ),
+        lairs=((0, 25, 25),),
+    )
+    assert explicit.stonehenge_node_id == 2
+    assert explicit.node(2).region_id == RegionId.FOREST
+    assert 2 in explicit.neighbors(1)
+    assert 1 in explicit.neighbors(2)
+
+
+@pytest.mark.sim
+def test_create_campaign_with_prebuilt_site_graph() -> None:
+    sites = (
+        MapSiteInput(site_id=0, x=160, y=100),
+        MapSiteInput(site_id=1, x=60, y=50),
+        MapSiteInput(site_id=2, x=260, y=50),
+        MapSiteInput(site_id=3, x=60, y=160),
+        MapSiteInput(site_id=4, x=260, y=160),
+    )
+    graph = build_overworld_graph_from_sites(
+        sites,
+        lairs=((0, 25, 20),),
+        dragon_route=(2, 4, 3, 1),
+    )
+    state = create_campaign((KnightId.RED, KnightId.BLUE), graph=graph, seed=123)
+    assert state.graph is graph
+    assert state.knights[KnightId.RED].node_id == 1
+    assert state.knights[KnightId.BLUE].node_id == 2
+    assert state.dragon.node_id == 2
+
+    dest = legal_moves(state)[0]
+    res = move_knight(state, dest)
+    assert res.to_node_id == dest
+    assert state.current_knight_id == KnightId.BLUE

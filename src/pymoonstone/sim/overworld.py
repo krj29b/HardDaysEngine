@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import IntEnum
+from typing import TYPE_CHECKING
 
 from pymoonstone.sim.prng import DEFAULT_SEED, SimPrng
 from pymoonstone.sim.types import KnightId
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 DAYS_PER_LUNAR_CYCLE: int = 28
 MOONSTONE_COUNT: int = 4
@@ -85,6 +89,18 @@ class EncounterBand:
 
     limit: int
     kind: int
+
+
+@dataclass(slots=True, frozen=True)
+class MapSiteInput:
+    """Pure-integer map site input matching ``MapSiteRecord`` coordinates (320x200)."""
+
+    site_id: int
+    x: int
+    y: int
+    kind: NodeKind | None = None
+    region_id: int | None = None
+    neighbors: tuple[int, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -344,6 +360,223 @@ def build_default_overworld_graph() -> OverworldGraph:
         start_nodes=start_nodes,
         dragon_patrol_route=patrol_route,
         encounter_bands=bands,
+    )
+
+
+_QUADRANT_TARGETS: tuple[tuple[KnightId, int, int], ...] = (
+    (KnightId.RED, 60, 50),
+    (KnightId.BLUE, 260, 50),
+    (KnightId.GREEN, 60, 160),
+    (KnightId.YELLOW, 260, 160),
+)
+
+
+def _dist2(ax: int, ay: int, bx: int, by: int) -> int:
+    dx = ax - bx
+    dy = ay - by
+    return dx * dx + dy * dy
+
+
+def _region_for_coords(x: int, y: int) -> RegionId:
+    if 100 <= x <= 220 and 70 <= y <= 130:
+        return RegionId.VALLEY
+    if x < 160:
+        return RegionId.FOREST if y < 100 else RegionId.SWAMP
+    return RegionId.GLEN if y < 100 else RegionId.WASTELAND
+
+
+def _infer_stonehenge_id(sites: Sequence[MapSiteInput]) -> int:
+    for site in sites:
+        if site.kind == NodeKind.STONEHENGE:
+            return site.site_id
+    center = min(sites, key=lambda s: (_dist2(s.x, s.y, 160, 100), s.site_id))
+    return center.site_id
+
+
+def _infer_start_nodes(
+    nodes: dict[int, OverworldNode],
+    stonehenge_id: int,
+) -> dict[KnightId, int]:
+    candidates = [
+        n for n in nodes.values() if n.node_id != stonehenge_id and n.kind != NodeKind.LAIR
+    ]
+    if not candidates:
+        candidates = [nodes[stonehenge_id]]
+    starts: dict[KnightId, int] = {}
+    for kid, tx, ty in _QUADRANT_TARGETS:
+        best = min(candidates, key=lambda n: (_dist2(n.x, n.y, tx, ty), n.node_id))
+        starts[kid] = best.node_id
+    return starts
+
+
+def _connect_mst(
+    node_ids: list[int],
+    coords: dict[int, tuple[int, int]],
+    adj: dict[int, set[int]],
+) -> None:
+    if len(node_ids) < 2:
+        return
+    visited = {node_ids[0]}
+    unvisited = set(node_ids[1:])
+    while unvisited:
+        best_key: tuple[int, int, int] | None = None
+        best_pair = (node_ids[0], node_ids[0])
+        for u in visited:
+            ux, uy = coords[u]
+            for v in unvisited:
+                vx, vy = coords[v]
+                key = (_dist2(ux, uy, vx, vy), u, v)
+                if best_key is None or key < best_key:
+                    best_key = key
+                    best_pair = (u, v)
+        u, v = best_pair
+        adj[u].add(v)
+        adj[v].add(u)
+        visited.add(v)
+        unvisited.remove(v)
+
+
+def _connect_nearest_sites(
+    site_ids: list[int],
+    coords: dict[int, tuple[int, int]],
+    adj: dict[int, set[int]],
+    degree_target: int = 2,
+) -> None:
+    for u in site_ids:
+        ux, uy = coords[u]
+        candidates = sorted(
+            (v for v in site_ids if v != u),
+            key=lambda v: (_dist2(ux, uy, coords[v][0], coords[v][1]), v),
+        )
+        for v in candidates[:degree_target]:
+            adj[u].add(v)
+            adj[v].add(u)
+
+
+def _apply_explicit_neighbors(
+    explicit_neighbors: dict[int, tuple[int, ...]],
+    coords: dict[int, tuple[int, int]],
+    adj: dict[int, set[int]],
+) -> None:
+    for u, nbrs in explicit_neighbors.items():
+        for v in nbrs:
+            if v not in coords:
+                msg = f"Neighbor {v} of site {u} not found in graph"
+                raise ValueError(msg)
+            if v != u:
+                adj[u].add(v)
+                adj[v].add(u)
+
+
+def _connect_isolated_lairs(
+    lair_ids: list[int],
+    site_ids: list[int],
+    coords: dict[int, tuple[int, int]],
+    adj: dict[int, set[int]],
+) -> None:
+    for lid in lair_ids:
+        if adj[lid]:
+            continue
+        lx, ly = coords[lid]
+        nearest = min(
+            site_ids, key=lambda sid: (_dist2(lx, ly, coords[sid][0], coords[sid][1]), sid)
+        )
+        adj[lid].add(nearest)
+        adj[nearest].add(lid)
+
+
+def _build_site_and_lair_nodes(
+    sites: Sequence[MapSiteInput],
+    lair_entries: dict[int, tuple[int, int, int]],
+    adj: dict[int, set[int]],
+    stonehenge_id: int,
+) -> dict[int, OverworldNode]:
+    nodes: dict[int, OverworldNode] = {}
+    for site in sites:
+        kind = (
+            site.kind
+            if site.kind is not None
+            else (NodeKind.STONEHENGE if site.site_id == stonehenge_id else NodeKind.WILDERNESS)
+        )
+        region_id = (
+            site.region_id if site.region_id is not None else _region_for_coords(site.x, site.y)
+        )
+        nodes[site.site_id] = OverworldNode(
+            node_id=site.site_id,
+            region_id=region_id,
+            kind=kind,
+            x=site.x,
+            y=site.y,
+            neighbors=tuple(sorted(adj[site.site_id])),
+        )
+    for lid, (lair_index, lx, ly) in lair_entries.items():
+        nodes[lid] = OverworldNode(
+            node_id=lid,
+            region_id=_region_for_coords(lx, ly),
+            kind=NodeKind.LAIR,
+            x=lx,
+            y=ly,
+            neighbors=tuple(sorted(adj[lid])),
+            lair_index=lair_index,
+        )
+    return nodes
+
+
+def build_overworld_graph_from_sites(
+    sites: Sequence[MapSiteInput],
+    *,
+    lairs: Sequence[tuple[int, int, int]] = (),
+    dragon_route: Sequence[int] = (),
+    encounter_bands: Sequence[EncounterBand] = (),
+) -> OverworldGraph:
+    """Build an ``OverworldGraph`` from 320x200 ``MapSiteInput`` entries (ARCHITECTURE.md §5)."""
+    if not sites:
+        msg = "sites must not be empty"
+        raise ValueError(msg)
+
+    coords: dict[int, tuple[int, int]] = {}
+    explicit_neighbors: dict[int, tuple[int, ...]] = {}
+    site_ids: list[int] = []
+    for site in sites:
+        if site.site_id in coords:
+            msg = f"Duplicate site_id {site.site_id}"
+            raise ValueError(msg)
+        coords[site.site_id] = (site.x, site.y)
+        site_ids.append(site.site_id)
+        if site.neighbors:
+            explicit_neighbors[site.site_id] = site.neighbors
+
+    next_id = max(site_ids) + 1
+    lair_entries: dict[int, tuple[int, int, int]] = {}
+    for lair_index, lx, ly in lairs:
+        _validate_lair_index(lair_index)
+        lair_entries[next_id] = (lair_index, lx, ly)
+        coords[next_id] = (lx, ly)
+        next_id += 1
+
+    all_ids = [*site_ids, *lair_entries]
+    adj: dict[int, set[int]] = {nid: set() for nid in all_ids}
+    if explicit_neighbors:
+        _apply_explicit_neighbors(explicit_neighbors, coords, adj)
+        _connect_isolated_lairs(list(lair_entries), site_ids, coords, adj)
+    else:
+        _connect_mst(all_ids, coords, adj)
+        _connect_nearest_sites(site_ids, coords, adj)
+
+    stonehenge_id = _infer_stonehenge_id(sites)
+    nodes = _build_site_and_lair_nodes(sites, lair_entries, adj, stonehenge_id)
+
+    for nid in dragon_route:
+        if nid not in nodes:
+            msg = f"Dragon route node {nid} not in graph"
+            raise ValueError(msg)
+
+    return OverworldGraph(
+        nodes=nodes,
+        stonehenge_node_id=stonehenge_id,
+        start_nodes=_infer_start_nodes(nodes, stonehenge_id),
+        dragon_patrol_route=tuple(dragon_route),
+        encounter_bands=tuple(encounter_bands),
     )
 
 
