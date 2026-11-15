@@ -695,9 +695,9 @@ class GameSession:
         )
         font.draw_text(
             scene_renderer.canvas,
-            f"NODE:{ow_k.node_id} -> {target}",
+            f"NODE:{ow_k.node_id}->{target}",
             104,
-            236,
+            246,
             color_index=31,
         )
 
@@ -748,35 +748,76 @@ class GameSession:
         scene_renderer.set_palette(default_combat_palette())
         scene_renderer.compose_scene(background=bg, sprites=sprites, border_index=0)
 
+    def _append_target_marker(
+        self,
+        sprites: list[SceneSprite],
+        mi_cel: object,
+        active_kid: KnightId,
+        color_slot: dict[KnightId, int],
+    ) -> None:
+        from pymoonstone.assets.cel import DecodedCel
+
+        if not isinstance(mi_cel, DecodedCel):
+            return
+        moves = legal_moves(self.overworld, active_kid)
+        if not moves:
+            return
+        target_id = moves[self.selected_move_index % len(moves)]
+        tnode = self.overworld.graph.nodes.get(target_id)
+        if tnode is None:
+            return
+        flag_idx = 15 + color_slot.get(active_kid, 0)
+        fsp = make_sprite(mi_cel, flag_idx, x=tnode.x - 5, y=tnode.y - 4, layer=3, order=50)
+        if fsp is not None:
+            sprites.append(fsp)
+
     def _overworld_sprites(self) -> list[SceneSprite]:
         if self.asset_bundle is None:
             return []
         sprites: list[SceneSprite] = []
-        marker_cel = self.asset_bundle.get_cel("ov1.cel", "KN1.ob")
-        if marker_cel is not None:
+        color_slot = {
+            KnightId.BLUE: 0,
+            KnightId.YELLOW: 1,
+            KnightId.GREEN: 2,
+            KnightId.RED: 3,
+        }
+        mi_cel = self.asset_bundle.get_cel("mi.c")
+        if mi_cel is not None:
+            active_kid = self.overworld.current_knight_id
             for idx, kid in enumerate(self.overworld.turn_order):
                 ow_k = self.overworld.knights[kid]
                 if not ow_k.alive:
                     continue
                 node = self.overworld.graph.nodes.get(ow_k.node_id)
-                px = node.x if node is not None else 40 + idx * 32
-                py = node.y if node is not None else 90
-                sp = make_sprite(marker_cel, idx, x=px, y=py, layer=2, order=idx)
+                px = (node.x - 5) if node is not None else 40 + idx * 32
+                py = (node.y - 4) if node is not None else 90
+                c_idx = color_slot.get(kid, idx & 3)
+                frame_idx = c_idx + (5 if kid == active_kid else 0)
+                sp = make_sprite(mi_cel, frame_idx, x=px, y=py, layer=2, order=idx)
                 if sp is not None:
                     sprites.append(sp)
+            self._append_target_marker(sprites, mi_cel, active_kid, color_slot)
         self._append_dragon_marker(sprites)
         return sprites
 
     def _append_dragon_marker(self, sprites: list[SceneSprite]) -> None:
         if self.asset_bundle is None:
             return
-        dragon_cel = self.asset_bundle.get_cel("DRAGON1.CEL")
         dnode = self.overworld.graph.nodes.get(self.overworld.dragon.node_id)
-        if dragon_cel is None or dnode is None:
+        if dnode is None:
             return
-        dsp = make_sprite(dragon_cel, 0, x=dnode.x, y=dnode.y, layer=3, order=99)
-        if dsp is not None:
-            sprites.append(dsp)
+        mi_cel = self.asset_bundle.get_cel("mi.c")
+        if mi_cel is not None:
+            dframe = 34 + ((self.tick_count // 8) % 5)
+            dsp = make_sprite(mi_cel, dframe, x=dnode.x - 12, y=dnode.y - 10, layer=3, order=99)
+            if dsp is not None:
+                sprites.append(dsp)
+                return
+        dragon_cel = self.asset_bundle.get_cel("DRAGON1.CEL")
+        if dragon_cel is not None:
+            dsp = make_sprite(dragon_cel, 0, x=dnode.x, y=dnode.y, layer=3, order=99)
+            if dsp is not None:
+                sprites.append(dsp)
 
     def _combat_sprites(self, active: ActiveEncounter) -> list[SceneSprite]:
         sprites: list[SceneSprite] = []
@@ -892,9 +933,19 @@ class GameSession:
         elif self.scene == GameScene.KNIGHT_SELECT:
             self._render_knight_select_scene(scene_renderer, font)
         elif self.scene == GameScene.OVERWORLD:
-            self._compose_picture_or_solid(
-                scene_renderer, "bg2.PIV", sprites=self._overworld_sprites()
+            sprites = self._overworld_sprites()
+            map_pic = (
+                self.asset_bundle.get_test_picture(8) if self.asset_bundle is not None else None
             )
+            if map_pic is not None:
+                scene_renderer.set_palette(map_pic.palette)
+                scene_renderer.compose_scene(
+                    background=map_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
+                    sprites=sprites,
+                    border_index=0,
+                )
+            else:
+                self._compose_picture_or_solid(scene_renderer, "bg2.PIV", sprites=sprites)
             self._render_overworld_hud(scene_renderer, font)
         elif self.scene == GameScene.COMBAT:
             self._render_combat_scene(scene_renderer, font)

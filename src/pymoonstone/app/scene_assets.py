@@ -83,6 +83,13 @@ class GameAssetBundle:
                 self._test_pack = ()
         return self._test_pack
 
+    def get_test_picture(self, index: int) -> DecodedPicture | None:
+        """Return picture ``index`` from the ``test`` pack if present."""
+        pack = self._get_test_pack()
+        if 0 <= index < len(pack):
+            return pack[index]
+        return None
+
     def get_picture(self, *names: str) -> DecodedPicture | None:
         """Load and cache the first matching picture from ``names``."""
         for name in names:
