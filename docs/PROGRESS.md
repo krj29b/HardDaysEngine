@@ -40,9 +40,9 @@ deviations, follow-ups). Task details and acceptance criteria are in `IMPLEMENTA
 | T6.3 | Monster AI state machines & Lairs | T5.2, T5.3, T6.1 | DONE | `sim/monster_ai.py` (`MonsterArchetype` x10 incl. Balok/Dragon/Guardians, 2.5D perception, `SimPrng` attack selection, projectiles, `LairEncounter` multi-wave state). 95% coverage, zero floats/I/O. |
 | T7.1 | Overworld map, turn order & moon cycle | T5.1, T5.2 | DONE | `sim/overworld.py` (`OverworldGraph`, `OverworldState`, `create_campaign`, `move_knight`, 28-day moon cycle, Dragon patrol, Lair keys, Moonstones, PvP duels, Stonehenge victory). 96% coverage, zero floats/I/O. |
 | T7.2 | Sacred places, towns & shops | T7.1 | DONE | `sim/locations.py` (Highwood merchant/healer/tavern dice, Waterdeep mystic/training, Stonehenge altar ritual, Lair loot distribution). 94% coverage, zero floats/I/O. |
-| T8.1 | Paula 4-voice VBL synth & 8SVX mixer | T3.5, T5.2 | TODO | Owns `src/pymoonstone/app/audio.py`, `tests/unit/test_audio_mixer.py`. 50 Hz 4-voice waveform/envelope synth (`S_44`/`S_45`), `.a` sample playback, and `.cmp` tracker playback. |
-| T8.2 | Multi-sprite 2.5D scene renderer & HUD | T4.1, T5.4, T6.1 | TODO | Owns `src/pymoonstone/render/scene.py`, `tests/gl/test_scene_gl.py`. Y-sorted 2.5D sprite batching, `.f`/`.font` bitmap text, and combat/overworld HUD rendering. |
-| T8.3 | Input router, scene host & playable CLI | T6.2, T6.3, T7.2, T8.1, T8.2 | TODO | Owns `src/pymoonstone/app/input.py`, `src/pymoonstone/app/game.py`, `tests/unit/test_game_session.py`. 4-player input router, full scene loop, and deterministic `--record`/`--replay`. |
+| T8.1 | Paula 4-voice VBL synth & 8SVX mixer | T3.5, T5.2 | DONE | `app/audio.py` (`PaulaSynthMixer`, `AudioEngine`, 4-voice 50 Hz VBL synth `S_44`/`S_45`, `.a`/8SVX sample mixing, `.cmp` ProTracker playback with headless fallback). |
+| T8.2 | Multi-sprite 2.5D scene renderer & HUD | T4.1, T5.4, T6.1 | DONE | `render/scene.py` (`SceneRenderer`, `SceneSprite` painter Y-sorting, numpy blitting, `BitmapFont`, combat/overworld HUDs, `$0RGB` palette LUT bridge). 4/4 GL tests pass. |
+| T8.3 | Input router, scene host & playable CLI | T6.2, T6.3, T7.2, T8.1, T8.2 | IN PROGRESS (app-game/2026-11-15) | Owns `src/pymoonstone/app/input.py`, `src/pymoonstone/app/game.py`, `tests/unit/test_game_session.py` (+ `cli/main.py` playable CLI wiring). 4-player input router, full scene loop, and deterministic `--record`/`--replay`. |
 
 ## Session log
 
