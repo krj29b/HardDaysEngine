@@ -14,6 +14,11 @@ import numpy as np
 import pygame
 
 from pymoonstone.app.audio import AudioEngine
+from pymoonstone.app.combat_bridge import (
+    build_mog_encounter,
+    clamp_entity_to_arena,
+    resolve_melee_attack_points,
+)
 from pymoonstone.app.config import find_adf_images
 from pymoonstone.app.input import (
     InputFrame,
@@ -22,6 +27,14 @@ from pymoonstone.app.input import (
     ReplayRecording,
     load_replay,
     save_replay,
+)
+from pymoonstone.app.location_screens import (
+    LocationKind,
+    LocationMenuState,
+    render_location_menu,
+    render_new_day_screen,
+    render_status_screen,
+    step_location_menu,
 )
 from pymoonstone.app.loop import Accumulator50Hz
 from pymoonstone.app.scene_assets import (
@@ -32,7 +45,7 @@ from pymoonstone.app.scene_assets import (
     select_monster_frame,
 )
 from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.palette import default_combat_palette
+from pymoonstone.assets.palette import RGBColor, default_combat_palette
 from pymoonstone.render.renderer import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
@@ -57,23 +70,20 @@ from pymoonstone.sim.knight_combat import (
     step_knight_vbl,
 )
 from pymoonstone.sim.locations import (
-    HealerService,
     distribute_lair_loot,
     perform_stonehenge_ritual,
-    visit_healer,
 )
 from pymoonstone.sim.monster_ai import (
     LairEncounter,
     MonsterArchetype,
-    MonsterSpawnSpec,
     MonsterState,
+    ProjectileState,
     TargetSnapshot,
-    WaveSpec,
     apply_hit_to_monster,
-    default_monster_params,
 )
 from pymoonstone.sim.overworld import (
     EncounterTrigger,
+    NodeKind,
     OverworldState,
     TriggerKind,
     create_campaign,
@@ -81,6 +91,7 @@ from pymoonstone.sim.overworld import (
     move_knight,
     resolve_lair_victory,
 )
+from pymoonstone.sim.palette_fx import PaletteFxState, pack_rgb12
 from pymoonstone.sim.prng import DEFAULT_SEED
 from pymoonstone.sim.types import Direction, EntityId, KnightId, Pos25D
 
@@ -90,6 +101,10 @@ if TYPE_CHECKING:
 
     import numpy.typing as npt
 
+    from pymoonstone.assets.arena import DecodedArena
+    from pymoonstone.assets.cel import CelFrame
+    from pymoonstone.assets.hit import HitFrame
+
 _ATTACK_ACTIONS: frozenset[KnightAction] = frozenset(
     {
         KnightAction.OVERHEAD_SLASH,
@@ -98,6 +113,22 @@ _ATTACK_ACTIONS: frozenset[KnightAction] = frozenset(
     }
 )
 _KNIGHT_MELEE_RANGE_X = 36
+_DAGGER_SPEED_X = 4
+_DAGGER_TTL_VBLS = 45
+_DAGGER_DAMAGE = 6
+
+_ARCHETYPE_HIT_KEYS: dict[MonsterArchetype, str] = {
+    MonsterArchetype.TROGG_SPEAR: "troggspear1",
+    MonsterArchetype.TROGG_AXE: "troggaxe1",
+    MonsterArchetype.RATMAN: "ratmen1",
+    MonsterArchetype.MUDMAN: "mudmen1",
+    MonsterArchetype.BEASTMAN: "be1",
+    MonsterArchetype.DEMON: "demon1",
+    MonsterArchetype.TROLL: "troll1",
+    MonsterArchetype.BALOK: "balok1",
+    MonsterArchetype.DRAGON: "dragon1",
+    MonsterArchetype.GUARDIAN: "he1",
+}
 
 
 class GameScene(IntEnum):
@@ -109,6 +140,20 @@ class GameScene(IntEnum):
     COMBAT = 3
     VICTORY = 4
     GAME_OVER = 5
+    LOCATION = 6
+    STATUS = 7
+    NEW_DAY = 8
+
+
+@dataclass(slots=True)
+class GoreParticle:
+    """Short-lived ``blo.cel`` gore sprite spawned on combat hits."""
+
+    x: int
+    y: int
+    z: int
+    frame_index: int
+    ttl_ticks: int = 12
 
 
 @dataclass(slots=True)
@@ -118,7 +163,10 @@ class ActiveEncounter:
     trigger: EncounterTrigger
     encounter: LairEncounter
     knight_ids: tuple[KnightId, ...]
+    arena: DecodedArena | None = None
     swing_spent: dict[KnightId, bool] = field(default_factory=dict)
+    knight_projectiles: list[ProjectileState] = field(default_factory=list)
+    gore_particles: list[GoreParticle] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)
@@ -132,21 +180,6 @@ class HeadlessSessionResult:
     recording: ReplayRecording
 
 
-def _is_melee_in_range(
-    attacker_x: int,
-    attacker_y: int,
-    attacker_dir: Direction,
-    target_pos: Pos25D,
-    reach_x: int,
-    depth_threshold: int,
-) -> bool:
-    dx = target_pos.x - attacker_x
-    facing_ok = (dx >= 0 and not attacker_dir.is_left) or (dx <= 0 and attacker_dir.is_left)
-    return (
-        facing_ok and abs(dx) <= reach_x and depth_close(attacker_y, target_pos.y, depth_threshold)
-    )
-
-
 def _make_knight_combat_state(knight_id: KnightId, index: int) -> KnightState:
     return KnightState(
         knight_id=knight_id,
@@ -158,46 +191,11 @@ def _make_knight_combat_state(knight_id: KnightId, index: int) -> KnightState:
     )
 
 
-def _archetype_for_trigger(trigger: EncounterTrigger) -> MonsterArchetype:
-    if trigger.kind == TriggerKind.DRAGON_INTERCEPT:
-        return MonsterArchetype.DRAGON
-    if trigger.kind == TriggerKind.LAIR_BOSS:
-        lair_bosses = (
-            MonsterArchetype.TROLL,
-            MonsterArchetype.BALOK,
-            MonsterArchetype.DEMON,
-            MonsterArchetype.GUARDIAN,
-        )
-        idx = max(0, min(len(lair_bosses) - 1, trigger.lair_index))
-        return lair_bosses[idx]
-    wandering = (
-        MonsterArchetype.TROGG_SPEAR,
-        MonsterArchetype.RATMAN,
-        MonsterArchetype.MUDMAN,
-        MonsterArchetype.BEASTMAN,
-    )
-    return wandering[trigger.encounter_kind % len(wandering)]
-
-
-def _build_encounter(
-    trigger: EncounterTrigger, knight_ids: tuple[KnightId, ...]
-) -> ActiveEncounter:
-    archetype = _archetype_for_trigger(trigger)
-    params = default_monster_params(archetype)
-    spawns = (
-        MonsterSpawnSpec(
-            entity_id=EntityId(100),
-            params=params,
-            pos=Pos25D(x=240, y=95, z=0),
-            direction=Direction.LEFT,
-        ),
-    )
-    encounter = LairEncounter(waves=(WaveSpec(wave_index=0, spawns=spawns),))
-    return ActiveEncounter(
-        trigger=trigger,
-        encounter=encounter,
-        knight_ids=knight_ids,
-    )
+def _palette_to_rgb12(palette: Sequence[RGBColor]) -> tuple[int, ...]:
+    words = [pack_rgb12(r >> 4, g >> 4, b >> 4) for r, g, b in palette[:32]]
+    while len(words) < 32:
+        words.append(0)
+    return tuple(words)
 
 
 _PORTRAIT_SLOT_TO_KNIGHT: tuple[KnightId, ...] = (
@@ -229,6 +227,7 @@ class GameSession:
         self.selected_player_count: int = len(roster)
         self.menu_cursor: int = 0
         self.gore_enabled: bool = True
+        self.practice_mode: bool = False
         self.knight_pick_active: bool = False
         self.knight_pick_slot: int = 0
         self.knight_taken_mask: int = 0
@@ -237,17 +236,26 @@ class GameSession:
         self._menu_prev_dy: int = 0
         self._menu_prev_fire: bool = False
         self._ow_prev_fire: bool = False
+        self._ow_prev_secondary: bool = False
+        self._end_prev_fire: bool = False
         self.selected_move_index: int = 0
-        self.overworld: OverworldState = create_campaign(roster, seed=seed)
-        self.knight_combat: dict[KnightId, KnightState] = {
-            kid: _make_knight_combat_state(kid, idx) for idx, kid in enumerate(roster)
-        }
-        self.active_encounter: ActiveEncounter | None = None
         self.audio = audio
         self.disk_set = disk_set
         self.asset_bundle: GameAssetBundle | None = (
             GameAssetBundle(disk_set) if disk_set is not None else None
         )
+        graph = self.asset_bundle.build_overworld_graph() if self.asset_bundle is not None else None
+        self.overworld: OverworldState = create_campaign(roster, graph=graph, seed=seed)
+        self.knight_combat: dict[KnightId, KnightState] = {
+            kid: _make_knight_combat_state(kid, idx) for idx, kid in enumerate(roster)
+        }
+        self.active_encounter: ActiveEncounter | None = None
+        self.location_menu: LocationMenuState | None = None
+        self.location_knight_id: KnightId = roster[0]
+        self.palette_fx: PaletteFxState = PaletteFxState(
+            _palette_to_rgb12(default_combat_palette())
+        )
+        self._pending_fade_in: bool = False
         self.last_status: str = "PRESS ENTER TO BEGIN"
 
     def _reset_campaign(self, count: int, custom_roster: Sequence[KnightId] = ()) -> None:
@@ -260,11 +268,15 @@ class GameSession:
         self.players = roster
         self.selected_player_count = len(roster)
         self.selected_move_index = 0
-        self.overworld = create_campaign(roster, seed=self.seed)
+        graph = self.asset_bundle.build_overworld_graph() if self.asset_bundle is not None else None
+        self.overworld = create_campaign(roster, graph=graph, seed=self.seed)
         self.knight_combat = {
             kid: _make_knight_combat_state(kid, idx) for idx, kid in enumerate(roster)
         }
         self.active_encounter = None
+        self.location_menu = None
+        self.location_knight_id = roster[0]
+        self.practice_mode = False
 
     def _player_input(self, frame: InputFrame, kid: KnightId) -> PlayerInput:
         direct = frame.for_player(kid)
@@ -288,6 +300,12 @@ class GameSession:
         if self.paused:
             return
 
+        self._step_active_scene(frame, primary)
+        self.palette_fx.step_vbl()
+        if self.audio is not None:
+            self.audio.step_vbl()
+
+    def _step_active_scene(self, frame: InputFrame, primary: PlayerInput) -> None:
         if self.scene == GameScene.TITLE:
             self._step_title(primary)
         elif self.scene == GameScene.KNIGHT_SELECT:
@@ -296,9 +314,37 @@ class GameSession:
             self._step_overworld(frame)
         elif self.scene == GameScene.COMBAT:
             self._step_combat(frame)
+        elif self.scene == GameScene.LOCATION:
+            self._step_location(frame)
+        elif self.scene == GameScene.STATUS:
+            self._step_status(frame)
+        elif self.scene == GameScene.NEW_DAY:
+            self._step_new_day(primary)
+        else:
+            self._step_end_screen(primary)
 
-        if self.audio is not None:
-            self.audio.step_vbl()
+    def _play_title_music(self) -> None:
+        if self.audio is not None and self.asset_bundle is not None:
+            mod = self.asset_bundle.load_title_music()
+            if mod is not None:
+                self.audio.play_music(mod)
+
+    def _play_victory_music(self) -> None:
+        if self.audio is not None and self.asset_bundle is not None:
+            mod = self.asset_bundle.load_victory_music()
+            if mod is not None:
+                self.audio.play_music(mod)
+
+    def _enter_victory(self, status: str) -> None:
+        self.scene = GameScene.VICTORY
+        self.last_status = status
+        self._pending_fade_in = True
+        self._play_victory_music()
+
+    def _enter_game_over(self) -> None:
+        self.scene = GameScene.GAME_OVER
+        self.last_status = "GAME OVER"
+        self._pending_fade_in = True
 
     def _step_title(self, primary: PlayerInput) -> None:
         finished = False
@@ -339,6 +385,7 @@ class GameSession:
             return
         if self.menu_cursor == 2:
             self._reset_campaign(self.selected_player_count)
+            self.practice_mode = True
             self._start_combat(
                 EncounterTrigger(
                     kind=TriggerKind.WANDERING_MONSTER,
@@ -393,34 +440,61 @@ class GameSession:
         if confirm:
             self._confirm_main_menu()
 
+    def _confirm_overworld_move(self, kid: KnightId, target_node: int) -> None:
+        prev_day = self.overworld.day
+        result = move_knight(self.overworld, target_node)
+        self.selected_move_index = 0
+        self._handle_overworld_triggers(kid, result.triggers)
+        if self.scene == GameScene.OVERWORLD and self.overworld.day > prev_day:
+            self.scene = GameScene.NEW_DAY
+            self.last_status = f"DAY {self.overworld.day}"
+
+    def _handle_overworld_game_over(self) -> bool:
+        if not self.overworld.game_over:
+            return False
+        if self.overworld.winner is not None:
+            self._enter_victory(f"{self.overworld.winner.name} WINS")
+        else:
+            self._enter_game_over()
+        return True
+
+    def _cycle_overworld_move(self, inp: PlayerInput, move_count: int) -> None:
+        delta = inp.dx or inp.dy
+        if delta != 0:
+            self.selected_move_index = (
+                self.selected_move_index + (1 if delta > 0 else -1)
+            ) % move_count
+
     def _step_overworld(self, frame: InputFrame) -> None:
-        if self.overworld.game_over:
-            self.scene = (
-                GameScene.VICTORY if self.overworld.winner is not None else GameScene.GAME_OVER
-            )
+        if self._handle_overworld_game_over():
             return
 
         kid = self.overworld.current_knight_id
         inp = self._player_input(frame, kid)
         moves = legal_moves(self.overworld, kid)
         if not moves:
-            self.scene = GameScene.GAME_OVER
+            self._enter_game_over()
             return
 
-        delta = inp.dx if inp.dx != 0 else inp.dy
-        if delta != 0:
-            self.selected_move_index = (self.selected_move_index + (1 if delta > 0 else -1)) % len(
-                moves
-            )
+        secondary_edge = inp.secondary and not self._ow_prev_secondary
+        self._ow_prev_secondary = inp.secondary
+        if secondary_edge:
+            self.scene = GameScene.STATUS
+            self.last_status = "STATUS"
+            return
+
+        self._cycle_overworld_move(inp, len(moves))
 
         fire_edge = inp.fire and not self._ow_prev_fire
         self._ow_prev_fire = inp.fire
         if inp.confirm or fire_edge:
-            idx = self.selected_move_index % len(moves)
-            target_node = moves[idx]
-            result = move_knight(self.overworld, target_node)
-            self.selected_move_index = 0
-            self._handle_overworld_triggers(kid, result.triggers)
+            self._confirm_overworld_move(kid, moves[self.selected_move_index % len(moves)])
+
+    def _open_location(self, knight_id: KnightId, location: LocationKind) -> None:
+        self.location_knight_id = knight_id
+        self.location_menu = LocationMenuState(location=location)
+        self.scene = GameScene.LOCATION
+        self.last_status = location.name
 
     def _handle_overworld_triggers(
         self,
@@ -429,31 +503,104 @@ class GameSession:
     ) -> None:
         for trig in triggers:
             if trig.kind == TriggerKind.VICTORY:
-                self.scene = GameScene.VICTORY
-                self.last_status = f"{knight_id.name} WINS"
+                self._enter_victory(f"{knight_id.name} WINS")
                 return
             if trig.kind == TriggerKind.TOWN_VISIT:
-                visit_healer(
-                    self.knight_combat[knight_id],
-                    service=HealerService.RESTORE_HP,
-                    overworld=self.overworld,
+                node = self.overworld.graph.nodes.get(trig.node_id)
+                loc_kind = (
+                    LocationKind.WATERDEEP
+                    if node is not None and node.kind == NodeKind.WATERDEEP
+                    else LocationKind.HIGHWOOD
                 )
-            elif trig.kind == TriggerKind.STONEHENGE_RITUAL:
-                ritual = perform_stonehenge_ritual(
-                    self.overworld,
-                    knight_id,
-                    knight_combat=self.knight_combat[knight_id],
-                )
-                if ritual.victory:
-                    self.scene = GameScene.VICTORY
-                    return
-            elif trig.kind in (
+                self._open_location(knight_id, loc_kind)
+                return
+            if trig.kind == TriggerKind.STONEHENGE_RITUAL:
+                if self.overworld.knights[knight_id].has_all_moonstones:
+                    ritual = perform_stonehenge_ritual(
+                        self.overworld,
+                        knight_id,
+                        knight_combat=self.knight_combat[knight_id],
+                    )
+                    if ritual.victory:
+                        self._enter_victory(f"{knight_id.name} WINS")
+                        return
+                self._open_location(knight_id, LocationKind.STONEHENGE)
+                return
+            if trig.kind in (
                 TriggerKind.WANDERING_MONSTER,
                 TriggerKind.LAIR_BOSS,
                 TriggerKind.DRAGON_INTERCEPT,
             ):
                 self._start_combat(trig, knight_id)
                 return
+
+    def _step_location(self, frame: InputFrame) -> None:
+        if self.location_menu is None:
+            self.scene = GameScene.OVERWORLD
+            return
+        kid = self.location_knight_id
+        inp = self._player_input(frame, kid)
+        res = step_location_menu(self.location_menu, inp, self.knight_combat[kid], self.overworld)
+        if res.victory:
+            self.location_menu = None
+            self._enter_victory(f"{kid.name} WINS")
+            return
+        if res.left_location:
+            self.location_menu = None
+            self.scene = GameScene.OVERWORLD
+            self.last_status = f"DAY {self.overworld.day}"
+
+    def _step_status(self, frame: InputFrame) -> None:
+        inp = self._player_input(frame, self.overworld.current_knight_id)
+        fire_edge = inp.fire and not self._ow_prev_fire
+        secondary_edge = inp.secondary and not self._ow_prev_secondary
+        self._ow_prev_fire = inp.fire
+        self._ow_prev_secondary = inp.secondary
+        if inp.confirm or fire_edge or secondary_edge:
+            self.scene = GameScene.OVERWORLD
+            self.last_status = f"DAY {self.overworld.day}"
+
+    def _step_new_day(self, primary: PlayerInput) -> None:
+        fire_edge = primary.fire and not self._ow_prev_fire
+        self._ow_prev_fire = primary.fire
+        if primary.confirm or fire_edge:
+            self.scene = GameScene.OVERWORLD
+            self.last_status = f"DAY {self.overworld.day}"
+
+    def _step_end_screen(self, primary: PlayerInput) -> None:
+        fire_edge = primary.fire and not self._end_prev_fire
+        self._end_prev_fire = primary.fire
+        if primary.confirm or fire_edge:
+            self._reset_campaign(self.selected_player_count)
+            self.scene = GameScene.KNIGHT_SELECT
+            self.last_status = "SELECT KNIGHTS"
+            self._pending_fade_in = True
+            self._play_title_music()
+
+    def _try_play_sample(self, *names: str) -> None:
+        if self.audio is None:
+            return
+        for name in names:
+            try:
+                self.audio.play_sample(name)
+                return
+            except KeyError:
+                continue
+
+    def _spawn_gore(self, active: ActiveEncounter, x: int, y: int, z: int) -> None:
+        if not self.gore_enabled:
+            return
+        active.gore_particles.append(GoreParticle(x=x, y=y, z=z, frame_index=self.tick_count % 6))
+
+    def _step_gore_particles(self, active: ActiveEncounter) -> None:
+        if not active.gore_particles:
+            return
+        remaining: list[GoreParticle] = []
+        for gp in active.gore_particles:
+            gp.ttl_ticks -= 1
+            if gp.ttl_ticks > 0:
+                remaining.append(gp)
+        active.gore_particles = remaining
 
     def _start_combat(self, trigger: EncounterTrigger, knight_id: KnightId) -> None:
         kstate = self.knight_combat[knight_id]
@@ -463,9 +610,76 @@ class GameSession:
         kstate.direction = Direction.RIGHT
         kstate.action = KnightAction.IDLE
         kstate.action_timer = 0
-        self.active_encounter = _build_encounter(trigger, (knight_id,))
+        mog_tables = self.asset_bundle.get_mog_tables() if self.asset_bundle is not None else None
+        arena_loaded = (
+            self.asset_bundle.get_combat_arena(max(0, trigger.lair_index))
+            if self.asset_bundle is not None
+            else None
+        )
+        arena = arena_loaded[0] if arena_loaded is not None else None
+        encounter = build_mog_encounter(trigger, (knight_id,), mog_tables, arena=arena)
+        self.active_encounter = ActiveEncounter(
+            trigger=trigger,
+            encounter=encounter,
+            knight_ids=(knight_id,),
+            arena=arena,
+        )
         self.scene = GameScene.COMBAT
+        self._pending_fade_in = True
         self.last_status = f"COMBAT: {trigger.kind.name}"
+
+    def _spawn_knight_dagger(self, kstate: KnightState, active: ActiveEncounter) -> None:
+        vx = -_DAGGER_SPEED_X if kstate.direction.is_left else _DAGGER_SPEED_X
+        active.knight_projectiles.append(
+            ProjectileState(
+                owner_id=kstate.entity_id,
+                projectile_type_id=0,
+                pos=Pos25D(x=kstate.x, y=kstate.y, z=max(8, kstate.z + 12)),
+                vx=vx,
+                vy=0,
+                vz=0,
+                direction=kstate.direction,
+                damage=_DAGGER_DAMAGE + max(0, kstate.strength - 1),
+                ttl_ticks=_DAGGER_TTL_VBLS,
+            )
+        )
+        self._try_play_sample("throw.a", "swish.a", "knifethr.a")
+
+    def _step_knight_projectiles(self, active: ActiveEncounter) -> None:
+        if not active.knight_projectiles:
+            return
+        remaining: list[ProjectileState] = []
+        for proj in active.knight_projectiles:
+            if not proj.active or proj.ttl_ticks <= 0:
+                continue
+            proj.ttl_ticks -= 1
+            proj.pos = proj.pos.translate(proj.vx, proj.vy, proj.vz)
+            if not (0 <= proj.pos.x < CANVAS_WIDTH):
+                continue
+            if self._hit_monster_with_projectile(proj, active):
+                continue
+            remaining.append(proj)
+        active.knight_projectiles = remaining
+
+    def _hit_monster_with_projectile(self, proj: ProjectileState, active: ActiveEncounter) -> bool:
+        for monster in active.encounter.monsters:
+            if not monster.is_alive:
+                continue
+            if abs(proj.pos.x - monster.pos.x) <= 14 and depth_close(
+                proj.pos.y, monster.pos.y, DEFAULT_DEPTH_THRESHOLD
+            ):
+                apply_hit_to_monster(monster, proj.damage, proj.pos.x)
+                self._spawn_gore(active, monster.pos.x, monster.pos.y, monster.pos.z)
+                self._try_play_sample("hit.a", "splat.a", "swordhit.a")
+                return True
+        return False
+
+    def _clamp_monsters_to_arena(self, active: ActiveEncounter) -> None:
+        if active.arena is None:
+            return
+        for monster in active.encounter.monsters:
+            if monster.is_alive:
+                monster.pos = clamp_entity_to_arena(monster.pos, active.arena)
 
     def _step_combat(self, frame: InputFrame) -> None:
         active = self.active_encounter
@@ -476,11 +690,17 @@ class GameSession:
         targets: list[TargetSnapshot] = []
         for kid in active.knight_ids:
             kstate = self.knight_combat[kid]
-            step_knight_vbl(
+            kres = step_knight_vbl(
                 kstate,
                 self._player_input(frame, kid).to_knight_input(),
                 prng=self.overworld.prng,
             )
+            clamped = clamp_entity_to_arena(kstate.pos, active.arena)
+            kstate.x, kstate.y, kstate.z = clamped.x, clamped.y, clamped.z
+            if kres.threw_secondary:
+                self._spawn_knight_dagger(kstate, active)
+            if self.audio is not None and kres.vm_events:
+                self.audio.handle_combat_events(kres.vm_events)
             self._resolve_knight_melee(kstate, active)
             targets.append(
                 TargetSnapshot(
@@ -491,8 +711,11 @@ class GameSession:
                 )
             )
 
+        self._step_knight_projectiles(active)
         enc_res = active.encounter.step_vbl(targets, self.overworld.prng)
+        self._clamp_monsters_to_arena(active)
         self._resolve_monster_attacks(active, enc_res)
+        self._step_gore_particles(active)
 
         if self.audio is not None:
             for mres in enc_res.monster_results:
@@ -500,25 +723,73 @@ class GameSession:
 
         self._check_combat_resolution(active)
 
+    def _knight_frame_info(self, knight: KnightState) -> tuple[CelFrame | None, HitFrame | None]:
+        if self.asset_bundle is None:
+            return None, None
+        kcel = self.asset_bundle.get_knight_cel(int(knight.knight_id))
+        if kcel is None or not kcel.frames:
+            return None, None
+        fidx = select_knight_frame(kcel, knight.action, self.tick_count)
+        frame = kcel.frames[fidx]
+        hit_sets = self.asset_bundle.get_hit_sets()
+        if not hit_sets:
+            return frame, None
+        preferred = f"kn{(int(knight.knight_id) % 4) + 1}"
+        hset = hit_sets.get(preferred) or hit_sets.get("kn4") or hit_sets.get("kn1")
+        hit_frame = hset.frames[fidx] if hset is not None and fidx < len(hset.frames) else None
+        return frame, hit_frame
+
+    def _monster_frame_info(
+        self, archetype: MonsterArchetype, attacking: bool
+    ) -> tuple[CelFrame | None, HitFrame | None]:
+        if self.asset_bundle is None:
+            return None, None
+        mcel = self.asset_bundle.get_monster_cel(archetype)
+        if mcel is None or not mcel.frames:
+            return None, None
+        fidx = select_monster_frame(mcel, self.tick_count, attacking)
+        frame = mcel.frames[fidx]
+        hit_sets = self.asset_bundle.get_hit_sets()
+        if not hit_sets:
+            return frame, None
+        hset = hit_sets.get(_ARCHETYPE_HIT_KEYS.get(archetype, ""))
+        hit_frame = hset.frames[fidx] if hset is not None and fidx < len(hset.frames) else None
+        return frame, hit_frame
+
     def _resolve_knight_melee(self, knight: KnightState, active: ActiveEncounter) -> None:
         if knight.action not in _ATTACK_ACTIONS:
             active.swing_spent[knight.knight_id] = False
             return
         if active.swing_spent.get(knight.knight_id, False):
             return
+        k_frame, hit_frame = self._knight_frame_info(knight)
+        k_w = k_frame.meta.width if k_frame is not None else 0
+        k_h = k_frame.meta.height if k_frame is not None else 0
         for monster in active.encounter.monsters:
             if not monster.is_alive:
                 continue
-            if _is_melee_in_range(
-                knight.x,
-                knight.y,
-                knight.direction,
-                monster.pos,
-                _KNIGHT_MELEE_RANGE_X,
-                DEFAULT_DEPTH_THRESHOLD,
+            m_frame, _ = self._monster_frame_info(monster.params.archetype, attacking=False)
+            if resolve_melee_attack_points(
+                attacker_id=knight.entity_id,
+                attacker_pos=knight.pos,
+                attacker_screen_x=knight.x,
+                attacker_screen_y=knight.y - knight.z,
+                attacker_cel_width=k_w,
+                attacker_cel_height=k_h,
+                attacker_flipped=knight.direction.is_left,
+                hit_frame=hit_frame,
+                defender_id=monster.entity_id,
+                defender_pos=monster.pos,
+                defender_screen_x=monster.pos.x,
+                defender_screen_y=monster.pos.y - monster.pos.z,
+                defender_frame=m_frame,
+                defender_flipped=monster.direction.is_left,
+                fallback_reach_x=_KNIGHT_MELEE_RANGE_X,
             ):
                 apply_hit_to_monster(monster, knight.attack_damage(), knight.x)
                 active.swing_spent[knight.knight_id] = True
+                self._spawn_gore(active, monster.pos.x, monster.pos.y, monster.pos.z)
+                self._try_play_sample("swordhit.a", "hit.a", "splat.a")
                 break
 
     def _apply_melee_intent(self, intent: object, active: ActiveEncounter) -> None:
@@ -526,22 +797,60 @@ class GameSession:
 
         if not isinstance(intent, MeleeAttackIntent):
             return
+        attacker = next(
+            (m for m in active.encounter.monsters if m.entity_id == intent.attacker_id), None
+        )
+        m_frame, hit_frame = (
+            self._monster_frame_info(attacker.params.archetype, attacking=True)
+            if attacker is not None
+            else (None, None)
+        )
+        m_w = m_frame.meta.width if m_frame is not None else 0
+        m_h = m_frame.meta.height if m_frame is not None else 0
         for kid in active.knight_ids:
             defender = self.knight_combat[kid]
-            if _is_melee_in_range(
-                intent.pos.x,
-                intent.pos.y,
-                intent.direction,
-                defender.pos,
-                intent.reach_x,
-                intent.depth_threshold,
+            k_frame, _ = self._knight_frame_info(defender)
+            if resolve_melee_attack_points(
+                attacker_id=intent.attacker_id,
+                attacker_pos=intent.pos,
+                attacker_screen_x=intent.pos.x,
+                attacker_screen_y=intent.pos.y - intent.pos.z,
+                attacker_cel_width=m_w,
+                attacker_cel_height=m_h,
+                attacker_flipped=intent.direction.is_left,
+                hit_frame=hit_frame,
+                defender_id=defender.entity_id,
+                defender_pos=defender.pos,
+                defender_screen_x=defender.x,
+                defender_screen_y=defender.y - defender.z,
+                defender_frame=k_frame,
+                defender_flipped=defender.direction.is_left,
+                depth_threshold=intent.depth_threshold,
+                fallback_reach_x=intent.reach_x,
             ):
-                apply_knight_damage(
-                    defender,
-                    intent.damage,
-                    attacker_id=intent.attacker_id,
-                    attacker_pos=intent.pos,
+                self._damage_knight_with_fx(
+                    defender, active, intent.damage, intent.attacker_id, intent.pos
                 )
+
+    def _damage_knight_with_fx(
+        self,
+        defender: KnightState,
+        active: ActiveEncounter,
+        damage: int,
+        attacker_id: EntityId,
+        attacker_pos: Pos25D,
+    ) -> None:
+        prev_hp = defender.hp
+        apply_knight_damage(
+            defender,
+            damage,
+            attacker_id=attacker_id,
+            attacker_pos=attacker_pos,
+        )
+        if defender.hp < prev_hp:
+            self.palette_fx.trigger_blood_flash()
+            self._spawn_gore(active, defender.x, defender.y, defender.z)
+            self._try_play_sample("hurt.a", "hit.a", "splat.a")
 
     def _resolve_monster_attacks(
         self,
@@ -560,55 +869,71 @@ class GameSession:
                 self._apply_melee_intent(mres.melee_intent, active)
         for phit in enc_res.projectile_hits:
             if phit.target_id in by_entity:
-                apply_knight_damage(
+                self._damage_knight_with_fx(
                     by_entity[phit.target_id],
+                    active,
                     phit.damage,
-                    attacker_id=phit.owner_id,
-                    attacker_pos=phit.pos,
+                    phit.owner_id,
+                    phit.pos,
                 )
+
+    def _finish_practice_combat(self) -> None:
+        self.practice_mode = False
+        self.active_encounter = None
+        self.scene = GameScene.KNIGHT_SELECT
+        self.last_status = "PRACTICE COMPLETE"
+
+    def _handle_combat_victory(self, active: ActiveEncounter) -> None:
+        if self.practice_mode:
+            self._finish_practice_combat()
+            return
+        lead_id = active.knight_ids[0]
+        kstate = self.knight_combat[lead_id]
+        if active.trigger.kind == TriggerKind.LAIR_BOSS and active.trigger.lair_index >= 0:
+            resolve_lair_victory(self.overworld, lead_id, active.trigger.lair_index)
+            distribute_lair_loot(
+                kstate,
+                active.trigger.lair_index,
+                self.overworld.prng,
+                overworld=self.overworld,
+            )
+        else:
+            kstate.xp += 25
+            kstate.gold += 15
+            ow_k = self.overworld.knights[lead_id]
+            ow_k.xp = kstate.xp
+            ow_k.gold = kstate.gold
+        self.active_encounter = None
+        self.scene = GameScene.OVERWORLD
+        self.last_status = "ENCOUNTER WON"
+
+    def _handle_combat_defeat(self, active: ActiveEncounter) -> None:
+        if self.practice_mode:
+            self._finish_practice_combat()
+            return
+        for kid in active.knight_ids:
+            kstate = self.knight_combat[kid]
+            ow_k = self.overworld.knights[kid]
+            ow_k.lives = kstate.lives
+            if kstate.lives > 0:
+                kstate.hp = kstate.max_hp
+                kstate.stamina = kstate.max_stamina
+                kstate.action = KnightAction.IDLE
+            else:
+                ow_k.alive = False
+        self.active_encounter = None
+        if all(not k.alive for k in self.overworld.knights.values()):
+            self.overworld.game_over = True
+            self._enter_game_over()
+        else:
+            self.scene = GameScene.OVERWORLD
+            self.last_status = "KNIGHT FALLEN"
 
     def _check_combat_resolution(self, active: ActiveEncounter) -> None:
         if active.encounter.completed:
-            lead_id = active.knight_ids[0]
-            kstate = self.knight_combat[lead_id]
-            if active.trigger.kind == TriggerKind.LAIR_BOSS and active.trigger.lair_index >= 0:
-                resolve_lair_victory(self.overworld, lead_id, active.trigger.lair_index)
-                distribute_lair_loot(
-                    kstate,
-                    active.trigger.lair_index,
-                    self.overworld.prng,
-                    overworld=self.overworld,
-                )
-            else:
-                kstate.xp += 25
-                kstate.gold += 15
-                ow_k = self.overworld.knights[lead_id]
-                ow_k.xp = kstate.xp
-                ow_k.gold = kstate.gold
-            self.active_encounter = None
-            self.scene = GameScene.OVERWORLD
-            self.last_status = "ENCOUNTER WON"
-            return
-
-        if all(not self.knight_combat[kid].is_alive for kid in active.knight_ids):
-            for kid in active.knight_ids:
-                kstate = self.knight_combat[kid]
-                ow_k = self.overworld.knights[kid]
-                ow_k.lives = kstate.lives
-                if kstate.lives > 0:
-                    kstate.hp = kstate.max_hp
-                    kstate.stamina = kstate.max_stamina
-                    kstate.action = KnightAction.IDLE
-                else:
-                    ow_k.alive = False
-            self.active_encounter = None
-            if all(not k.alive for k in self.overworld.knights.values()):
-                self.overworld.game_over = True
-                self.scene = GameScene.GAME_OVER
-                self.last_status = "GAME OVER"
-            else:
-                self.scene = GameScene.OVERWORLD
-                self.last_status = "KNIGHT FALLEN"
+            self._handle_combat_victory(active)
+        elif all(not self.knight_combat[kid].is_alive for kid in active.knight_ids):
+            self._handle_combat_defeat(active)
 
     def state_hash(self) -> str:
         """Return a deterministic SHA-256 hex digest of the full integer simulation state."""
@@ -865,7 +1190,35 @@ class GameSession:
             )
             if sp is not None:
                 sprites.append(sp)
+        self._append_gore_sprites(sprites, active)
         return sprites
+
+    def _append_gore_sprites(self, sprites: list[SceneSprite], active: ActiveEncounter) -> None:
+        if not self.gore_enabled or not active.gore_particles or self.asset_bundle is None:
+            return
+        blo_cel = self.asset_bundle.get_blood_cel()
+        if blo_cel is None:
+            return
+        for idx, gp in enumerate(active.gore_particles):
+            gsp = make_sprite(
+                blo_cel, gp.frame_index, x=gp.x, y=gp.y, z=gp.z, layer=3, order=50 + idx
+            )
+            if gsp is not None:
+                sprites.append(gsp)
+
+    def _apply_scene_palette(
+        self, scene_renderer: SceneRenderer, base_palette: Sequence[RGBColor]
+    ) -> None:
+        words = _palette_to_rgb12(base_palette)
+        if self._pending_fade_in:
+            self._pending_fade_in = False
+            self.palette_fx.fade_in(words, divisor=1, from_black=True)
+        elif not self.palette_fx.is_fading and not self.palette_fx.is_flashing:
+            self.palette_fx.set_palette(words)
+        if self.palette_fx.is_fading or self.palette_fx.is_flashing:
+            scene_renderer.set_palette_fx(self.palette_fx.current_palette())
+        else:
+            scene_renderer.set_palette(base_palette)
 
     def _render_combat_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         active = self.active_encounter
@@ -880,7 +1233,7 @@ class GameSession:
 
         if arena_loaded is not None:
             _arena_data, arena_bg, pal = arena_loaded
-            scene_renderer.set_palette(pal)
+            self._apply_scene_palette(scene_renderer, pal)
             scene_renderer.compose_scene(background=arena_bg, sprites=sprites, border_index=0)
         else:
             self._compose_picture_or_solid(scene_renderer, sprites=sprites)
@@ -903,7 +1256,7 @@ class GameSession:
                         gore_on=self.gore_enabled,
                     )
                 if menu_bg is not None:
-                    scene_renderer.set_palette(menu_pal)
+                    self._apply_scene_palette(scene_renderer, menu_pal)
                     scene_renderer.compose_scene(background=menu_bg, border_index=0)
                     menu_rendered = True
         if not menu_rendered:
@@ -916,46 +1269,79 @@ class GameSession:
                 color_index=31,
             )
 
-    def render_to_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
-        """Render the active game scene and HUD onto ``scene_renderer``."""
-        if self.scene == GameScene.TITLE:
-            if self.asset_bundle is not None:
-                bg, pal, sprites = build_intro_cinematic_frame(self.asset_bundle, self.tick_count)
-                if bg is not None:
-                    scene_renderer.set_palette(pal)
-                    scene_renderer.compose_scene(background=bg, sprites=sprites, border_index=0)
-                else:
-                    self._compose_picture_or_solid(scene_renderer, "bg1a.PIV", "mindscape")
-                    font.draw_text(scene_renderer.canvas, "PRESS ENTER", 116, 236, color_index=31)
-            else:
-                self._compose_picture_or_solid(scene_renderer, "bg1a.PIV", "mindscape")
-                font.draw_text(scene_renderer.canvas, "PRESS ENTER", 116, 236, color_index=31)
-        elif self.scene == GameScene.KNIGHT_SELECT:
-            self._render_knight_select_scene(scene_renderer, font)
-        elif self.scene == GameScene.OVERWORLD:
-            sprites = self._overworld_sprites()
-            map_pic = (
-                self.asset_bundle.get_test_picture(8) if self.asset_bundle is not None else None
+    def _render_title_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
+        if self.asset_bundle is not None:
+            bg, pal, sprites = build_intro_cinematic_frame(self.asset_bundle, self.tick_count)
+            if bg is not None:
+                self._apply_scene_palette(scene_renderer, pal)
+                scene_renderer.compose_scene(background=bg, sprites=sprites, border_index=0)
+                return
+        self._compose_picture_or_solid(scene_renderer, "bg1a.PIV", "mindscape")
+        font.draw_text(scene_renderer.canvas, "PRESS ENTER", 116, 236, color_index=31)
+
+    def _render_overworld_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
+        sprites = self._overworld_sprites()
+        map_pic = self.asset_bundle.get_test_picture(8) if self.asset_bundle is not None else None
+        if map_pic is not None:
+            self._apply_scene_palette(scene_renderer, map_pic.palette)
+            scene_renderer.compose_scene(
+                background=map_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
+                sprites=sprites,
+                border_index=0,
             )
-            if map_pic is not None:
-                scene_renderer.set_palette(map_pic.palette)
-                scene_renderer.compose_scene(
-                    background=map_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
-                    sprites=sprites,
-                    border_index=0,
-                )
-            else:
-                self._compose_picture_or_solid(scene_renderer, "bg2.PIV", sprites=sprites)
-            self._render_overworld_hud(scene_renderer, font)
-        elif self.scene == GameScene.COMBAT:
-            self._render_combat_scene(scene_renderer, font)
-        elif self.scene == GameScene.VICTORY:
+        else:
+            self._compose_picture_or_solid(scene_renderer, "bg2.PIV", sprites=sprites)
+        self._render_overworld_hud(scene_renderer, font)
+
+    def _render_location_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
+        if self.location_menu is not None:
+            render_location_menu(
+                scene_renderer,
+                self.location_menu,
+                self.knight_combat[self.location_knight_id],
+                self.overworld,
+                font,
+                bundle=self.asset_bundle,
+            )
+        else:
+            self._compose_picture_or_solid(scene_renderer, "ch.piv")
+
+    def _render_end_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
+        if self.scene == GameScene.VICTORY:
             self._compose_picture_or_solid(scene_renderer, "WI1.P", "WI2.P")
             font.draw_text(scene_renderer.canvas, "VICTORY!", 128, 236, color_index=30)
         else:
             self._compose_picture_or_solid(scene_renderer, "message.piv")
             font.draw_text(scene_renderer.canvas, "GAME OVER", 124, 236, color_index=15)
 
+    def render_to_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
+        """Render the active game scene and HUD onto ``scene_renderer``."""
+        if self.scene == GameScene.TITLE:
+            self._render_title_scene(scene_renderer, font)
+        elif self.scene == GameScene.KNIGHT_SELECT:
+            self._render_knight_select_scene(scene_renderer, font)
+        elif self.scene == GameScene.OVERWORLD:
+            self._render_overworld_scene(scene_renderer, font)
+        elif self.scene == GameScene.COMBAT:
+            self._render_combat_scene(scene_renderer, font)
+        elif self.scene == GameScene.LOCATION:
+            self._render_location_scene(scene_renderer, font)
+        elif self.scene == GameScene.STATUS:
+            kid = self.overworld.current_knight_id
+            render_status_screen(
+                scene_renderer,
+                self.knight_combat[kid],
+                self.overworld,
+                font,
+                bundle=self.asset_bundle,
+            )
+        elif self.scene == GameScene.NEW_DAY:
+            render_new_day_screen(scene_renderer, self.overworld, font, bundle=self.asset_bundle)
+        else:
+            self._render_end_scene(scene_renderer, font)
+
+        if self.palette_fx.is_fading or self.palette_fx.is_flashing:
+            scene_renderer.set_palette_fx(self.palette_fx.current_palette())
         scene_renderer.flush_to_fbo()
 
 

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import numpy as np
 import pygame
 
+from pymoonstone.app.audio import AudioEngine
 from pymoonstone.app.game import GameScene, GameSession, run_headless_session
 from pymoonstone.app.input import (
     InputFrame,
@@ -17,6 +19,7 @@ from pymoonstone.app.input import (
     save_replay,
 )
 from pymoonstone.app.intro_player import assemble_stile_panorama
+from pymoonstone.app.location_screens import LocationKind
 from pymoonstone.cli.main import main
 from pymoonstone.sim.types import KnightId
 
@@ -257,3 +260,120 @@ def test_knight_pick_routes_p1_input_and_edge_triggers_fire() -> None:
 
     session2.step_tick(_frame_p1(confirm=True))
     assert session2.overworld.total_turns == 1
+
+
+def test_practice_mode_returns_to_knight_select() -> None:
+    session = GameSession(seed=11, start_scene=GameScene.KNIGHT_SELECT)
+    session.step_tick(_frame_p1(dy=1))
+    session.step_tick(_frame_p1())
+    session.step_tick(_frame_p1(dy=1))
+    assert session.menu_cursor == 2
+
+    session.step_tick(_frame_p1(confirm=True))
+    assert session.scene == GameScene.COMBAT
+    assert session.practice_mode is True
+    assert session.active_encounter is not None
+
+    session.active_encounter.encounter.completed = True
+    session.step_tick(_frame_p1())
+    assert session.scene == GameScene.KNIGHT_SELECT
+    assert session.practice_mode is False
+    assert session.active_encounter is None
+
+    # Practice defeat also returns to KNIGHT_SELECT without game over.
+    session.step_tick(_frame_p1(confirm=True))
+    assert session.scene == GameScene.COMBAT
+    assert session.practice_mode is True
+    kstate = session.knight_combat[KnightId.RED]
+    kstate.lives = 1
+    kstate.hp = 0
+    session.step_tick(_frame_p1())
+    assert session.scene == GameScene.KNIGHT_SELECT
+    assert session.practice_mode is False
+    assert session.overworld.game_over is False
+
+
+def test_status_new_day_and_location_transitions() -> None:
+    session = GameSession(seed=1, start_scene=GameScene.OVERWORLD)
+    session.step_tick(_frame_p1(secondary=True))
+    assert session.scene == GameScene.STATUS
+
+    session.step_tick(_frame_p1(confirm=True))
+    assert session.scene == GameScene.OVERWORLD
+
+    # Move RED to Highwood (node 1) to open LOCATION menu, then leave.
+    session.step_tick(_frame_p1(dx=1))
+    session.step_tick(_frame_p1(confirm=True))
+    assert session.scene == GameScene.LOCATION
+    assert session.location_menu is not None
+    assert session.location_menu.location == LocationKind.HIGHWOOD
+
+    for _ in range(3):
+        session.step_tick(_frame_p1(dy=1))
+        session.step_tick(_frame_p1())
+    session.step_tick(_frame_p1(confirm=True))
+    assert session.scene == GameScene.OVERWORLD
+
+    # Move from Highwood (1) back to start node (10) -> day advances to 3, shows NEW_DAY.
+    session.step_tick(_frame_p1(dx=1))
+    session.step_tick(_frame_p1(confirm=True))
+    assert session.overworld.day == 3
+    assert session.scene == GameScene.NEW_DAY
+
+    session.step_tick(_frame_p1(confirm=True))
+    assert session.scene == GameScene.OVERWORLD
+
+
+def test_victory_and_game_over_reset_to_menu_and_music() -> None:
+    calls: list[str] = []
+
+    class _FakeBundle:
+        def build_overworld_graph(self) -> None:
+            return None
+
+        def load_victory_music(self) -> None:
+            calls.append("victory")
+            return None
+
+        def load_title_music(self) -> None:
+            calls.append("title")
+            return None
+
+    session = GameSession(
+        seed=5,
+        start_scene=GameScene.OVERWORLD,
+        audio=AudioEngine(headless=True),
+    )
+    with patch.object(session, "asset_bundle", _FakeBundle()):
+        session.overworld.game_over = True
+        session.overworld.winner = KnightId.RED
+        session.step_tick(_frame_p1())
+        assert session.scene == GameScene.VICTORY
+        assert "victory" in calls
+
+        session.step_tick(_frame_p1(confirm=True))
+        assert session.scene == GameScene.KNIGHT_SELECT
+        assert session.overworld.game_over is False
+        assert "title" in calls
+
+        session.scene = GameScene.GAME_OVER
+        session.step_tick(_frame_p1(fire=True))
+        assert session.scene == GameScene.KNIGHT_SELECT
+        assert calls.count("title") == 2
+
+
+def test_combat_dagger_throw_and_palette_fx_step() -> None:
+    session = GameSession(seed=7, start_scene=GameScene.KNIGHT_SELECT)
+    session.step_tick(_frame_p1(dy=1))
+    session.step_tick(_frame_p1())
+    session.step_tick(_frame_p1(dy=1))
+    session.step_tick(_frame_p1(confirm=True))
+    assert session.scene == GameScene.COMBAT
+    assert session.active_encounter is not None
+
+    start_daggers = session.knight_combat[KnightId.RED].daggers
+    start_vbl = session.palette_fx.vbl_count
+    session.step_tick(_frame_p1(secondary=True))
+    assert session.knight_combat[KnightId.RED].daggers == start_daggers - 1
+    assert len(session.active_encounter.knight_projectiles) == 1
+    assert session.palette_fx.vbl_count == start_vbl + 1
