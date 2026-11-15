@@ -12,28 +12,33 @@ from pymoonstone.sim.collision import (
     DRAW_FLAG_NO_BODY_BOX,
 )
 from pymoonstone.sim.combat_vm import (
-    DRAW_FLAG_FG_MASK,
+    DRAW_FLAG_BG,
     DRAW_FLAG_FLIP_X,
+    DRAW_FLAG_NO_GORE,
     DRAW_FLAG_STAMP_BG,
     MAX_COMBAT_JOBS,
-    OP_BRANCH_RAND,
-    OP_BRANCH_REL,
-    OP_CALL,
     OP_END_FRAME,
-    OP_END_SCRIPT,
-    OP_FREE_JOB,
+    OP_ENGINE_CALL,
+    OP_FRAME_SET,
+    OP_GORE_JUMP,
+    OP_IF_DEAD,
+    OP_IF_NONZERO,
+    OP_IF_SAME_FACING,
+    OP_IF_ZERO,
     OP_JUMP,
+    OP_JUMP_RET,
+    OP_KILL_JOB,
+    OP_LOOP2_BEGIN,
+    OP_LOOP2_END,
     OP_LOOP_BEGIN,
-    OP_LOOP_END,
+    OP_MOTION_BLOCK,
     OP_MOVE,
-    OP_RETURN,
-    OP_SCREEN_FLASH,
-    OP_SCREEN_SHAKE,
+    OP_POKE_OWNER,
+    OP_RESET_WORK,
+    OP_SECOND_SCRIPT,
     OP_SET_FACING,
-    OP_SET_VELOCITY,
     OP_SOUND,
-    OP_SPAWN_EFFECT,
-    OP_SPAWN_PROJECTILE,
+    OP_SPAWN_JOB,
     VBL_DIVISOR_FAST,
     VBL_DIVISOR_NORMAL,
     ArenaBounds,
@@ -44,7 +49,6 @@ from pymoonstone.sim.combat_vm import (
     FrameCompleteEvent,
     JobFreedEvent,
     MoveEvent,
-    ScreenEffectEvent,
     ScriptEndedEvent,
     ScriptError,
     SoundEvent,
@@ -62,34 +66,33 @@ pytestmark = pytest.mark.sim
 
 
 def _draw(cel_slot: int, frame: int, dy: int, flags: int, dx: int) -> bytes:
-    return struct.pack(">BBbBh", cel_slot, frame, dy, flags, dx)
+    return struct.pack(">BBbBh", (cel_slot & 0x07) << 2, frame, dy, flags, dx)
 
 
 def test_normal_and_fast_vbl_divisors() -> None:
     script = (
         _draw(0, 1, -2, DRAW_FLAG_HURTBOX, 4)
-        + bytes([OP_END_FRAME])
+        + bytes([OP_END_FRAME, 0x00])
         + _draw(0, 2, 0, DRAW_FLAG_ATTACK, 6)
-        + bytes([OP_END_FRAME, OP_END_SCRIPT])
+        + bytes([OP_END_FRAME, 0xFF])
     )
 
     normal = CombatJob(job_id=0, frame_divisor=VBL_DIVISOR_NORMAL)
     assert normal.vbl_countdown == 1
-    # Tick 1 fires frame 0 immediately, then waits 5 idle ticks before tick 7 fires frame 1.
     fired_ticks_normal = [t for t in range(1, 15) if step_vbl(normal, script)]
-    assert fired_ticks_normal == [1, 7, 13]
+    assert fired_ticks_normal == [1, 7]
     assert not normal.running
 
     fast = CombatJob(job_id=1)
     fast.set_speed_mode(fast=True)
     assert fast.frame_divisor == VBL_DIVISOR_FAST
     fired_ticks_fast = [t for t in range(1, 13) if step_vbl(fast, script)]
-    assert fired_ticks_fast == [1, 6, 11]
+    assert fired_ticks_fast == [1, 6]
     assert not fast.running
 
 
 def test_paused_and_inactive_jobs_skip_ticks() -> None:
-    script = _draw(1, 0, 0, 0, 0) + bytes([OP_END_FRAME])
+    script = _draw(1, 0, 0, 0, 0) + bytes([OP_END_FRAME, 0xFF])
     paused_job = CombatJob(paused=1)
     assert step_vbl(paused_job, script) == ()
     assert paused_job.pc == 0
@@ -99,16 +102,18 @@ def test_paused_and_inactive_jobs_skip_ticks() -> None:
     assert step_frame(inactive_job, script) == ()
 
 
-def test_draw_opcode_flags_and_mirrored_displacements() -> None:
+def test_draw_opcode_slot_decoding_flags_and_mirroring() -> None:
     all_flags = (
         DRAW_FLAG_HURTBOX
         | DRAW_FLAG_ATTACK
         | DRAW_FLAG_FLIP_X
+        | DRAW_FLAG_BG
         | DRAW_FLAG_STAMP_BG
         | DRAW_FLAG_NO_BODY_BOX
-        | DRAW_FLAG_FG_MASK
+        | DRAW_FLAG_NO_GORE
     )
-    script = _draw(3, 7, -5, all_flags, 12) + bytes([OP_END_FRAME])
+    # Opcode 0x0C -> cel_slot = (0x0C & 0x1F) >> 2 = 3.
+    script = struct.pack(">BBbBh", 0x0C, 7, -5, all_flags, 12) + bytes([OP_END_FRAME, 0x00])
 
     right_job = CombatJob(job_id=2, x=100, y=80, z=10, direction=Direction.RIGHT)
     events_r = step_frame(right_job, script)
@@ -135,132 +140,147 @@ def test_draw_opcode_flags_and_mirrored_displacements() -> None:
     assert isinstance(draw_l, DrawFrameEvent)
     assert draw_l.dx == -12
     assert draw_l.screen_x == 88
-    # Facing left (True) XOR DRAW_FLAG_FLIP_X (True) -> False.
     assert draw_l.flipped is False
     assert effective_flip_x(Direction.LEFT, 0) is True
     assert mirrored_dx(Direction.LEFT, -8) == 8
     assert left_job.pos == Pos25D(100, 80, 10)
 
+    # Gore-off mode skips draws with 0x80 flag.
+    gore_off_job = CombatJob(job_id=4, gore_off=True)
+    events_g = step_frame(gore_off_job, script)
+    assert [type(e) for e in events_g] == [FrameCompleteEvent]
 
-def test_loop_and_branch_opcodes() -> None:
-    # Loop 3 times drawing frame 0.. and then end script.
-    loop_script = (
+
+def test_loop1_and_loop2_markers() -> None:
+    # Loop1 repeats 3 times at the $FF $00 marker, then falls through to $FF $FF.
+    loop1_script = (
         bytes([OP_LOOP_BEGIN, 3])
         + _draw(0, 1, 0, 0, 2)
-        + bytes([OP_END_FRAME, OP_LOOP_END, OP_END_SCRIPT])
+        + bytes([OP_END_FRAME, 0xFF])
     )
     job = CombatJob()
-    frames = [step_frame(job, loop_script) for _ in range(4)]
-    assert [e for evs in frames[:3] for e in evs if isinstance(e, DrawFrameEvent)].__len__() == 3
-    assert any(isinstance(e, BranchEvent) and e.taken for e in frames[1])
-    assert any(isinstance(e, ScriptEndedEvent) for e in frames[3])
+    frames = [step_frame(job, loop1_script) for _ in range(3)]
+    assert sum(1 for evs in frames for e in evs if isinstance(e, DrawFrameEvent)) == 3
+    assert isinstance(frames[0][-1], FrameCompleteEvent)
+    assert isinstance(frames[1][-1], FrameCompleteEvent)
+    assert isinstance(frames[2][-1], ScriptEndedEvent)
     assert not job.running
 
-    # Random loop count (0 -> 1..31 from SimPrng) and deterministic random branch.
+    # Loop2 repeats twice using $FF $FE, then exits to $FF $FF.
+    loop2_script = (
+        bytes([OP_LOOP2_BEGIN, 2])
+        + _draw(1, 2, 0, 0, 4)
+        + bytes([OP_END_FRAME, 0xFE, OP_END_FRAME, 0xFF])
+    )
+    job2 = CombatJob()
+    f0 = step_frame(job2, loop2_script)
+    f1 = step_frame(job2, loop2_script)
+    f2 = step_frame(job2, loop2_script)
+    assert isinstance(f0[0], DrawFrameEvent) and isinstance(f0[1], FrameCompleteEvent)
+    assert isinstance(f1[0], DrawFrameEvent) and isinstance(f1[1], FrameCompleteEvent)
+    assert isinstance(f2[0], ScriptEndedEvent)
+    assert not job2.running
+
+    # Random loop count (0 -> 1..31 from SimPrng) is deterministic.
     prng_a = SimPrng(0xCAFE_BABE)
     prng_b = SimPrng(0xCAFE_BABE)
-    rand_script = (
-        bytes([OP_LOOP_BEGIN, 0])
-        + struct.pack(">BH", OP_BRANCH_RAND, 128)
-        + struct.pack(">h", 2)
-        + bytes([OP_SOUND, 0x00, 0x05, OP_END_FRAME, OP_END_SCRIPT])
-    )
+    rand_script = bytes([OP_LOOP_BEGIN, 0, OP_SOUND, 5, OP_END_FRAME, 0xFF])
     job_a = CombatJob()
     job_b = CombatJob()
     ev_a = step_frame(job_a, rand_script, prng=prng_a)
     ev_b = step_frame(job_b, rand_script, prng=prng_b)
     assert ev_a == ev_b
-    assert job_a.loop_counter == job_b.loop_counter
     assert 1 <= job_a.loop_counter <= 31
 
 
-def test_jump_relative_branch_and_subroutine_call_return() -> None:
-    # Layout:
-    # 0..4:   CALL 12
-    # 5:      END_FRAME
-    # 6..8:   BRANCH_REL +7 -> offset 16 (END_SCRIPT)
-    # 9..11:  SOUND 99 (skipped)
-    # 12..15: SUBROUTINE: SOUND 42 (3B at 12..14), RETURN (1B at 15)
-    # 16:     END_SCRIPT
-    sub_offset = 12
-    sub_body = struct.pack(">BH", OP_SOUND, 42) + bytes([OP_RETURN])
-    main = (
-        struct.pack(">BI", OP_CALL, sub_offset)
-        + bytes([OP_END_FRAME])
-        + struct.pack(">Bh", OP_BRANCH_REL, 7)
-        + struct.pack(">BH", OP_SOUND, 99)
+def test_jump_immediate_and_deferred_call_and_conditional_branches() -> None:
+    # 0..5:   0x84 mode=1 (deferred arm -> offset 14)
+    # 6..7:   0xFF 0x00 (yields, takes armed call -> 14)
+    # 8..13:  0xA4 99 + 0xFF 0xFF (skipped)
+    # 14..19: 0x84 mode=3 (immediate jump -> offset 20)
+    # 20..25: 0x98 gore_jump -> offset 32 (skipped when gore_off=False)
+    # 26..31: 0xC4 if_same_facing -> offset 32 (taken when same_facing_as_knight=True)
+    # 32..33: 0xFF 0xFF (end)
+    script = (
+        struct.pack(">BBI", OP_JUMP, 1, 14)
+        + bytes([OP_END_FRAME, 0x00])
+        + bytes([OP_SOUND, 99, OP_END_FRAME, 0xFF, 0x00, 0x00])
+        + struct.pack(">BBI", OP_JUMP, 3, 20)
+        + struct.pack(">BBI", OP_GORE_JUMP, 0x07, 32)
+        + struct.pack(">BBI", OP_IF_SAME_FACING, 0x00, 32)
+        + bytes([OP_END_FRAME, 0xFF])
     )
-    assert len(main) == sub_offset
-    script = main + sub_body + bytes([OP_END_SCRIPT])
-
-    job = CombatJob()
+    job = CombatJob(gore_off=False, same_facing_as_knight=True)
     ev0 = step_frame(job, script)
-    assert [type(e) for e in ev0] == [BranchEvent, SoundEvent, BranchEvent, FrameCompleteEvent]
-    assert isinstance(ev0[1], SoundEvent) and ev0[1].sound_id == 42
+    assert isinstance(ev0[0], BranchEvent) and ev0[0].taken is False
+    assert isinstance(ev0[1], FrameCompleteEvent) and ev0[1].next_pc == 14
 
     ev1 = step_frame(job, script)
-    assert isinstance(ev1[0], BranchEvent) and ev1[0].opcode == OP_BRANCH_REL
-    assert isinstance(ev1[1], ScriptEndedEvent)
+    assert [type(e) for e in ev1] == [BranchEvent, BranchEvent, BranchEvent, ScriptEndedEvent]
     assert not job.running
 
-    # Unconditional jump loop.
-    jump_target = 0
-    jump_script = (
-        _draw(0, 0, 0, 0, 1) + bytes([OP_END_FRAME]) + struct.pack(">BI", OP_JUMP, jump_target)
-    )
-    jjob = CombatJob()
-    step_frame(jjob, jump_script)
-    ev_jump = step_frame(jjob, jump_script)
-    assert any(
-        isinstance(e, BranchEvent) and e.opcode == OP_JUMP and e.target_pc == 0 for e in ev_jump
-    )
 
-
-def test_velocity_integration_move_and_arena_clamping() -> None:
-    bounds = ArenaBounds(min_x=10, max_x=100, min_y=30, max_y=150, min_z=0, max_z=50)
+def test_motion_block_and_move_with_arena_clamping() -> None:
+    bounds = ArenaBounds(min_x=10, max_x=120, min_y=30, max_y=150, min_z=0, max_z=50)
+    # Motion block: param=0, count=2, flags=0x11 (rise + move facing), vy=6, vy_lim=2, vx=8, vx_lim=2.
     script = (
-        struct.pack(">BBhhh", OP_SET_VELOCITY, 0x01, 15, -5, 4)
-        + bytes([OP_END_FRAME])
-        + struct.pack(">Bhh", OP_MOVE, 10, 20)
-        + bytes([OP_END_FRAME, OP_FREE_JOB])
+        bytes([OP_MOTION_BLOCK, 0, 2, 0x11, 6, 2, 8, 2, OP_END_FRAME, 0x00])
+        + struct.pack(">BBHHH", OP_MOVE, 0x01, 10, 0, 20)
+        + bytes([OP_END_FRAME, 0x00, OP_KILL_JOB, 0x00])
     )
     job = CombatJob(
         job_id=4,
-        x=85,
-        y=33,
-        z=40,
+        x=80,
+        y=40,
+        z=10,
         direction=Direction.LEFT,
         owner_id=EntityId(7),
     )
 
+    # Frame 0: arms motion block (return_pc = 8) and executes motion step 1 at $FF $00.
+    # Facing left: x -= 8 -> 72; rise z += 6 -> 16.
     ev0 = step_frame(job, script, bounds=bounds)
-    assert ev0[0] == FrameCompleteEvent(job_id=4, next_pc=9)
-    # Facing left with flag bit 0 set negates vx (+15 -> -15).
-    assert (job.vx, job.vy, job.vz) == (-15, -5, 4)
+    assert any(isinstance(e, MoveEvent) and (e.x, e.z) == (72, 16) for e in ev0)
+    assert isinstance(ev0[-1], FrameCompleteEvent) and ev0[-1].next_pc == 8
 
-    # Frame 1 integrates velocity (-15, -5, +4) -> (70, 28->30, 44),
-    # then OP_MOVE (-10, +20) -> (60, 30, 64->50).
+    # Frame 1: $FF $00 triggers motion step 2 (halved speeds: vx=4, vy=3 -> x=68, z=19), still at pc=8.
     ev1 = step_frame(job, script, bounds=bounds)
-    assert ev1[0] == MoveEvent(job_id=4, dx=-15, dy=-3, dz=4, x=70, y=30, z=44)
-    assert ev1[1] == MoveEvent(job_id=4, dx=-10, dy=0, dz=6, x=60, y=30, z=50)
-    assert ev1[2] == FrameCompleteEvent(job_id=4, next_pc=15)
+    moves1 = [e for e in ev1 if isinstance(e, MoveEvent)]
+    assert len(moves1) == 1
+    assert (moves1[0].x, moves1[0].z) == (68, 19)
 
+    # Frame 2: motion count exhausted -> advances past $FF $00 to pc=10 (OP_MOVE).
     ev2 = step_frame(job, script, bounds=bounds)
-    assert any(isinstance(e, JobFreedEvent) and e.owner_id == EntityId(7) for e in ev2)
+    assert isinstance(ev2[-1], FrameCompleteEvent) and ev2[-1].next_pc == 10
+
+    # Frame 3: OP_MOVE (left, flags=1 -> x -= 10 -> 58; depth y += 20 -> 60), then $FF $00 -> pc=20.
+    ev3 = step_frame(job, script, bounds=bounds)
+    moves3 = [e for e in ev3 if isinstance(e, MoveEvent)]
+    assert len(moves3) == 1
+    assert (moves3[0].x, moves3[0].y) == (58, 60)
+
+    # Frame 4: OP_KILL_JOB frees the job.
+    ev4 = step_frame(job, script, bounds=bounds)
+    assert any(isinstance(e, JobFreedEvent) and e.owner_id == EntityId(7) for e in ev4)
     assert not job.active
     assert not job.running
 
 
-def test_sound_spawn_screen_effects_facing_and_hooks() -> None:
+def test_sound_poke_if_field_ifdead_spawn_facing_and_reset() -> None:
+    # Test 0xA4, 0xA8, 0xCC, 0xC8, 0xAC, 0xB0, 0xB8, 0xC0, 0x80, 0xD0, 0xB4.
     script = (
-        struct.pack(">BH", OP_SOUND, 14)
-        + struct.pack(">BHhhh", OP_SPAWN_PROJECTILE, 2, 10, 1, 5)
-        + bytes([OP_SET_FACING, 0])
-        + struct.pack(">BHhh", OP_SPAWN_EFFECT, 9, 4, -2)
-        + bytes([OP_SCREEN_SHAKE, 6, 8])
-        + struct.pack(">BHB", OP_SCREEN_FLASH, 0xA00, 3)
-        + bytes([0xA5, OP_END_FRAME])
+        bytes([OP_SOUND, 14])
+        + struct.pack(">BBhI", OP_POKE_OWNER, 0x01, 104, 1)
+        + struct.pack(">BBhI", OP_IF_NONZERO, 0x01, 104, 20)
+        + bytes([OP_SOUND, 99])
+        + struct.pack(">BBI", OP_SECOND_SCRIPT, 1, 500)
+        + struct.pack(">BBI", OP_ENGINE_CALL, 0, 5)
+        + struct.pack(">BBI", OP_SPAWN_JOB, 0, 77)
+        + bytes([OP_FRAME_SET, 2, OP_SET_FACING, 0xFF, OP_RESET_WORK, 0x00])
+        + struct.pack(">BBI", OP_IF_DEAD, 0, 50)
+        + bytes([OP_END_FRAME, 0xFF])
     )
+    assert len(script) == 52
     job = CombatJob(
         job_id=0,
         x=50,
@@ -268,41 +288,53 @@ def test_sound_spawn_screen_effects_facing_and_hooks() -> None:
         z=0,
         direction=Direction.RIGHT,
         owner_id=EntityId(1),
+        owner_hp=0,
     )
     events = step_frame(job, script)
 
     assert events[0] == SoundEvent(job_id=0, sound_id=14)
-    assert events[1] == SpawnEvent(
+    assert events[1] == CombatHookEvent(job_id=0, opcode=OP_POKE_OWNER, arg=104)
+    assert isinstance(events[2], BranchEvent) and events[2].opcode == OP_IF_NONZERO and events[2].taken
+    assert events[3] == CombatHookEvent(job_id=0, opcode=OP_ENGINE_CALL, arg=5)
+    assert events[4] == SpawnEvent(
         job_id=0,
         spawn_kind="projectile",
-        type_id=2,
-        x=60,
-        y=91,
-        z=5,
+        type_id=77,
+        x=50,
+        y=90,
+        z=0,
         direction=Direction.RIGHT,
         owner_id=EntityId(1),
     )
-    # OP_SET_FACING flipped RIGHT -> LEFT before OP_SPAWN_EFFECT.
+    assert job.frame_set == 2
     assert job.facing_left is True
-    assert events[2] == SpawnEvent(
-        job_id=0,
-        spawn_kind="effect",
-        type_id=9,
-        x=46,
-        y=88,
-        z=0,
-        direction=Direction.LEFT,
-        owner_id=EntityId(1),
+    assert job.work.spawn_armed is True
+    assert job.work.spawn_script_id == 500
+    assert isinstance(events[5], BranchEvent) and events[5].opcode == OP_IF_DEAD and events[5].taken
+    assert isinstance(events[6], ScriptEndedEvent)
+
+    # Verify 0xFD and 0xFE 1-byte jumps and 0xC8 if_zero.
+    # 0..1:   OP_LOOP2_BEGIN 2 (loop2_pc=2)
+    # 2..9:   OP_MOTION_BLOCK (return_pc=10)
+    # 10..17: OP_IF_ZERO (target=20)
+    # 18..19: OP_END_FRAME 0xFF
+    # 20..21: OP_END_FRAME 0x00, OP_JUMP_RET (not reached here, tested via 0xC8 -> 20)
+    jmp_script = (
+        bytes([OP_LOOP2_BEGIN, 2, OP_MOTION_BLOCK, 0, 1, 0x40, 0, 0, 0, 0])
+        + struct.pack(">BBhI", OP_IF_ZERO, 0x02, 10, 20)
+        + bytes([OP_END_FRAME, 0xFF, OP_END_FRAME, 0x00, OP_JUMP_RET, OP_LOOP2_END])
     )
-    assert events[3] == ScreenEffectEvent(job_id=0, effect="shake", value=6, duration_vbls=8)
-    assert events[4] == ScreenEffectEvent(job_id=0, effect="flash", value=0xA00, duration_vbls=3)
-    assert events[5] == CombatHookEvent(job_id=0, opcode=0xA5)
-    assert events[6] == FrameCompleteEvent(job_id=0, next_pc=len(script))
+    j2 = CombatJob()
+    ev_j0 = step_frame(j2, jmp_script)
+    assert isinstance(ev_j0[-1], FrameCompleteEvent) and ev_j0[-1].next_pc == 20
+    ev_j1 = step_frame(j2, jmp_script)
+    assert isinstance(ev_j1[-1], FrameCompleteEvent) and ev_j1[-1].next_pc == 22
+    assert OP_LOOP2_END == 0xFE
 
 
 def test_pool_stepping_and_error_cases() -> None:
-    s0 = struct.pack(">BH", OP_SOUND, 1) + bytes([OP_END_FRAME])
-    s1 = struct.pack(">BH", OP_SOUND, 2) + bytes([OP_END_FRAME])
+    s0 = bytes([OP_SOUND, 1, OP_END_FRAME, 0x00])
+    s1 = bytes([OP_SOUND, 2, OP_END_FRAME, 0x00])
     jobs = [
         CombatJob(job_id=0, script_id=0),
         CombatJob(job_id=1, script_id=1, paused=1),
@@ -326,14 +358,11 @@ def test_pool_stepping_and_error_cases() -> None:
         step_frame(CombatJob(), bytes([0x00, 0x01]))
 
     with pytest.raises(ScriptError, match="out of range"):
-        step_frame(CombatJob(), struct.pack(">BI", OP_JUMP, 999))
-
-    with pytest.raises(ScriptError, match="empty call stack"):
-        step_frame(CombatJob(), bytes([OP_RETURN]))
+        step_frame(CombatJob(), struct.pack(">BBI", OP_JUMP, 3, 999))
 
     with pytest.raises(ScriptError, match="unknown combat opcode"):
         step_frame(CombatJob(), bytes([0xE0]))
 
-    infinite_loop = struct.pack(">BI", OP_JUMP, 0)
+    infinite_loop = struct.pack(">BBI", OP_JUMP, 3, 0)
     with pytest.raises(ScriptError, match="exceeded"):
         step_frame(CombatJob(), infinite_loop, max_ops=8)

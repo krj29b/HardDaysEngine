@@ -58,6 +58,8 @@ from pymoonstone.assets.tables import (
     load_mog_tables,
     load_program_tables,
     parse_combat_action_tables,
+    parse_knight_script_tables,
+    parse_monster_script_tables,
     parse_creature_nodes,
     parse_encounter_bands,
     parse_knight_names,
@@ -286,3 +288,99 @@ def test_runtime_tables_from_real_disks(adf_dir: Path) -> None:
     assert mog_tables.synth.sequences[0].s44_offset == 0
     assert all(seq.s44_offset > 0 and len(seq.stream) > 0 for seq in mog_tables.synth.sequences[1:])
     assert len(mog_tables.synth.instruments) == 131
+    assert mog_tables.knight_scripts is not None
+    assert len(mog_tables.knight_scripts.action_scripts) == 9
+    assert len(mog_tables.knight_scripts.hurt_scripts) == 9
+    assert len(mog_tables.knight_scripts.walk_scripts) == 3
+    assert len(mog_tables.monster_scripts) == 11
+
+
+def test_parse_knight_and_monster_script_tables_synthetic() -> None:
+    from pymoonstone.assets.hunk import HUNK_BSS, HunkSection
+
+    # Build a synthetic S_0 with LEA S_1+100, A0; MOVE.L #S_4+400, 4(A0); RTS
+    # followed by Knight init (22(A1)=S_4+400, 34(A1)=S_1+100) + RTS
+    # and Monster init (type 0x20, 22(A1)=S_4+420, 30(A1)=S_1+200) + RTS.
+    s0_buf = bytearray()
+    r1_offs: list[int] = []
+    r4_offs: list[int] = []
+
+    # LEA S_1+100, A0
+    s0_buf += struct.pack(">H", 0x41F9)
+    r1_offs.append(len(s0_buf))
+    s0_buf += struct.pack(">I", 100)
+    # MOVE.L #S_4+400, 4(A0)
+    s0_buf += struct.pack(">H", 0x217C)
+    r4_offs.append(len(s0_buf))
+    s0_buf += struct.pack(">Ih", 400, 4)
+    # LEA S_1+200, A0
+    s0_buf += struct.pack(">H", 0x41F9)
+    r1_offs.append(len(s0_buf))
+    s0_buf += struct.pack(">I", 200)
+    # MOVE.L #S_4+420, (A0)+
+    s0_buf += struct.pack(">H", 0x20FC)
+    r4_offs.append(len(s0_buf))
+    s0_buf += struct.pack(">I", 420)
+    s0_buf += struct.pack(">H", 0x4E75)  # RTS
+
+    # Knight init block
+    s0_buf += struct.pack(">H", 0x237C)
+    r4_offs.append(len(s0_buf))
+    s0_buf += struct.pack(">Ih", 400, 22)
+    s0_buf += struct.pack(">H", 0x237C)
+    r1_offs.append(len(s0_buf))
+    s0_buf += struct.pack(">Ih", 100, 34)
+    s0_buf += struct.pack(">H", 0x4E75)
+
+    # Monster init block (type 0x20)
+    s0_buf += struct.pack(">HHh", 0x137C, 0x20, 77)
+    s0_buf += struct.pack(">H", 0x237C)
+    r4_offs.append(len(s0_buf))
+    s0_buf += struct.pack(">Ih", 420, 22)
+    s0_buf += struct.pack(">H", 0x237C)
+    r1_offs.append(len(s0_buf))
+    s0_buf += struct.pack(">Ih", 200, 30)
+    s0_buf += struct.pack(">H", 0x4E75)
+
+    syn_exec = DecodedHunkExecutable(
+        name="syn_mog",
+        sections=(
+            HunkSection(0, HUNK_CODE, len(s0_buf), bytes(s0_buf), {1: tuple(r1_offs), 4: tuple(r4_offs)}),
+            HunkSection(1, HUNK_BSS, 512, b"\x00" * 512, {}),
+            HunkSection(2, HUNK_DATA, 4, b"\x00" * 4, {}),
+            HunkSection(3, HUNK_DATA, 4, b"\x00" * 4, {}),
+            HunkSection(4, HUNK_DATA, 512, b"\x00" * 512, {}),
+        ),
+    )
+    ks = parse_knight_script_tables(syn_exec)
+    assert ks.idle_script == 400
+    assert ks.action_scripts[1] == 400
+
+    ms = parse_monster_script_tables(syn_exec)
+    assert len(ms) == 1
+    assert ms[0].creature_type == 0x20
+    assert ms[0].idle_script == 420
+    assert ms[0].hurt_scripts[0] == 420
+
+
+@pytest.mark.adf
+def test_real_knight_scripts_emit_multipart_draws_in_vm(adf_dir: Path) -> None:
+    from pymoonstone.sim.combat_vm import CombatJob, DrawFrameEvent, step_frame
+
+    disks = DiskSet.from_directory(adf_dir)
+    mog = parse_hunk_executable("mog", disks.read_file("mog"))
+    s4_bytes = mog.sections[MOG_TABLES_SECTION].data
+    ks = parse_knight_script_tables(mog)
+
+    cases = {
+        "IDLE": ks.idle_script,
+        "WALK": ks.walk_scripts[0][0],
+        "THRUST": ks.action_scripts[1],
+        "LOW_SWEEP": ks.action_scripts[2],
+        "OVERHEAD_SLASH": ks.action_scripts[8],
+    }
+    for name, pc in cases.items():
+        job = CombatJob(pc=pc)
+        events = step_frame(job, s4_bytes)
+        draws = [e for e in events if isinstance(e, DrawFrameEvent)]
+        assert len(draws) >= 2, f"{name} at pc={pc} emitted {len(draws)} draws, expected >= 2"
