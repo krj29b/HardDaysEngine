@@ -231,3 +231,29 @@ def test_assemble_stile_panorama_vertical_scroll() -> None:
     assert int(pano[0, 0]) == 3
     assert int(pano[450, 0]) == 7
     assert int(pano[1100, 0]) == 11
+
+
+def test_knight_pick_routes_p1_input_and_edge_triggers_fire() -> None:
+    session = GameSession(seed=7, start_scene=GameScene.KNIGHT_SELECT)
+    session.knight_pick_active = True
+    session.knight_pick_slot = 0  # SIR RICHARD -> KnightId.BLUE
+
+    # Holding fire on two consecutive ticks only confirms once.
+    session.selected_player_count = 2
+    session.step_tick(_frame_p1(fire=True))
+    assert session.picked_knights == [KnightId.BLUE]
+    assert session.scene == GameScene.KNIGHT_SELECT
+    session.step_tick(_frame_p1(fire=True))
+    assert session.picked_knights == [KnightId.BLUE]
+
+    # Single-player pick starts OVERWORLD and routes P1 (RED slot) input to BLUE knight.
+    session2 = GameSession(seed=7, start_scene=GameScene.KNIGHT_SELECT)
+    session2.knight_pick_active = True
+    session2.knight_pick_slot = 0
+    session2.step_tick(_frame_p1(confirm=True))
+    assert session2.scene == GameScene.OVERWORLD
+    assert session2.players == (KnightId.BLUE,)
+    assert session2.overworld.current_knight_id == KnightId.BLUE
+
+    session2.step_tick(_frame_p1(confirm=True))
+    assert session2.overworld.total_turns == 1

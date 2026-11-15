@@ -200,6 +200,14 @@ def _build_encounter(
     )
 
 
+_PORTRAIT_SLOT_TO_KNIGHT: tuple[KnightId, ...] = (
+    KnightId.BLUE,
+    KnightId.YELLOW,
+    KnightId.GREEN,
+    KnightId.RED,
+)
+
+
 class GameSession:
     """Deterministic 50 Hz multi-scene Moonstone game session (T8.3)."""
 
@@ -227,6 +235,8 @@ class GameSession:
         self.picked_knights: list[KnightId] = []
         self._menu_prev_dx: int = 0
         self._menu_prev_dy: int = 0
+        self._menu_prev_fire: bool = False
+        self._ow_prev_fire: bool = False
         self.selected_move_index: int = 0
         self.overworld: OverworldState = create_campaign(roster, seed=seed)
         self.knight_combat: dict[KnightId, KnightState] = {
@@ -256,10 +266,22 @@ class GameSession:
         }
         self.active_encounter = None
 
+    def _player_input(self, frame: InputFrame, kid: KnightId) -> PlayerInput:
+        direct = frame.for_player(kid)
+        if kid not in self.players:
+            return direct
+        slot_kid = KnightId(self.players.index(kid))
+        if slot_kid == kid:
+            return direct
+        slot_inp = frame.for_player(slot_kid)
+        if slot_inp != PlayerInput():
+            return slot_inp
+        return direct
+
     def step_tick(self, frame: InputFrame) -> None:
         """Advance the game session by exactly one 50 Hz PAL VBL tick."""
         self.tick_count += 1
-        primary = frame.for_player(self.players[0])
+        primary = self._player_input(frame, self.players[0])
         if primary.pause and self.scene in (GameScene.OVERWORLD, GameScene.COMBAT):
             self.paused = not self.paused
             return
@@ -299,7 +321,7 @@ class GameSession:
             return
         slot = self.knight_pick_slot & 3
         self.knight_taken_mask |= 1 << slot
-        self.picked_knights.append(KnightId(slot))
+        self.picked_knights.append(_PORTRAIT_SLOT_TO_KNIGHT[slot])
         if len(self.picked_knights) >= self.selected_player_count:
             self.knight_pick_active = False
             self._reset_campaign(self.selected_player_count, self.picked_knights)
@@ -357,9 +379,11 @@ class GameSession:
     def _step_knight_select(self, primary: PlayerInput) -> None:
         dx_edge = primary.dx if primary.dx != self._menu_prev_dx else 0
         dy_edge = primary.dy if primary.dy != self._menu_prev_dy else 0
+        fire_edge = primary.fire and not self._menu_prev_fire
         self._menu_prev_dx = primary.dx
         self._menu_prev_dy = primary.dy
-        confirm = primary.confirm or primary.fire
+        self._menu_prev_fire = primary.fire
+        confirm = primary.confirm or fire_edge
 
         if self.knight_pick_active:
             self._step_knight_pick(dx_edge, confirm)
@@ -377,18 +401,21 @@ class GameSession:
             return
 
         kid = self.overworld.current_knight_id
-        inp = frame.for_player(kid)
+        inp = self._player_input(frame, kid)
         moves = legal_moves(self.overworld, kid)
         if not moves:
             self.scene = GameScene.GAME_OVER
             return
 
-        if inp.dx > 0 or inp.dy > 0:
-            self.selected_move_index = (self.selected_move_index + 1) % len(moves)
-        elif inp.dx < 0 or inp.dy < 0:
-            self.selected_move_index = (self.selected_move_index - 1) % len(moves)
+        delta = inp.dx if inp.dx != 0 else inp.dy
+        if delta != 0:
+            self.selected_move_index = (self.selected_move_index + (1 if delta > 0 else -1)) % len(
+                moves
+            )
 
-        if inp.confirm or inp.fire:
+        fire_edge = inp.fire and not self._ow_prev_fire
+        self._ow_prev_fire = inp.fire
+        if inp.confirm or fire_edge:
             idx = self.selected_move_index % len(moves)
             target_node = moves[idx]
             result = move_knight(self.overworld, target_node)
@@ -451,7 +478,7 @@ class GameSession:
             kstate = self.knight_combat[kid]
             step_knight_vbl(
                 kstate,
-                frame.for_player(kid).to_knight_input(),
+                self._player_input(frame, kid).to_knight_input(),
                 prng=self.overworld.prng,
             )
             self._resolve_knight_melee(kstate, active)
