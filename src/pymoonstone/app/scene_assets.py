@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import contextlib
+import struct
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from pymoonstone.app.combat_bridge import compose_knight_pieces, select_knight_body_frame
 from pymoonstone.app.intro_player import IntroCinematicPlayer
 from pymoonstone.assets.arena import DecodedArena, composite_arena_background, decode_arena
-from pymoonstone.assets.audio import DecodedModule, decode_cmp_module, decode_sample_bank
+from pymoonstone.assets.audio import (
+    DEFAULT_SAMPLE_RATE,
+    AudioFormatError,
+    DecodedModule,
+    decode_cmp_module,
+    decode_iff_8svx,
+    decode_sample_bank,
+)
 from pymoonstone.assets.cel import DecodedCel, decode_cel
 from pymoonstone.assets.hit import HitSet, parse_collide_hit
 from pymoonstone.assets.hunk import HunkFormatError, parse_hunk_executable
@@ -21,7 +31,6 @@ from pymoonstone.assets.tables import (
 )
 from pymoonstone.render.renderer import CANVAS_WIDTH, PLAYFIELD_HEIGHT
 from pymoonstone.render.scene import SceneSprite
-from pymoonstone.sim.knight_combat import KnightAction
 from pymoonstone.sim.monster_ai import MonsterArchetype
 from pymoonstone.sim.overworld import (
     EncounterBand,
@@ -37,6 +46,7 @@ if TYPE_CHECKING:
 
     from pymoonstone.app.audio import AudioEngine
     from pymoonstone.assets.adf import DiskSet
+    from pymoonstone.sim.knight_combat import KnightAction
 
 _ARCHETYPE_CELS: dict[MonsterArchetype, tuple[str, ...]] = {
     MonsterArchetype.TROGG_SPEAR: ("TROGGSpear1.CEL", "TROGGSpear2.CEL"),
@@ -53,20 +63,34 @@ _ARCHETYPE_CELS: dict[MonsterArchetype, tuple[str, ...]] = {
 
 _LAIR_ARENAS: tuple[str, ...] = ("fol1.t", "fo1.t", "gl1.t", "fol2.t")
 
-_ACTION_FRAME_OFFSET: dict[KnightAction, int] = {
-    KnightAction.IDLE: 0,
-    KnightAction.WALK: 1,
-    KnightAction.RUN: 2,
-    KnightAction.ROLL: 5,
-    KnightAction.BLOCK: 6,
-    KnightAction.OVERHEAD_SLASH: 7,
-    KnightAction.THRUST: 9,
-    KnightAction.LOW_SWEEP: 11,
-    KnightAction.THROW_SECONDARY: 13,
-    KnightAction.HIT_STUN: 14,
-    KnightAction.KNOCKDOWN: 15,
-    KnightAction.DEATH: 16,
+COMBAT_SFX_KEYS: tuple[str, ...] = ("swing", "hit", "block", "hurt", "throw", "death")
+
+_LEGACY_SFX_ALIASES: dict[str, tuple[str, ...]] = {
+    "hit": ("hit.a", "splat.a", "swordhit.a"),
+    "hurt": ("hurt.a",),
+    "throw": ("throw.a", "swish.a", "knifethr.a"),
+    "swing": ("swing.a",),
+    "block": ("block.a",),
+    "death": ("death.a",),
 }
+
+
+def _extract_8svx_chunks(pcm: bytes) -> list[tuple[bytes, int]]:
+    chunks: list[tuple[bytes, int]] = []
+    pos = 0
+    while True:
+        idx = pcm.find(b"FORM", pos)
+        if idx < 0 or idx + 12 > len(pcm):
+            break
+        if pcm[idx + 8 : idx + 12] != b"8SVX":
+            pos = idx + 4
+            continue
+        (form_size,) = struct.unpack_from(">I", pcm, idx + 4)
+        end = min(len(pcm), idx + 8 + form_size)
+        with contextlib.suppress(AudioFormatError):
+            chunks.append(decode_iff_8svx(pcm[idx:end]))
+        pos = max(idx + 12, end)
+    return chunks
 
 
 @dataclass(slots=True)
@@ -86,6 +110,7 @@ class GameAssetBundle:
     _program_tables_checked: bool = False
     _mog_tables: MogRuntimeTables | None = None
     _mog_tables_checked: bool = False
+    _mog_s4_data: bytes | None = None
     _hit_sets: dict[str, HitSet] | None = None
     _hit_sets_checked: bool = False
 
@@ -189,7 +214,8 @@ class GameAssetBundle:
         return self.get_cel(*candidates, "TROLL1.CEL")
 
     def preload_audio(self, audio: AudioEngine) -> None:
-        """Load available ``.a`` sample banks into ``audio.mixer``."""
+        """Load available ``.a`` sample banks and register addressable combat SFX keys."""
+        bank_chunks: dict[str, list[tuple[bytes, int]]] = {}
         for entry in self.disk_set.list_entries():
             if not entry.name.casefold().endswith(".a"):
                 continue
@@ -197,8 +223,37 @@ class GameAssetBundle:
                 bank = decode_sample_bank(entry.name, self.disk_set.read_file(entry.name))
             except ValueError:
                 continue
-            if len(bank.samples_pcm8) > 0:
-                audio.mixer.register_sample_bank(bank)
+            if len(bank.samples_pcm8) == 0:
+                continue
+            audio.mixer.register_sample_bank(bank)
+            stem = entry.name.rsplit(".", 1)[0].casefold()
+            chunks = _extract_8svx_chunks(bank.samples_pcm8) or [
+                (bank.samples_pcm8, DEFAULT_SAMPLE_RATE)
+            ]
+            bank_chunks[stem] = chunks
+            for idx, (pcm, rate) in enumerate(chunks):
+                audio.mixer.register_sample(f"{stem}:{idx}", pcm, sample_rate=rate)
+
+        self._register_combat_sfx_keys(audio, bank_chunks)
+        mog_tables = self.get_mog_tables()
+        if mog_tables is not None:
+            audio.mixer.set_synth_tables(mog_tables.synth)
+
+    def _register_combat_sfx_keys(
+        self,
+        audio: AudioEngine,
+        bank_chunks: dict[str, list[tuple[bytes, int]]],
+    ) -> None:
+        primary = bank_chunks.get("kn") or bank_chunks.get("he")
+        if not primary and bank_chunks:
+            primary = next(iter(bank_chunks.values()))
+        if not primary:
+            return
+        for idx, sfx_key in enumerate(COMBAT_SFX_KEYS):
+            pcm, rate = primary[idx % len(primary)]
+            audio.mixer.register_sample(sfx_key, pcm, sample_rate=rate)
+            for alias in _LEGACY_SFX_ALIASES.get(sfx_key, ()):
+                audio.mixer.register_sample(alias, pcm, sample_rate=rate)
 
     def load_title_music(self) -> DecodedModule | None:
         """Return unpacked ProTracker ``music.cmp`` module if present on disk."""
@@ -232,9 +287,17 @@ class GameAssetBundle:
                 try:
                     exe = parse_hunk_executable("mog", self.disk_set.read_file("mog"))
                     self._mog_tables = load_mog_tables(exe)
+                    if len(exe.sections) > 4:
+                        self._mog_s4_data = exe.sections[4].data
                 except HunkFormatError:
                     self._mog_tables = None
+                    self._mog_s4_data = None
         return self._mog_tables
+
+    def get_mog_s4_bytes(self) -> bytes | None:
+        """Return cached raw `mog` `S_4` data hunk bytes if `mog` is present."""
+        self.get_mog_tables()
+        return self._mog_s4_data
 
     def get_hit_sets(self) -> dict[str, HitSet] | None:
         """Load and cache weapon hitboxes from ``collide.hit`` if present (ARCHITECTURE.md §4.2)."""
@@ -253,7 +316,11 @@ class GameAssetBundle:
         mog_tables = self.get_mog_tables()
         if mog_tables is None or len(mog_tables.lair_region.map_sites) < 4:
             return None
-        site_kinds = {
+        road_kind = NodeKind.__members__.get("ROAD", NodeKind.WILDERNESS)
+        valley_kind = NodeKind.__members__.get("VALLEY_OF_THE_GODS", NodeKind.WILDERNESS)
+        tower_kind = NodeKind.__members__.get("MATHS_TOWER", NodeKind.WILDERNESS)
+        site_kinds: dict[int, NodeKind] = {
+            **dict.fromkeys(range(21), road_kind),
             21: NodeKind.START,
             22: NodeKind.START,
             23: NodeKind.START,
@@ -261,6 +328,13 @@ class GameAssetBundle:
             25: NodeKind.HIGHWOOD,
             26: NodeKind.WATERDEEP,
             27: NodeKind.STONEHENGE,
+            28: valley_kind,
+            29: road_kind,
+            30: tower_kind,
+            31: NodeKind.LAIR,
+            32: NodeKind.LAIR,
+            33: NodeKind.LAIR,
+            34: NodeKind.LAIR,
         }
         sites = tuple(
             MapSiteInput(
@@ -280,14 +354,68 @@ class GameAssetBundle:
         )
         return build_overworld_graph_from_sites(sites, lairs=lairs, encounter_bands=bands)
 
+    def compose_knight_sprites(
+        self,
+        knight_index: int,
+        action: KnightAction,
+        tick_count: int,
+        *,
+        x: int,
+        y: int,
+        z: int = 0,
+        flipped: bool = False,
+        layer: int = 2,
+        order: int = 0,
+    ) -> list[SceneSprite]:
+        """Build multi-part knight :class:`SceneSprite`s using `mog` scripts and `collide.hit`."""
+        kcel = self.get_knight_cel(knight_index)
+        if kcel is None or not kcel.frames:
+            return []
+        mog_tables = self.get_mog_tables()
+        hit_sets = self.get_hit_sets()
+        preferred = f"kn{(knight_index % 4) + 1}"
+        hset = (
+            hit_sets.get(preferred) or hit_sets.get("kn4") or hit_sets.get("kn1")
+            if hit_sets
+            else None
+        )
+        pieces = compose_knight_pieces(
+            kcel,
+            action,
+            tick_count,
+            flipped=flipped,
+            mog_s4=self.get_mog_s4_bytes(),
+            combat_actions=mog_tables.combat_actions if mog_tables is not None else None,
+            hit_set=hset,
+        )
+        sprites: list[SceneSprite] = []
+        for idx, piece in enumerate(pieces):
+            sp = make_sprite(
+                kcel,
+                piece.frame_index,
+                x=x,
+                y=y,
+                z=z,
+                dx=piece.dx,
+                dy=piece.dy,
+                flipped=piece.flipped,
+                layer=layer,
+                order=order + idx,
+            )
+            if sp is not None:
+                sprites.append(sp)
+        return sprites
 
-def select_knight_frame(cel: DecodedCel, action: KnightAction, tick_count: int) -> int:
-    """Pick a valid cel frame index for ``action`` and ``tick_count``."""
-    if not cel.frames:
-        return 0
-    base = _ACTION_FRAME_OFFSET.get(action, 0)
-    anim = (tick_count // 6) % 3 if action in (KnightAction.WALK, KnightAction.RUN) else 0
-    return (base + anim) % len(cel.frames)
+
+def select_knight_frame(
+    cel: DecodedCel,
+    action: KnightAction,
+    tick_count: int,
+    *,
+    hit_set: HitSet | None = None,
+) -> int:
+    """Pick a body-sized cel frame index within `collide.hit` bounds for ``action``."""
+    return select_knight_body_frame(cel, action, tick_count, hit_set=hit_set)
 
 
 def select_monster_frame(cel: DecodedCel, tick_count: int, attacking: bool) -> int:
@@ -306,6 +434,8 @@ def make_sprite(
     x: int,
     y: int,
     z: int = 0,
+    dx: int = 0,
+    dy: int = 0,
     flipped: bool = False,
     layer: int = 2,
     order: int = 0,
@@ -322,6 +452,8 @@ def make_sprite(
         x=clamped_x,
         y=clamped_y,
         z=z,
+        dx=dx,
+        dy=dy,
         layer=layer,
         order=order,
         mirrored=flipped,

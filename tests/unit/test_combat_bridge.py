@@ -7,14 +7,19 @@ from dataclasses import dataclass
 import numpy as np
 
 from pymoonstone.app.combat_bridge import (
+    CombatSpritePiece,
     build_mog_encounter,
     cel_mask_from_frame,
+    cel_screen_origin,
     clamp_entity_to_arena,
+    compose_knight_pieces,
+    resolve_composed_melee_attack,
     resolve_melee_attack_points,
+    select_knight_body_frame,
 )
 from pymoonstone.assets.arena import DecodedArena, ObstacleSegment
-from pymoonstone.assets.cel import CelFrame, CelFrameMeta
-from pymoonstone.assets.hit import HitFrame, HitPoint
+from pymoonstone.assets.cel import CelFrame, CelFrameMeta, DecodedCel
+from pymoonstone.assets.hit import HitFrame, HitPoint, HitSet
 from pymoonstone.assets.tables import (
     BuiltinFontTable,
     CombatActionTables,
@@ -394,3 +399,134 @@ def test_clamp_entity_to_arena() -> None:
 
     blocked_x = clamp_entity_to_arena(Pos25D(135, 100, 0), arena, dx=10)
     assert blocked_x == Pos25D(139, 100, 0)
+
+
+def _make_sized_frame(index: int, width: int, height: int, *, hot_x: int = 0) -> CelFrame:
+    pixels = np.ones((height, width), dtype=np.uint8)
+    mask = np.ones((height, width), dtype=bool)
+    meta = CelFrameMeta(
+        index=index,
+        data_offset=0,
+        width=width,
+        height=height,
+        hot_and_flags=(hot_x & 0x0F) << 4,
+        plane_bits=0x1F,
+    )
+    return CelFrame(meta=meta, pixels=pixels, mask=mask)
+
+
+def test_select_knight_body_frame_skips_slivers_and_stays_in_hit_range() -> None:
+    from pymoonstone.sim.knight_combat import KnightAction
+
+    frames = tuple(
+        _make_sized_frame(i, 7, 33) if i % 2 == 1 else _make_sized_frame(i, 54, 23)
+        for i in range(60)
+    )
+    cel = DecodedCel(frame_count=60, packed_size=0, unpacked_bits=0, frames=frames, raw_planes=b"")
+    hit_frames = tuple(
+        HitFrame(
+            frame_index=i,
+            hit_type=1,
+            max_x=40 if i == 10 else 0,
+            max_y=12 if i == 10 else 0,
+            points=(HitPoint(40, 12),) if i == 10 else (),
+        )
+        for i in range(26)
+    )
+    hit_set = HitSet(name="kn4", norm_name="kn4", frames=hit_frames)
+
+    for action in KnightAction:
+        for tick in (0, 6, 12, 18):
+            fidx = select_knight_body_frame(cel, action, tick, hit_set=hit_set)
+            assert 0 <= fidx < 26
+            assert cel.frames[fidx].meta.width >= 20
+            if action in (
+                KnightAction.OVERHEAD_SLASH,
+                KnightAction.THRUST,
+                KnightAction.LOW_SWEEP,
+            ):
+                assert fidx == 10
+
+
+def test_compose_knight_pieces_from_mog_bytecode() -> None:
+    import struct
+
+    from pymoonstone.sim.collision import DRAW_FLAG_ATTACK, DRAW_FLAG_HURTBOX
+    from pymoonstone.sim.combat_vm import OP_END_FRAME, OP_END_SCRIPT
+    from pymoonstone.sim.knight_combat import KnightAction
+
+    frames = tuple(_make_sized_frame(i, 24, 20, hot_x=2) for i in range(26))
+    cel = DecodedCel(frame_count=26, packed_size=0, unpacked_bits=0, frames=frames, raw_planes=b"")
+
+    script = (
+        struct.pack(">BBbBh", 0, 4, -8, DRAW_FLAG_HURTBOX, 2)
+        + struct.pack(">BBbBh", 0, 5, 0, DRAW_FLAG_HURTBOX | DRAW_FLAG_ATTACK, 10)
+        + bytes([OP_END_FRAME, OP_END_SCRIPT])
+    )
+    s4 = b"\x00" * 32 + script
+    right_offsets = (32,) * 11
+    left_offsets = (32,) * 11
+    actions = CombatActionTables(right_offsets=right_offsets, left_offsets=left_offsets)
+
+    pieces = compose_knight_pieces(
+        cel,
+        KnightAction.OVERHEAD_SLASH,
+        0,
+        flipped=False,
+        mog_s4=s4,
+        combat_actions=actions,
+    )
+    assert len(pieces) == 2
+    assert pieces[0].frame_index == 4
+    assert (pieces[0].dx, pieces[0].dy) == (2, -8)
+    assert pieces[0].hurtbox is True
+    assert pieces[0].attack is False
+    assert pieces[1].frame_index == 5
+    assert (pieces[1].dx, pieces[1].dy) == (10, 0)
+    assert pieces[1].attack is True
+
+
+def test_resolve_composed_melee_attack_with_hotspots() -> None:
+    atk_frame = _make_sized_frame(0, 24, 20, hot_x=2)
+    def_frame = _make_sized_frame(1, 20, 20, hot_x=0)
+    hit_set = HitSet(
+        name="kn4",
+        norm_name="kn4",
+        frames=(
+            HitFrame(
+                frame_index=0,
+                hit_type=1,
+                max_x=22,
+                max_y=10,
+                points=(HitPoint(22, 10),),
+            ),
+        ),
+    )
+    atk_piece = CombatSpritePiece(frame=atk_frame, frame_index=0, dx=6, dy=0, attack=True)
+    def_piece = CombatSpritePiece(frame=def_frame, frame_index=1, hurtbox=True)
+
+    # cel_screen_origin for attacker at x=100: 100 + 6 - 12 - 2 = 92; hit point at 92 + 22 = 114
+    sx, sy = cel_screen_origin(Pos25D(100, 90, 0), atk_frame, dx=6, dy=0, flipped=False)
+    assert (sx, sy) == (92, 80)
+
+    assert resolve_composed_melee_attack(
+        attacker_id=EntityId(1),
+        attacker_pos=Pos25D(100, 90, 0),
+        attacker_pieces=(atk_piece,),
+        attacker_hit_set=hit_set,
+        attacker_flipped=False,
+        defender_id=EntityId(2),
+        defender_pos=Pos25D(115, 92, 0),
+        defender_pieces=(def_piece,),
+    )
+
+    assert not resolve_composed_melee_attack(
+        attacker_id=EntityId(1),
+        attacker_pos=Pos25D(100, 90, 0),
+        attacker_pieces=(atk_piece,),
+        attacker_hit_set=hit_set,
+        attacker_flipped=False,
+        defender_id=EntityId(2),
+        defender_pos=Pos25D(160, 92, 0),
+        defender_pieces=(def_piece,),
+    )

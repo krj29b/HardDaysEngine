@@ -32,6 +32,7 @@ class PlayerInput:
     run: bool = False
     confirm: bool = False
     pause: bool = False
+    skip_intro: bool = False
 
     def normalized(self) -> PlayerInput:
         """Clamp ``dx`` and ``dy`` to ``-1..1``."""
@@ -46,6 +47,7 @@ class PlayerInput:
             run=self.run,
             confirm=self.confirm,
             pause=self.pause,
+            skip_intro=self.skip_intro,
         )
 
     def to_knight_input(self) -> KnightInput:
@@ -67,6 +69,7 @@ class PlayerInput:
         *,
         confirm: bool = False,
         pause: bool = False,
+        skip_intro: bool = False,
     ) -> PlayerInput:
         """Wrap a :class:`KnightInput` with optional menu ``confirm``/``pause`` flags."""
         norm = inp.normalized()
@@ -79,6 +82,7 @@ class PlayerInput:
             run=norm.run,
             confirm=confirm,
             pause=pause,
+            skip_intro=skip_intro,
         )
 
     def to_dict(self) -> dict[str, int | bool]:
@@ -91,8 +95,9 @@ class PlayerInput:
             "secondary": norm.secondary,
             "weapon_switch": norm.weapon_switch,
             "run": norm.run,
-            "confirm": self.confirm,
-            "pause": self.pause,
+            "confirm": norm.confirm,
+            "pause": norm.pause,
+            "skip_intro": norm.skip_intro,
         }
 
     @classmethod
@@ -107,6 +112,7 @@ class PlayerInput:
             run=bool(data.get("run", False)),
             confirm=bool(data.get("confirm", False)),
             pause=bool(data.get("pause", False)),
+            skip_intro=bool(data.get("skip_intro", False)),
         ).normalized()
 
 
@@ -345,8 +351,6 @@ class InputRouter:
             key = int(event.key)
             self._held_keys.add(key)
             self._edge_keys.add(key)
-            if key == pygame.K_ESCAPE:
-                self._quit_requested = True
         elif etype == pygame.KEYUP:
             self._held_keys.discard(int(event.key))
         elif etype in (
@@ -383,6 +387,13 @@ class InputRouter:
             1 if bind.left in self._held_keys else 0
         )
         dy = (1 if bind.down in self._held_keys else 0) - (1 if bind.up in self._held_keys else 0)
+        skip_intro = (
+            (bind.confirm in self._edge_keys)
+            or (bind.fire in self._edge_keys)
+            or (pygame.K_ESCAPE in self._edge_keys)
+            or (pygame.K_RETURN in self._edge_keys)
+            or (pygame.K_SPACE in self._edge_keys)
+        )
         return PlayerInput(
             dx=dx,
             dy=dy,
@@ -392,6 +403,7 @@ class InputRouter:
             run=bind.run in self._held_keys,
             confirm=(bind.confirm in self._edge_keys) or (bind.fire in self._edge_keys),
             pause=bind.pause in self._edge_keys,
+            skip_intro=skip_intro,
         )
 
     def _sample_pad(self, pad: _PadState) -> PlayerInput:
@@ -399,6 +411,8 @@ class InputRouter:
         ax_dy = 1 if pad.axis_y >= AXIS_DEADZONE else (-1 if pad.axis_y <= -AXIS_DEADZONE else 0)
         dx = pad.hat_x if pad.hat_x != 0 else ax_dx
         dy = pad.hat_y if pad.hat_y != 0 else ax_dy
+        button_a = 0 in pad.edge_buttons
+        start_btn = 7 in pad.edge_buttons
         return PlayerInput(
             dx=dx,
             dy=dy,
@@ -406,8 +420,9 @@ class InputRouter:
             secondary=1 in pad.buttons,
             weapon_switch=2 in pad.edge_buttons,
             run=3 in pad.buttons,
-            confirm=(0 in pad.edge_buttons) or (7 in pad.edge_buttons),
-            pause=7 in pad.edge_buttons,
+            confirm=button_a or start_btn,
+            pause=start_btn,
+            skip_intro=button_a or start_btn,
         )
 
     def _merge_inputs(self, kb: PlayerInput, pad: PlayerInput) -> PlayerInput:
@@ -420,6 +435,7 @@ class InputRouter:
             run=kb.run or pad.run,
             confirm=kb.confirm or pad.confirm,
             pause=kb.pause or pad.pause,
+            skip_intro=kb.skip_intro or pad.skip_intro,
         ).normalized()
 
     def sample_frame(self) -> InputFrame:
