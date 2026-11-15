@@ -23,7 +23,6 @@ from pymoonstone.assets import (
     PictureFormatError,
     RNCFormatError,
     amiga_hash,
-    assemble_combat_palette,
     cel_frame_to_rgba,
     cell_word_to_rgb,
     composite_arena_background,
@@ -187,11 +186,6 @@ def test_palette_word_decoding_and_combat_assembly() -> None:
     assert pal[0] == (0, 0, 0)
     assert pal[1] == (255, 0, 0)
     assert pal[2] == (238, 238, 238)
-
-    combat_pal = assemble_combat_palette(pal * 11, pal * 11)
-    assert len(combat_pal) == 32
-    assert combat_pal[0] == (0, 0, 0)
-    assert combat_pal[15] == cell_word_to_rgb(0x0A00)
 
 
 def test_planar_picture_and_pack_round_trip() -> None:

@@ -208,6 +208,9 @@ class _StubCombatBundle:
     def get_mog_tables(self) -> MogRuntimeTables:
         return self._mog_tables
 
+    def get_fight_palette_tables(self) -> None:
+        return None
+
     def get_mog_s4_bytes(self) -> bytes:
         return self._s4
 
@@ -253,53 +256,6 @@ class _StubCombatBundle:
 
 def _render_stub(session: GameSession, renderer: _StubSceneRenderer) -> None:
     session.render_to_scene(cast("SceneRenderer", renderer), default_bitmap_font())
-
-
-def test_blue_knight_combat_palette_indices_6_to_8() -> None:
-    session = GameSession(players=(KnightId.BLUE,), start_scene=GameScene.OVERWORLD)
-    session._start_combat(
-        EncounterTrigger(
-            kind=TriggerKind.WANDERING_MONSTER,
-            knight_id=KnightId.BLUE,
-            node_id=0,
-            day=1,
-            moon_phase=MoonPhase.NEW_MOON,
-            encounter_kind=0,
-        ),
-        KnightId.BLUE,
-    )
-    for _ in range(16):
-        session.step_tick(InputFrame())
-
-    renderer = _StubSceneRenderer()
-    _render_stub(session, renderer)
-    assert len(renderer.palette) == 32
-    for idx in (6, 7, 8):
-        r, g, b = renderer.palette[idx]
-        assert b > r and b > g, f"expected blue tunic at index {idx}, got {(r, g, b)}"
-    # Outside dragon scene, index 15 is blood red.
-    r15, g15, b15 = renderer.palette[15]
-    assert r15 > g15 and r15 > b15
-
-
-def test_dragon_combat_palette_overrides_index_15() -> None:
-    session = GameSession(players=(KnightId.BLUE,), start_scene=GameScene.OVERWORLD)
-    session._start_combat(
-        EncounterTrigger(
-            kind=TriggerKind.DRAGON_INTERCEPT,
-            knight_id=KnightId.BLUE,
-            node_id=0,
-            day=1,
-            moon_phase=MoonPhase.NEW_MOON,
-        ),
-        KnightId.BLUE,
-    )
-    for _ in range(16):
-        session.step_tick(InputFrame())
-
-    renderer = _StubSceneRenderer()
-    _render_stub(session, renderer)
-    assert renderer.palette[15] == rgb12_to_rgb24(0x0FE8)
 
 
 def test_scene_entry_fade_in_first_rendered_frame_not_all_black() -> None:

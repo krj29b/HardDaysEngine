@@ -19,9 +19,10 @@ from pymoonstone.assets.audio import (
     decode_sample_bank,
 )
 from pymoonstone.assets.cel import DecodedCel, decode_cel
+from pymoonstone.assets.fight_palette import FightPaletteTables, parse_fight_palette_tables
 from pymoonstone.assets.hit import HitSet, parse_collide_hit
 from pymoonstone.assets.hunk import HunkFormatError, parse_hunk_executable
-from pymoonstone.assets.palette import RGBColor, assemble_combat_palette, default_combat_palette
+from pymoonstone.assets.palette import RGBColor, default_combat_palette
 from pymoonstone.assets.picture import DecodedPicture, decode_picture, decode_picture_pack
 from pymoonstone.assets.tables import (
     MogRuntimeTables,
@@ -213,6 +214,8 @@ class GameAssetBundle:
     _mog_tables: MogRuntimeTables | None = None
     _mog_tables_checked: bool = False
     _mog_s4_data: bytes | None = None
+    _fight_palette_checked: bool = False
+    _fight_palette_tables: FightPaletteTables | None = None
     _hit_sets: dict[str, HitSet] | None = None
     _hit_sets_checked: bool = False
 
@@ -301,8 +304,7 @@ class GameAssetBundle:
             loaded = self.get_arena(candidate)
             if loaded is not None:
                 arena, bg_pic = loaded
-                pal = assemble_combat_palette(default_combat_palette(), bg_pic.palette)
-                return arena, bg_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH], pal
+                return arena, bg_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH], tuple(bg_pic.palette)
         return None
 
     def get_knight_cel(self, knight_index: int) -> DecodedCel | None:
@@ -407,6 +409,18 @@ class GameAssetBundle:
                     self._mog_tables = None
                     self._mog_s4_data = None
         return self._mog_tables
+
+    def get_fight_palette_tables(self) -> FightPaletteTables | None:
+        """Load and cache the fight colour rows from ``mog`` (ARCHITECTURE.md §10.15).
+
+        Returns ``None`` when the disk set has no ``mog``; an unsupported ``mog`` raises.
+        """
+        if not self._fight_palette_checked:
+            self._fight_palette_checked = True
+            if self.disk_set.has_file("mog"):
+                exe = parse_hunk_executable("mog", self.disk_set.read_file("mog"))
+                self._fight_palette_tables = parse_fight_palette_tables(exe)
+        return self._fight_palette_tables
 
     def get_mog_s4_bytes(self) -> bytes | None:
         """Return cached raw `mog` `S_4` data hunk bytes if `mog` is present."""

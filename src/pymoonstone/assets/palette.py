@@ -95,20 +95,3 @@ def palette_to_rgba_array(
     if zero_transparent and size > 0:
         lut[0, 3] = 0
     return lut
-
-
-def assemble_combat_palette(
-    hud_palette: Sequence[RGBColor],
-    region_palette: Sequence[RGBColor],
-) -> tuple[RGBColor, ...]:
-    """Combine HUD/knight colours (0..15) with region colours (16..28) and blood red at 15."""
-    out = list(default_combat_palette())
-    for i in range(min(16, len(hud_palette))):
-        out[i] = hud_palette[i]
-    out[0] = (0, 0, 0)
-    out[15] = cell_word_to_rgb(0x0A00)
-    for i in range(16, min(29, len(region_palette))):
-        out[i] = region_palette[i]
-    for i in range(29, min(32, len(hud_palette))):
-        out[i] = hud_palette[i]
-    return tuple(out)

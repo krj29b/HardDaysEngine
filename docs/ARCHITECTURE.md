@@ -874,8 +874,9 @@ With the travel mark set (§11) a lair is looted without a fight.
 Every creature arena starts the same way, in this order:
 
 1. Show the next line of the loading-text cycle on `message.piv`.
-2. Build the arena picture for the current **region code** (0 forest, 4 glen, 8 swamp, `$C`
-   wasteland; §4.3 composes it) and its obstacle table. The **low edge** is the largest `y` of
+2. Build the arena picture for the current **region code** (0 glen, 4 forest, 8 swamp, `$C`
+   wasteland; §4.3 composes it, where the arena file prefixes `gl`, `fo`, `sw`, `wa` are its
+   region indices 1, 0, 2, 3) and its obstacle table. The **low edge** is the largest `y` of
    the obstacle records, starting from 30.
 3. Free all 20 fight-pool actors, all jobs and all dagger trajectories.
 4. Place the attacker: the current knight becomes the first fighter at `x = 250`, `height = 0`,
@@ -1092,9 +1093,10 @@ looks only at the first fighter.
 
 ### 10.13 Fight palette
 
-Built when an arena finishes its set-up, from the backdrop picture's 32 colours:
+Built when an arena finishes its set-up, from the 32 colours of the region's object sheet
+(§4.3: `test` picture 0 for glen and forest, 2 for swamp, 3 for wasteland):
 
-1. Copy the picture palette.
+1. Copy the sheet's palette.
 2. Entries 9..15 take the seven colours of the **scene code** (§10.3). Scene `$0C` (a duel)
    instead puts the second fighter's three class colours at 9..11. Scenes `$18` and `$20` pick
    one of three sets by region code (`$C`, 0, others). Scene `$14` (dragon) also sets 29..31.
@@ -1108,7 +1110,10 @@ Built when an arena finishes its set-up, from the backdrop picture's 32 colours:
 6. Entry 0 is black. Entry 15 is blood red unless the scene is `$14`.
 7. Fade in to the result.
 
-Entry 5 and, outside the dragon scene, 29..31 always stay the picture's own.
+Entry 5 and, outside the dragon scene, 29..31 always stay the sheet's own. The four region
+tables hold the same 13 colours as entries 16..28 of the region backdrop pictures (`test`
+pictures 7, 4, 6, 5 for codes 0, 4, 8, `$C`), which is how the code-to-region order above was
+established and is what the real-disk test checks.
 
 ### 10.14 On-screen feedback
 
@@ -1124,8 +1129,9 @@ in `mog` and are read by offset. Hit points, reach, alive / total counts, scene 
 class colours are **immediates inside 68k code** in hunk 0. They are read as operands at known
 positions:
 
-- `assets/tables.py` identifies the `mog` file by CRC-32 and holds, per known version, the hunk
-  offsets of each routine's operands (positions, not values).
+- The decoder identifies `mog` by the CRC-32 of its code hunk (hunk 0) and holds, per known
+  version, the hunk offsets of each routine's operands (positions, not values). The first such
+  decoder is `assets/fight_palette.py`.
 - Each operand read checks the instruction word in front of it; a mismatch raises an error
   naming the routine, rather than returning a guess.
 - Relocated longs (script addresses) are resolved through the hunk's relocation table to an

@@ -49,9 +49,24 @@ from pymoonstone.app.scene_assets import (
     select_monster_frame,
 )
 from pymoonstone.assets.adf import DiskSet
+from pymoonstone.assets.fight_palette import (
+    REGION_FOREST,
+    REGION_GLEN,
+    REGION_SWAMP,
+    REGION_WASTELAND,
+    SCENE_BALOK,
+    SCENE_DRAGON,
+    SCENE_FLYER,
+    SCENE_GUARDIAN,
+    SCENE_MUDMEN,
+    SCENE_RATMEN,
+    SCENE_TROGG_AXE,
+    SCENE_TROGG_SPEAR,
+    SCENE_TROLL,
+    assemble_fight_palette,
+)
 from pymoonstone.assets.palette import (
     RGBColor,
-    assemble_combat_palette,
     cell_word_to_rgb,
     default_combat_palette,
 )
@@ -164,36 +179,35 @@ _MI_DRAGON_BASE = 34
 _MI_DRAGON_COUNT = 8
 _MI_PLACE_IDS: frozenset[int] = frozenset({21, 22, 23, 24, 25, 26, 27, 28, 30})
 
-# Knight class tunic ramps for combat palette indices 6..8 (ARCHITECTURE.md §8.1).
-_KNIGHT_COMBAT_TUNIC_WORDS: dict[KnightId, tuple[int, int, int]] = {
-    KnightId.RED: (0x0600, 0x0A11, 0x0E33),
-    KnightId.BLUE: (0x0016, 0x0139, 0x036E),
-    KnightId.GREEN: (0x0040, 0x0182, 0x02C5),
-    KnightId.YELLOW: (0x0850, 0x0B90, 0x0FD0),
+# Scene code of each creature's arena (ARCHITECTURE.md §10.3).
+_ARCHETYPE_SCENE_CODES: dict[MonsterArchetype, int] = {
+    MonsterArchetype.TROGG_SPEAR: SCENE_TROGG_SPEAR,
+    MonsterArchetype.TROGG_AXE: SCENE_TROGG_AXE,
+    MonsterArchetype.RATMAN: SCENE_RATMEN,
+    MonsterArchetype.MUDMAN: SCENE_MUDMEN,
+    MonsterArchetype.BEASTMAN: SCENE_FLYER,
+    MonsterArchetype.TROLL: SCENE_TROLL,
+    MonsterArchetype.BALOK: SCENE_BALOK,
+    MonsterArchetype.DEMON: SCENE_GUARDIAN,
+    MonsterArchetype.GUARDIAN: SCENE_GUARDIAN,
+    MonsterArchetype.DRAGON: SCENE_DRAGON,
+}
+_SCENE_NONE = -1
+
+# Actor ``kind`` of each selectable knight (ARCHITECTURE.md §9.2, §10.13).
+_KNIGHT_KINDS: dict[KnightId, int] = {
+    KnightId.BLUE: 0,
+    KnightId.YELLOW: 1,
+    KnightId.GREEN: 2,
+    KnightId.RED: 3,
 }
 
-# Creature scene colors for combat palette indices 9..14 (index 15 is blood red 0x0A00).
-_CREATURE_SCENE_COLOR_WORDS: dict[MonsterArchetype, tuple[int, int, int, int, int, int]] = {
-    MonsterArchetype.TROGG_SPEAR: (0x0231, 0x0452, 0x0673, 0x0895, 0x0AB7, 0x0CD9),
-    MonsterArchetype.TROGG_AXE: (0x0231, 0x0452, 0x0673, 0x0895, 0x0AB7, 0x0CD9),
-    MonsterArchetype.RATMAN: (0x0322, 0x0543, 0x0765, 0x0987, 0x0BA9, 0x0DCB),
-    MonsterArchetype.MUDMAN: (0x0221, 0x0432, 0x0653, 0x0874, 0x0986, 0x0BA8),
-    MonsterArchetype.BEASTMAN: (0x0321, 0x0542, 0x0753, 0x0974, 0x0B96, 0x0DB8),
-    MonsterArchetype.TROLL: (0x0232, 0x0353, 0x0575, 0x0797, 0x09B9, 0x0BDB),
-    MonsterArchetype.BALOK: (0x0311, 0x0522, 0x0743, 0x0965, 0x0B87, 0x0DA9),
-    MonsterArchetype.DEMON: (0x0301, 0x0512, 0x0723, 0x0944, 0x0B66, 0x0D88),
-    MonsterArchetype.GUARDIAN: (0x0334, 0x0556, 0x0778, 0x099A, 0x0BBC, 0x0DDE),
-}
-
-# Dragon scene uses fiery tones across indices 9..15 instead of blood red at 15.
-_DRAGON_SCENE_COLOR_WORDS: tuple[int, int, int, int, int, int, int] = (
-    0x0410,
-    0x0720,
-    0x0A40,
-    0x0D60,
-    0x0F90,
-    0x0FC4,
-    0x0FE8,
+# Region code of each arena file prefix index (fo, gl, sw, wa) (ARCHITECTURE.md §10.2).
+_ARENA_REGION_CODES: tuple[int, int, int, int] = (
+    REGION_FOREST,
+    REGION_GLEN,
+    REGION_SWAMP,
+    REGION_WASTELAND,
 )
 
 
@@ -437,23 +451,24 @@ class GameSession:
         base_palette: Sequence[RGBColor],
         active: ActiveEncounter | None,
     ) -> tuple[RGBColor, ...]:
-        out = list(base_palette[:32])
-        while len(out) < 32:
-            out.append((0, 0, 0))
-        kid = active.knight_ids[0] if active is not None and active.knight_ids else self.players[0]
-        tunic = _KNIGHT_COMBAT_TUNIC_WORDS.get(kid, _KNIGHT_COMBAT_TUNIC_WORDS[KnightId.RED])
-        for offset, word in enumerate(tunic):
-            out[6 + offset] = cell_word_to_rgb(word)
+        """Assemble the fight palette from the arena picture palette (ARCHITECTURE.md §10.13)."""
+        tables = (
+            self.asset_bundle.get_fight_palette_tables() if self.asset_bundle is not None else None
+        )
+        if tables is None or active is None:
+            return tuple(base_palette)
         archetype = self._active_monster_archetype(active)
-        if archetype == MonsterArchetype.DRAGON:
-            for offset, word in enumerate(_DRAGON_SCENE_COLOR_WORDS):
-                out[9 + offset] = cell_word_to_rgb(word)
-        else:
-            if archetype in _CREATURE_SCENE_COLOR_WORDS:
-                for offset, word in enumerate(_CREATURE_SCENE_COLOR_WORDS[archetype]):
-                    out[9 + offset] = cell_word_to_rgb(word)
-            out[15] = cell_word_to_rgb(0x0A00)
-        return tuple(out)
+        scene = _ARCHETYPE_SCENE_CODES.get(archetype, _SCENE_NONE) if archetype else _SCENE_NONE
+        region_index = active.arena.region & 3 if active.arena is not None else 0
+        kid = active.knight_ids[0] if active.knight_ids else self.players[0]
+        words = assemble_fight_palette(
+            _palette_to_rgb12(base_palette),
+            tables,
+            scene=scene,
+            region=_ARENA_REGION_CODES[region_index],
+            first_kind=_KNIGHT_KINDS[kid],
+        )
+        return tuple(cell_word_to_rgb(word) for word in words)
 
     @staticmethod
     def _active_monster_archetype(active: ActiveEncounter | None) -> MonsterArchetype | None:
@@ -830,8 +845,7 @@ class GameSession:
         loaded = self.asset_bundle.get_arena(arena_name)
         if loaded is not None:
             arena, bg_pic = loaded
-            pal = assemble_combat_palette(default_combat_palette(), bg_pic.palette)
-            return arena, bg_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH], pal
+            return arena, bg_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH], tuple(bg_pic.palette)
         return self.asset_bundle.get_combat_arena(max(0, trigger.lair_index))
 
     def _start_combat(self, trigger: EncounterTrigger, knight_id: KnightId) -> None:

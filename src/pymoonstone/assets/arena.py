@@ -10,7 +10,6 @@ import numpy as np
 import numpy.typing as npt
 
 from pymoonstone.assets.lzss import decompress_lzss
-from pymoonstone.assets.palette import assemble_combat_palette
 from pymoonstone.assets.picture import (
     PICTURE_HEIGHT,
     PICTURE_WIDTH,
@@ -164,13 +163,16 @@ def composite_arena_background(
     arena: DecodedArena,
     test_pictures: Sequence[DecodedPicture],
 ) -> DecodedPicture:
-    """Composite a 320x200 arena background from `B/test` tile sheets (ARCHITECTURE.md §4.3)."""
+    """Composite a 320x200 arena background from `B/test` tile sheets (ARCHITECTURE.md §4.3).
+
+    The returned palette is the region's object sheet palette, the base of the fight palette
+    (ARCHITECTURE.md §10.13).
+    """
     if len(test_pictures) < 8:
         msg = f"Expected at least 8 pictures from B/test, got {len(test_pictures)}"
         raise ArenaFormatError(msg)
 
     region = arena.region & 3
-    hud_pic = test_pictures[0]
     base_pic = test_pictures[_REGION_BACKDROP_INDEX[region]]
     main_sheet = test_pictures[_MAIN_SHEET_INDEX]
     fg_sheet = test_pictures[_REGION_FG_SHEET_INDEX[region]]
@@ -180,15 +182,14 @@ def composite_arena_background(
         sheet = fg_sheet if op.kind == 0x0300 else main_sheet
         _blit_tile_cookie_cut(canvas, sheet.pixels, op.tile_index, op.x, op.y)
 
-    palette = assemble_combat_palette(hud_pic.palette, base_pic.palette)
     raw_planes = indexed_to_planar(canvas, planes=5)
     return DecodedPicture(
         width=PICTURE_WIDTH,
         height=PICTURE_HEIGHT,
         planes=5,
         packed_size=0,
-        raw_palette=hud_pic.raw_palette,
-        palette=palette,
+        raw_palette=fg_sheet.raw_palette,
+        palette=fg_sheet.palette,
         pixels=canvas,
         raw_planes=raw_planes,
     )

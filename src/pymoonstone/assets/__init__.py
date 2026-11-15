@@ -97,7 +97,6 @@ from pymoonstone.assets.manifest import (
 from pymoonstone.assets.palette import (
     DEFAULT_COMBAT_CELL_WORDS,
     RGBColor,
-    assemble_combat_palette,
     cell_word_to_rgb,
     decode_palette,
     decode_palette_word,
@@ -180,7 +179,6 @@ __all__ = [
     "RNCHeader",
     "SynthInstrumentRecord",
     "amiga_hash",
-    "assemble_combat_palette",
     "cel_frame_to_rgba",
     "cell_word_to_rgb",
     "composite_arena_background",

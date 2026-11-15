@@ -39,6 +39,8 @@ _TOWN_BUTTON_COUNTS: tuple[tuple[LocationKind, int], ...] = (
     (LocationKind.HIGHWOOD, 4),
     (LocationKind.WATERDEEP, 5),
 )
+_REGION_NAMES: tuple[str, ...] = ("forest", "glen", "swamp", "wasteland")
+_NO_NODE = -1
 _END_SCENES: tuple[GameScene, ...] = (
     GameScene.STATUS,
     GameScene.NEW_DAY,
@@ -177,11 +179,31 @@ def _fight_shots(rig: AuditRig) -> Iterator[AuditShot]:
         yield rig.capture(session, f"fight{creature}_attack_late")
 
 
+def _region_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    """One lair arena per region, to review the fight palette (ARCHITECTURE.md §10.13)."""
+    for lair_index, region in enumerate(_REGION_NAMES):
+        session = rig.new_session()
+        session._start_combat(
+            EncounterTrigger(
+                kind=TriggerKind.LAIR_BOSS,
+                knight_id=_PRIMARY,
+                node_id=_NO_NODE,
+                day=1,
+                moon_phase=session.overworld.moon_phase,
+                lair_index=lair_index,
+            ),
+            _PRIMARY,
+        )
+        _step(session, 60)
+        yield rig.capture(session, f"region_{region}")
+
+
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
     "intro": _intro_shots,
     "menu_map": _menu_and_map_shots,
     "places": _place_shots,
     "fights": _fight_shots,
+    "regions": _region_shots,
 }
 
 

@@ -80,7 +80,7 @@ code that passes its tests but does not reproduce the original; T11.24 corrects 
 | T11.3 | Spec §10: fights | T11.2 | DONE | `ARCHITECTURE.md` §10: entries, common set-up, the nine arenas, record initialisation, spawning and lanes, wave scaling, frame order, job pass, knight handler, contact / movement probe / clipping, damage and blocking, death accounting, palette, low-health pulse, how fight data is read from `mog` (§10.15). The per-handler rules (§10.16) are written by T11.9 / T11.10a–i before their code. Findings: creature values are code operands in `mog` hunk 0, so T11.7 reads operands at CRC-identified positions; the original fight has no HUD bars. Audit §6.2 item 5 corrected. |
 | T11.4 | Spec §11: overworld & turns | T11.2 | TODO | |
 | T11.5 | Spec §12: places & sheets | T11.2 | TODO | |
-| T11.6 | Fight palette from data | T11.1, T11.3 | TODO | |
+| T11.6 | Fight palette from data | T11.1, T11.3 | DONE | `assets/fight_palette.py` reads class, scene, Trogg, dragon-tail and low-tweak rows from `MOVE.W #imm` runs in `mog` hunk 0 (opcode checked per operand, hunk CRC `$FA43E5B2`) and the region / guardian tables through their relocated `LEA`s; `assemble_fight_palette` implements §10.13. `assemble_combat_palette` and the colour literals in `app/game.py` are gone; an arena picture now carries its object sheet's palette. Region codes are 0 glen, 4 forest (spec corrected), proven by the region tables matching `test` pictures 7 / 4 / 6 / 5. Contact sheets `fights.png` and `regions.png` reviewed: all four regions correct. Not done here: duel scene `$0C` and Mudmen's forced swamp region have no caller until T11.8; the invented HUD still draws with entries 29..31 and so changed colour (it is removed in T11.11). Without disks the fight keeps the fallback palette. |
 | T11.7 | Creature definitions from `mog` | T11.3 | TODO | |
 | T11.8 | Fight engine (jobs own script state) | T11.7 | TODO | |
 | T11.9 | Knight control | T11.8 | TODO | |
@@ -112,3 +112,4 @@ code that passes its tests but does not reproduce the original; T11.24 corrects 
 - 2026-11-15 · Claude · User accepted ADR-009. T11.1 done (audit harness, 6 smoke tests pass on real disks).
 - 2026-11-15 · Claude · T11.2 done (spec §9, no code changes).
 - 2026-11-15 · Claude · T11.3 done (spec §10, no code changes); T11.7 and T11.11 wording adjusted to it.
+- 2026-11-15 · Claude · T11.6 done: fight palette read from `mog`; 26 unit + 9 real-disk tests.

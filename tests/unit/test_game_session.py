@@ -540,6 +540,9 @@ def test_combat_sfx_keys_and_region_arena_selection() -> None:
         def get_mog_tables(self) -> None:
             return None
 
+        def get_fight_palette_tables(self) -> None:
+            return None
+
         def get_arena(self, name: str) -> tuple[DecodedArena, DecodedPicture]:
             requested_arenas.append(name)
             arena = DecodedArena(name=name, region=0, is_lair=False, obstacles=(), tiles=())
