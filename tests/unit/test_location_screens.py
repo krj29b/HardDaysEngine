@@ -184,26 +184,14 @@ def test_highwood_healer_shop_tavern_and_leave() -> None:
     ow = _make_overworld()
     knight = _make_knight(gold=500, hp=60)
     state = LocationMenuState(location=LocationKind.HIGHWOOD)
+    assert menu_options_for_location(state, knight) == (
+        "MERCHANT",
+        "TAVERN",
+        "HEALER",
+        "LEAVE",
+    )
 
-    # Enter Healer (index 0) and restore HP (index 0).
-    step_location_menu(state, PlayerInput(confirm=True), knight, ow)
-    assert state.location == LocationKind.HEALER
-    step_location_menu(state, PlayerInput(), knight, ow)
-    res_heal = step_location_menu(state, PlayerInput(fire=True), knight, ow)
-    assert knight.hp == knight.max_hp
-    assert knight.gold < 500
-    assert "HEALED" in res_heal.status_message
-
-    # Return to HighWood via Leave (index 3).
-    state.cursor = 3
-    step_location_menu(state, PlayerInput(), knight, ow)
-    res_back = step_location_menu(state, PlayerInput(confirm=True), knight, ow)
-    assert res_back.left_location is False
-    assert int(state.location) == int(LocationKind.HIGHWOOD)
-
-    # Enter Merchant / Shop (index 1) and buy Sword Upgrade (index 0).
-    state.cursor = 1
-    step_location_menu(state, PlayerInput(), knight, ow)
+    # Enter Merchant / Shop (index 0) and buy Sword Upgrade (index 0).
     step_location_menu(state, PlayerInput(confirm=True), knight, ow)
     assert int(state.location) == int(LocationKind.SHOP)
     prev_sword = knight.sword_tier
@@ -216,13 +204,13 @@ def test_highwood_healer_shop_tavern_and_leave() -> None:
     assert sell_res.accepted is True
     assert knight.sword_tier == prev_sword
 
-    # Return to HighWood, enter Tavern (index 2), adjust wager, roll dice.
+    # Return to HighWood, enter Tavern (index 1), adjust wager, roll dice.
     state.cursor = len(menu_options_for_location(state, knight)) - 1
     step_location_menu(state, PlayerInput(), knight, ow)
     step_location_menu(state, PlayerInput(confirm=True), knight, ow)
     assert int(state.location) == int(LocationKind.HIGHWOOD)
 
-    state.cursor = 2
+    state.cursor = 1
     step_location_menu(state, PlayerInput(), knight, ow)
     step_location_menu(state, PlayerInput(confirm=True), knight, ow)
     assert int(state.location) == int(LocationKind.TAVERN)
@@ -234,7 +222,23 @@ def test_highwood_healer_shop_tavern_and_leave() -> None:
     assert "VS" in res_dice.status_message
     assert knight.gold in (gold_before_dice - 20, gold_before_dice, gold_before_dice + 20)
 
-    # Leave Tavern -> HighWood -> Overworld.
+    # Return to HighWood, enter Healer (index 2), and restore HP (index 0).
+    state.cursor = 3
+    step_location_menu(state, PlayerInput(), knight, ow)
+    step_location_menu(state, PlayerInput(confirm=True), knight, ow)
+    assert int(state.location) == int(LocationKind.HIGHWOOD)
+
+    state.cursor = 2
+    step_location_menu(state, PlayerInput(), knight, ow)
+    step_location_menu(state, PlayerInput(confirm=True), knight, ow)
+    assert int(state.location) == int(LocationKind.HEALER)
+    step_location_menu(state, PlayerInput(), knight, ow)
+    res_heal = step_location_menu(state, PlayerInput(fire=True), knight, ow)
+    assert knight.hp == knight.max_hp
+    assert knight.gold < 500
+    assert "HEALED" in res_heal.status_message
+
+    # Leave Healer -> HighWood -> Overworld.
     state.cursor = 3
     step_location_menu(state, PlayerInput(), knight, ow)
     step_location_menu(state, PlayerInput(confirm=True), knight, ow)
@@ -245,12 +249,36 @@ def test_highwood_healer_shop_tavern_and_leave() -> None:
     assert res_exit.left_location is True
 
 
-def test_waterdeep_mystic_and_stonehenge_ritual() -> None:
+def test_waterdeep_all_services_training_and_stonehenge_ritual() -> None:
     ow = _make_overworld()
-    knight = _make_knight(gold=500, hp=80)
+    knight = _make_knight(gold=500, hp=60)
     state = LocationMenuState(location=LocationKind.WATERDEEP)
+    assert menu_options_for_location(state, knight) == (
+        "MERCHANT",
+        "TAVERN",
+        "HEALER",
+        "MYSTIC",
+        "LEAVE",
+    )
 
-    # Enter Mystic (index 0) and buy Fireball Scroll (index 0) + Key Hint (index 2).
+    # Enter Merchant (0), Tavern (1), Healer (2) and verify each returns to WaterDeep.
+    for idx, expected_loc in (
+        (0, LocationKind.SHOP),
+        (1, LocationKind.TAVERN),
+        (2, LocationKind.HEALER),
+    ):
+        state.cursor = idx
+        step_location_menu(state, PlayerInput(), knight, ow)
+        step_location_menu(state, PlayerInput(confirm=True), knight, ow)
+        assert state.location == expected_loc
+        state.cursor = len(menu_options_for_location(state, knight)) - 1
+        step_location_menu(state, PlayerInput(), knight, ow)
+        step_location_menu(state, PlayerInput(confirm=True), knight, ow)
+        assert state.location == LocationKind.WATERDEEP
+
+    # Enter Mystic (index 3) and buy Fireball Scroll (index 0) + Key Hint (index 2).
+    state.cursor = 3
+    step_location_menu(state, PlayerInput(), knight, ow)
     step_location_menu(state, PlayerInput(confirm=True), knight, ow)
     assert state.location == LocationKind.MYSTIC
     step_location_menu(state, PlayerInput(), knight, ow)
@@ -260,6 +288,23 @@ def test_waterdeep_mystic_and_stonehenge_ritual() -> None:
     step_location_menu(state, PlayerInput(), knight, ow)
     res_hint = step_location_menu(state, PlayerInput(confirm=True), knight, ow)
     assert "LAIR" in res_hint.status_message
+
+    # Leave Mystic -> WaterDeep -> Overworld (index 4).
+    state.cursor = 4
+    step_location_menu(state, PlayerInput(), knight, ow)
+    step_location_menu(state, PlayerInput(confirm=True), knight, ow)
+    assert state.location == LocationKind.WATERDEEP
+    state.cursor = 4
+    step_location_menu(state, PlayerInput(), knight, ow)
+    res_leave = step_location_menu(state, PlayerInput(confirm=True), knight, ow)
+    assert res_leave.left_location is True
+
+    # Training screen trains Strength cleanly.
+    train_state = LocationMenuState(location=LocationKind.TRAINING)
+    prev_str = knight.strength
+    res_train = step_location_menu(train_state, PlayerInput(confirm=True), knight, ow)
+    assert knight.strength == prev_str + 1
+    assert res_train.left_location is False
 
     # Stonehenge ritual succeeds when at Stonehenge, full moon, and all 4 moonstones.
     ow.knights[KnightId.RED].node_id = ow.graph.stonehenge_node_id
@@ -327,3 +372,42 @@ def test_render_location_status_and_new_day_screens() -> None:
     day_joined = "\n".join(day_font.lines)
     assert "DAY 15" in day_joined
     assert "FULL MOON" in day_joined
+
+
+def test_town_scroll_rendering_avoids_overlapping_text_and_aligns_highlight() -> None:
+    ow = _make_overworld()
+    knight = _make_knight()
+    renderer = _FakeSceneRenderer()
+    bundle = _FakeBundle(
+        {
+            "WaterDeep.PIV": _make_pic(fill=2),
+            "HighWood.PIV": _make_pic(fill=4),
+        }
+    )
+
+    # WaterDeep.PIV: scroll is on the left (x=0..63). Cursor 3 (MYSTIC) is at y_piv=134..164.
+    wd_font = _RecordingFont()
+    wd_state = LocationMenuState(location=LocationKind.WATERDEEP, cursor=3)
+    render_location_menu(renderer, wd_state, knight, ow, wd_font, bundle=bundle)
+    assert not any("+ " in line for line in wd_font.lines)
+    assert "> MYSTIC" in wd_font.lines
+    assert "<" in wd_font.lines
+    # Interior of the painted scroll at y_canvas=166, x=10..50 must remain untouched (fill=2).
+    assert np.all(renderer.canvas[28 + 134 + 4, 10:50] == 2)
+    # Highlight border at y_canvas=28+134=162, x=0..63 is drawn in fg color (>2).
+    assert int(renderer.canvas[28 + 134, 10]) > 2
+
+    # HighWood.PIV: scroll is on the right (x=256..319). Cursor 0 (MERCHANT) is at y_piv=30..45.
+    hw_font = _RecordingFont()
+    hw_state = LocationMenuState(location=LocationKind.HIGHWOOD, cursor=0)
+    render_location_menu(renderer, hw_state, knight, ow, hw_font, bundle=bundle)
+    assert not any("+ " in line for line in hw_font.lines)
+    assert "> MERCHANT" in hw_font.lines
+    assert ">" in hw_font.lines
+    assert np.all(renderer.canvas[28 + 30 + 4, 266:310] == 4)
+    assert int(renderer.canvas[28 + 30, 270]) > 4
+
+    # Fallback without town .PIV renders text options cleanly.
+    fb_font = _RecordingFont()
+    render_location_menu(renderer, wd_state, knight, ow, fb_font, bundle=None)
+    assert any("+ MYSTIC" in line for line in fb_font.lines)

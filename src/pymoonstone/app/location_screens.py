@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 import numpy as np
 
 from pymoonstone.assets.palette import RGBColor, default_combat_palette
-from pymoonstone.render.renderer import CANVAS_WIDTH, PLAYFIELD_HEIGHT
+from pymoonstone.render.renderer import CANVAS_WIDTH, PLAYFIELD_HEIGHT, PLAYFIELD_Y_OFFSET
 from pymoonstone.sim.locations import (
     MAX_TAVERN_WAGER,
     MIN_TAVERN_WAGER,
@@ -146,6 +146,37 @@ _TRAINING_STATS: tuple[tuple[str, TrainableStat], ...] = (
     ("TRAIN ENDURANCE", TrainableStat.ENDURANCE),
 )
 
+_HIGHWOOD_TARGETS: tuple[LocationKind, ...] = (
+    LocationKind.SHOP,
+    LocationKind.TAVERN,
+    LocationKind.HEALER,
+)
+
+_WATERDEEP_TARGETS: tuple[LocationKind, ...] = (
+    LocationKind.SHOP,
+    LocationKind.TAVERN,
+    LocationKind.HEALER,
+    LocationKind.MYSTIC,
+)
+
+# Scroll button rectangles (x, y_piv, width, height) from Amiga town layouts
+# (placevisit.cpp kTownA / kTownB). y_piv is relative to PLAYFIELD_Y_OFFSET (28).
+_TOWN_SCROLL_RECTS: dict[LocationKind, tuple[tuple[int, int, int, int], ...]] = {
+    LocationKind.HIGHWOOD: (
+        (256, 30, 64, 16),
+        (256, 66, 64, 16),
+        (256, 106, 64, 16),
+        (256, 183, 64, 12),
+    ),
+    LocationKind.WATERDEEP: (
+        (0, 26, 64, 16),
+        (0, 63, 64, 16),
+        (0, 101, 64, 16),
+        (0, 134, 64, 31),
+        (0, 182, 64, 12),
+    ),
+}
+
 
 @dataclass(slots=True)
 class LocationMenuState:
@@ -196,9 +227,9 @@ def menu_options_for_location(state: LocationMenuState, knight: KnightState) -> 
     """Return display labels for all selectable rows in ``state.location``."""
     loc = state.location
     if loc == LocationKind.HIGHWOOD:
-        return ("HEALER", "MERCHANT", "TAVERN", "LEAVE")
+        return ("MERCHANT", "TAVERN", "HEALER", "LEAVE")
     if loc == LocationKind.WATERDEEP:
-        return ("MYSTIC", "TRAINING", "LEAVE")
+        return ("MERCHANT", "TAVERN", "HEALER", "MYSTIC", "LEAVE")
     if loc == LocationKind.HEALER:
         hp_cost = healer_hp_cost(knight)
         return (f"RESTORE HP {hp_cost}G", "RESTORE LIFE 150G", "LIFT CURSE 40G", "LEAVE")
@@ -240,16 +271,14 @@ def _format_status(text: str) -> str:
 
 
 def _confirm_highwood(state: LocationMenuState) -> LocationStepResult:
-    targets = (LocationKind.HEALER, LocationKind.SHOP, LocationKind.TAVERN)
-    if state.cursor < len(targets):
-        return _enter_sub_location(state, targets[state.cursor])
+    if state.cursor < len(_HIGHWOOD_TARGETS):
+        return _enter_sub_location(state, _HIGHWOOD_TARGETS[state.cursor])
     return _leave_current_location(state)
 
 
 def _confirm_waterdeep(state: LocationMenuState) -> LocationStepResult:
-    targets = (LocationKind.MYSTIC, LocationKind.TRAINING)
-    if state.cursor < len(targets):
-        return _enter_sub_location(state, targets[state.cursor])
+    if state.cursor < len(_WATERDEEP_TARGETS):
+        return _enter_sub_location(state, _WATERDEEP_TARGETS[state.cursor])
     return _leave_current_location(state)
 
 
@@ -423,6 +452,16 @@ def _brightest_color_index(palette: Sequence[tuple[int, int, int]]) -> int:
     return max(range(1, limit), key=lambda idx: sum(palette[idx]))
 
 
+def _compose_picture(scene_renderer: SceneRenderTarget, pic: DecodedPicture) -> int:
+    scene_renderer.set_palette(pic.palette)
+    scene_renderer.compose_scene(
+        background=pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
+        sprites=(),
+        border_index=0,
+    )
+    return _brightest_color_index(pic.palette)
+
+
 def _compose_backdrop(
     scene_renderer: SceneRenderTarget,
     bundle: PictureBundle | None,
@@ -433,13 +472,7 @@ def _compose_backdrop(
     if bundle is not None:
         pic = bundle.get_picture(*names)
         if pic is not None:
-            scene_renderer.set_palette(pic.palette)
-            scene_renderer.compose_scene(
-                background=pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
-                sprites=(),
-                border_index=0,
-            )
-            return _brightest_color_index(pic.palette)
+            return _compose_picture(scene_renderer, pic)
     bg: npt.NDArray[np.uint8] = np.full(
         (PLAYFIELD_HEIGHT, CANVAS_WIDTH), np.uint8(fill_index), dtype=np.uint8
     )
@@ -447,6 +480,58 @@ def _compose_backdrop(
     scene_renderer.set_palette(pal)
     scene_renderer.compose_scene(background=bg, sprites=(), border_index=0)
     return 31
+
+
+def _compose_location_backdrop(
+    scene_renderer: SceneRenderTarget,
+    bundle: PictureBundle | None,
+    location: LocationKind,
+) -> tuple[int, bool]:
+    names = location_backdrop_names(location)
+    if bundle is not None and location in _TOWN_SCROLL_RECTS and len(names) > 1:
+        town_pic = bundle.get_picture(*names[:-1])
+        if town_pic is not None:
+            return _compose_picture(scene_renderer, town_pic), True
+        return _compose_backdrop(scene_renderer, bundle, (names[-1],)), False
+    return _compose_backdrop(scene_renderer, bundle, names), False
+
+
+def _draw_scroll_highlight(
+    canvas: npt.NDArray[np.uint8],
+    rect: tuple[int, int, int, int],
+    color_index: int,
+) -> None:
+    bx, by, bw, bh = rect
+    x0 = max(0, bx)
+    y0 = max(PLAYFIELD_Y_OFFSET, PLAYFIELD_Y_OFFSET + by)
+    x1 = min(CANVAS_WIDTH, bx + bw)
+    y1 = min(PLAYFIELD_Y_OFFSET + PLAYFIELD_HEIGHT, y0 + bh)
+    if x0 >= x1 or y0 >= y1:
+        return
+    c = np.uint8(color_index & 0x1F)
+    canvas[y0, x0:x1] = c
+    canvas[y1 - 1, x0:x1] = c
+    canvas[y0:y1, x0] = c
+    canvas[y0:y1, x1 - 1] = c
+
+
+def _render_town_scroll_cursor(
+    canvas: npt.NDArray[np.uint8],
+    location: LocationKind,
+    cursor_idx: int,
+    label: str,
+    font: FontTarget,
+    fg: int,
+) -> None:
+    rects = _TOWN_SCROLL_RECTS[location]
+    bx, by, bw, bh = rects[cursor_idx % len(rects)]
+    _draw_scroll_highlight(canvas, (bx, by, bw, bh), fg)
+    cy = PLAYFIELD_Y_OFFSET + by + max(0, (bh - 8) // 2)
+    if bx == 0:
+        font.draw_text(canvas, "<", bw + 2, cy, color_index=fg)
+    else:
+        font.draw_text(canvas, ">", max(0, bx - 10), cy, color_index=fg)
+    font.draw_text(canvas, f"> {label}", 100, 240, color_index=fg)
 
 
 def render_location_menu(
@@ -459,7 +544,7 @@ def render_location_menu(
     bundle: PictureBundle | None = None,
 ) -> None:
     """Render the active location backdrop, menu options, and knight stats."""
-    fg = _compose_backdrop(scene_renderer, bundle, location_backdrop_names(state.location))
+    fg, has_scroll = _compose_location_backdrop(scene_renderer, bundle, state.location)
     canvas = scene_renderer.canvas
     title = _LOCATION_TITLES.get(state.location, "LOCATION")
     font.draw_text(canvas, title, 8, 8, color_index=fg)
@@ -469,14 +554,19 @@ def render_location_menu(
     font.draw_text(canvas, f"DAY {overworld.day}", 8, 240, color_index=fg)
 
     options = menu_options_for_location(state, knight)
-    start_y = 44
-    for idx, label in enumerate(options):
-        selected = idx == (state.cursor % len(options))
-        prefix = "+ " if selected else "  "
-        font.draw_text(canvas, f"{prefix}{label}", 24, start_y + idx * 14, color_index=fg)
+    selected_idx = state.cursor % len(options)
+    if has_scroll:
+        _render_town_scroll_cursor(
+            canvas, state.location, selected_idx, options[selected_idx], font, fg
+        )
+    else:
+        start_y = 44
+        for idx, label in enumerate(options):
+            prefix = "+ " if idx == selected_idx else "  "
+            font.draw_text(canvas, f"{prefix}{label}", 24, start_y + idx * 14, color_index=fg)
 
     if state.status_message:
-        font.draw_text(canvas, state.status_message[:36], 16, 206, color_index=fg)
+        font.draw_text(canvas, state.status_message[:36], 8, 229, color_index=fg)
 
 
 def render_status_screen(
