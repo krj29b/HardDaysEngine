@@ -523,31 +523,46 @@ _KNIGHT_HURT_TO_SCRIPT_INDEX: dict[KnightAction, int] = {
 }
 
 
+def _script_at(scripts: Sequence[int], index: int, fallback: int) -> int:
+    offset = scripts[index] if 0 <= index < len(scripts) else 0
+    return offset or fallback
+
+
+def _resolve_knight_walk_offset(
+    action: KnightAction,
+    tick_count: int,
+    walk_scripts: Sequence[Sequence[int]],
+) -> int | None:
+    if action not in (KnightAction.WALK, KnightAction.RUN) or not walk_scripts:
+        return None
+    walk_block = walk_scripts[0]
+    if not walk_block:
+        return None
+    divisor = VBL_DIVISOR_FAST if action == KnightAction.RUN else VBL_DIVISOR_NORMAL
+    phase = (tick_count // divisor) % len(walk_block)
+    return walk_block[phase]
+
+
 def _resolve_knight_script_offset(
     action: KnightAction,
     tick_count: int,
     knight_scripts: KnightScriptTables,
 ) -> tuple[int, int]:
     """Return `(s4_offset, step_count)` for `action` from decoded `KnightScriptTables`."""
-    if action in (KnightAction.WALK, KnightAction.RUN) and knight_scripts.walk_scripts:
-        walk_block = knight_scripts.walk_scripts[0]
-        if walk_block:
-            divisor = VBL_DIVISOR_FAST if action == KnightAction.RUN else VBL_DIVISOR_NORMAL
-            phase = (tick_count // divisor) % len(walk_block)
-            return walk_block[phase], 0
+    walk_offset = _resolve_knight_walk_offset(action, tick_count, knight_scripts.walk_scripts)
+    if walk_offset is not None:
+        return walk_offset, 0
+    step_count = tick_count // VBL_DIVISOR_NORMAL
     if action in _KNIGHT_HURT_TO_SCRIPT_INDEX:
         h_idx = _KNIGHT_HURT_TO_SCRIPT_INDEX[action]
-        offset = (
-            knight_scripts.hurt_scripts[h_idx] if h_idx < len(knight_scripts.hurt_scripts) else 0
-        )
-        return (offset or knight_scripts.alt_script), tick_count // VBL_DIVISOR_NORMAL
+        return _script_at(knight_scripts.hurt_scripts, h_idx, knight_scripts.alt_script), step_count
     if action == KnightAction.IDLE:
-        return knight_scripts.idle_script, tick_count // VBL_DIVISOR_NORMAL
+        return knight_scripts.idle_script, step_count
     a_idx = _KNIGHT_ACTION_TO_SCRIPT_INDEX.get(action, 0)
-    offset = (
-        knight_scripts.action_scripts[a_idx] if a_idx < len(knight_scripts.action_scripts) else 0
+    return (
+        _script_at(knight_scripts.action_scripts, a_idx, knight_scripts.idle_script),
+        step_count,
     )
-    return (offset or knight_scripts.idle_script), tick_count // VBL_DIVISOR_NORMAL
 
 
 def _draws_to_pieces(
@@ -659,6 +674,32 @@ def _find_monster_scripts(
     return None
 
 
+def _first_positive(offsets: Sequence[int]) -> int:
+    for offset in offsets:
+        if offset > 0:
+            return offset
+    return 0
+
+
+def _first_nonzero(*values: int) -> int:
+    for value in values:
+        if value:
+            return value
+    return 0
+
+
+def _resolve_monster_walk_offset(
+    walk_scripts: Sequence[Sequence[int]],
+    tick_count: int,
+) -> int | None:
+    if not walk_scripts:
+        return None
+    phases = [p for p in walk_scripts[0] if p > 0]
+    if not phases:
+        return None
+    return phases[(tick_count // VBL_DIVISOR_NORMAL) % len(phases)]
+
+
 def _select_monster_script_offset(
     ms: MonsterScriptTables,
     tick_count: int,
@@ -667,17 +708,17 @@ def _select_monster_script_offset(
     walking: bool,
     hurt: bool,
 ) -> tuple[int, int]:
+    step_count = tick_count // VBL_DIVISOR_NORMAL
     if hurt:
-        offset = next((p for p in ms.hurt_scripts if p > 0), 0) or ms.alt_script or ms.idle_script
-        return offset, tick_count // VBL_DIVISOR_NORMAL
+        offset = _first_nonzero(_first_positive(ms.hurt_scripts), ms.alt_script, ms.idle_script)
+        return offset, step_count
     if attacking:
-        offset = next((p for p in ms.action_scripts if p > 0), 0) or ms.idle_script
-        return offset, tick_count // VBL_DIVISOR_NORMAL
-    if walking and ms.walk_scripts:
-        phases = [p for p in ms.walk_scripts[0] if p > 0]
-        if phases:
-            return phases[(tick_count // VBL_DIVISOR_NORMAL) % len(phases)], 0
-    return ms.idle_script, tick_count // VBL_DIVISOR_NORMAL
+        return _first_nonzero(_first_positive(ms.action_scripts), ms.idle_script), step_count
+    if walking:
+        walk_offset = _resolve_monster_walk_offset(ms.walk_scripts, tick_count)
+        if walk_offset is not None:
+            return walk_offset, 0
+    return ms.idle_script, step_count
 
 
 def compose_monster_pieces(
