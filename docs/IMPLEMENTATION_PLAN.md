@@ -162,6 +162,130 @@ Status lives in `PROGRESS.md`. Every task ends with a green `scripts/quality_gat
     and `uv run pymoonstone` playable entry point with deterministic replay recording/verification (`--record` / `--replay`).
   - *Accept:* End-to-end headless session test running a scripted overworld + combat encounter with 100% deterministic state hash.
 
+### Phase 11: Original-model rebuild of fights, overworld and places
+Source: `PLAYABILITY_AUDIT.md` §6 (Audit v3). Depends on ADR-009. Phases 9 and 10 are superseded
+where they conflict. Reference reading for every task is `reference/moonstone-ace` (clone of
+`Jarskih/moonstone-ace-public`; git-ignored): the header comments in `include/game/*.hpp` and
+`include/game/rules/*.hpp` describe each original routine in prose and are the fastest way in.
+`reference/openmoonstone` (`joetsoi/OpenMoonstone`) is for behaviour cross-checks only.
+
+Rules for the whole phase:
+- **Spec first.** Each task names the `ARCHITECTURE.md` section it implements. Write that section
+  (own words, ADR-001) before the code.
+- **Data from the disks.** Colours, prices, script addresses, creature definitions, button layouts
+  and spawn lists are read from `mog` at runtime. A table that cannot be located yet blocks its
+  task; it is not replaced by literals.
+- **Evidence.** Presentation tasks attach a contact sheet from `scripts/audit_shots.py`; rule tasks
+  have `adf` tests whose expected values are computed independently of the code under test.
+- **No parallel models.** When a task replaces a module, the old module and its tests are deleted in
+  the same commit.
+
+#### 11A: Tooling and specification
+- **T11.1 Audit harness (`scripts/audit_shots.py`, `tests/adf/test_scene_smoke.py`):** drive
+  `GameSession` on the real disks through every scene, place and creature type; write PNG contact
+  sheets under `build/audit/`. *Accept:* one command produces the sheets; the smoke test renders
+  every scene without an exception; nothing under `build/` is tracked.
+- **T11.2 Spec: game state records (`ARCHITECTURE.md` §9):** the knight record as used on the map
+  and in fights, the 24-byte inventory and its slot meanings, lair records and their loot, map
+  nodes, the active-fight block, the item and weapon ids. *Accept:* every field the later tasks
+  read or write has an offset, width and meaning, with the conflicts between sources noted.
+- **T11.3 Spec: fights (§10):** arena set-up per fight kind, creature definitions (cel slots, hit
+  sets, sound bank, record initialisation, spawn lists, waves), the fight loop order and end timers,
+  contact and damage rules, the engine routines scripts call, the nine AI handlers, the fight
+  palette assembly, the HUD.
+- **T11.4 Spec: overworld and turns (§11):** map frame order, movement and clipping, terrain mask,
+  move budget, proximity scan and node menu, lair visibility, dragon flight, turn scheduler, clock
+  and moon, computer-controlled knights.
+- **T11.5 Spec: places and sheets (§12):** the visit prologue and classification by node id, both
+  town button screens, the shared sheet loop with its button tables per sheet number, smith and
+  market rules, temple, healer, dice house, mystic, Stonehenge offer and ritual, wizard, valley,
+  home villages, the ending hand-over.
+
+#### 11B: Fights (fixes the sprite errors)
+- **T11.6 Fight palette from data (`assets/palette.py`, `app/`):** indices 0, 1..5 and 16..31 from
+  the backdrop and region rules, 6..8 from the first fighter's class row, 9..15 from the creature
+  scene row. Remove `default_combat_palette` from the fight path and the colour literals in
+  `app/game.py`. *Accept:* in every arena, index 5 equals the backdrop picture's entry; no RGB
+  literal for tunic or creature colours remains in `src/`; sheet reviewed for all four regions.
+- **T11.7 Creature definitions (`assets/tables.py`):** decode, from located tables rather than a
+  code scan, each creature's cel slot list, hit sets, sound bank, script tables, type byte, hit
+  points and tunables, plus the lair-to-creature table. *Accept:* for every creature, every draw
+  instruction reachable from its scripts names a slot that is loaded and a frame inside that cel
+  (no modulo, no slot fallback); the `adf` test walks all scripts and asserts this.
+- **T11.8 Fight engine (`sim/fight.py`, replaces the replay in `app/combat_bridge.py`):** ten jobs
+  with persistent script state, the frame-set lists selected by `$C0`, second scripts, spawned
+  objects, owner pokes, motion blocks, engine routines, depth sort, attack and hurt lists, contact
+  pass, background stamps. `app/` renders the jobs' draw lists. *Accept:* a recorded trace of a
+  knight idle, walk and each attack matches the draw lists computed by a second, independent
+  script walker in the test; a job's script position survives across ticks (no restart per frame).
+- **T11.9 Knight control (`sim/fighters.py`, replaces `sim/knight_combat.py`):** joystick to action
+  through the two action tables, walk scripts by phase and direction block, hurt scripts by the
+  attacker's action, damage and defence tables, daggers, blocking, arena obstacles. Stamina and
+  score are removed. *Accept:* each of the nine actions plays its own script to its end; a hit
+  reduces hit points by the table value for that action and equipment.
+- **T11.10 Creature AI handlers (`sim/fight_ai/`, replaces `sim/monster_ai.py`):** one handler per
+  type, called only on a hit link or when the script ended, returning the next script. Split as
+  `T11.10a` Troggs, `b` Ratmen, `c` Mudmen, `d` flyer, `e` Troll, `f` Balok, `g` Guardian, `h`
+  Dragon, `i` computer knight. *Accept per handler:* a seeded fight on the real disks reaches a
+  decided outcome; the creature dies through its hurt script's death branch; sheet shows the whole
+  creature in idle, walk, attack, hurt and death.
+- **T11.11 Fight loop and outcomes (`sim/fight.py`, `app/game.py`):** frame pacing, end timers,
+  waves, defeat settlement and lives, the practice fight (knight against knight), the original HUD.
+  *Accept:* win and loss both return to the caller with the right record changes; practice returns
+  to the title; the hit flash leaves the HUD colours alone.
+
+#### 11C: Overworld
+- **T11.12 Map movement and proximity (`sim/overworld.py` rewritten, `app/`):** pixel position,
+  edge clipping, terrain slow-down, move budget, map sprites, proximity scan with highlight, node
+  menu, lair records and visibility. The node graph and `_CANONICAL_ROAD_SITES` are deleted.
+  *Accept:* holding a direction moves the knight one pixel per unblocked frame; stepping away from
+  the start does not start a fight; standing on a lair or place lists it in the node menu.
+- **T11.13 Turns, clock and dragon (`sim/turns.py`):** turn hand-over, day and moon advance, the
+  "Next Day" screen from `ch.piv`, dragon flight and attack on the map, game over when no human
+  knight is left. *Accept:* a four-knight round visits each knight once per day; the moon frame
+  follows the phase table.
+- **T11.14 Computer-controlled knights on the map (`sim/ai_map.py`):** roam target, walk line,
+  shopping wish, opponent choice, item use. *Accept:* seeded multi-day run is deterministic and the
+  PRNG draw order matches the specified frame order.
+
+#### 11D: Places and sheets (the missing screens)
+- **T11.15 Sheet engine (`sim/sheets.py`, `app/sheet_screen.py`):** the shared screen loop, panels,
+  item icons from `ki.cel`, pointer from `po.cel`, the use and take button tables, the click
+  dispatch, inventory transfer, item use. *Accept:* sheets 2 (lair loot) and 9 (status / temple)
+  render and operate from the real tables.
+- **T11.16 Towns (`app/town_screen.py`, replaces `app/location_screens.py`):** Highwood and
+  Waterdeep button screens with all five buttons each, routed to smith, market, dice house, healer,
+  temple and mystic as the button tables say. The invented goods, services and training menu are
+  deleted with `sim/locations.py`. *Accept:* every button on both scrolls is selectable and opens
+  its screen; Exit returns to the map.
+- **T11.17 Smith and market (sheets 5 and 6):** fixed-price smith, market stock and price list,
+  buy and sell-back, gold cap, including the documented quirks. *Accept:* prices and caps come from
+  `mog`; buying and selling change gold and inventory exactly as specified.
+- **T11.18 Dice house, healer, mystic:** `tav.piv` / `dice.piv` / `dice.cel` with the payout table;
+  `hea.piv` with donation and rest; `mys.piv` with `mys.cel`. *Accept:* each screen shows its
+  animation cels and applies its rule; sheets reviewed.
+- **T11.19 Stonehenge:** the offer sheet, the ritual screen (`hen1.p`, `hen1.c`, `he.a`, timed
+  fades), the win condition (the moonstone of the current phase) and the hand-over to the ending.
+- **T11.20 Wizard's tower:** `WI2.P`, `WI1.P`, `Wi1.C`, `wz.a`, then the temple sheet; the visit
+  uses up the turn. `WI1.P` stops being the victory picture.
+- **T11.21 Valley, home villages, meetings:** the guardian fight and its reward, the life granted
+  at a home village, knight-meets-knight duel with the scroll dialog, meeting and exchange sheets,
+  the dragon hoard sheet.
+- **T11.22 Ending and game over:** the `program` ending sequence with `vmusic.cmp`; the farewell
+  text screen on `message.piv` with its own palette.
+
+#### 11E: Close-out
+- **T11.23 Sound wiring:** script sound opcodes to the synth, per-creature banks loaded with the
+  arena, music per scene.
+- **T11.24 Campaign verification:** a recorded real-disk replay from knight select through a lair
+  win, its loot sheet, a town purchase and a day change, with a deterministic state hash; README
+  controls updated; `PROGRESS.md` statuses for Phases 6 to 10 corrected to what survived.
+
+Milestones: **M1** one creature fight that looks and plays right (T11.1, T11.2, T11.3, T11.6 to
+T11.11, Troggs first). **M2** walking the map into that fight and out again (T11.4, T11.5, T11.12,
+T11.13, T11.15 for the loot sheet). **M3** all places (T11.16 to T11.21). **M4** a campaign that
+can be finished (the remaining T11.10 handlers, T11.14, T11.22 to T11.24).
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:

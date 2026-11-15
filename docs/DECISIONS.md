@@ -52,3 +52,28 @@ divisors in `sim`.
 **Status:** ACCEPTED (2026-11-15)
 **Context:** Parallel worker agents operating in `workspace: "share"` worktrees can cause merge conflicts if multiple tasks edit the same source or test file simultaneously.
 **Decision:** Every task in Phases 5–8 (`T5.1`–`T8.3`) specifies explicit, disjoint source and test file paths in `IMPLEMENTATION_PLAN.md` and `PROGRESS.md`. Workers claim a single `T<id>` and modify only its owned files; shared index files (`__init__.py` and `PROGRESS.md` status merges) are coordinated when landing branches.
+
+## ADR-009: One model per subsystem, taken from the original; the invented models are removed
+**Status:** ACCEPTED (2026-11-15, decided by the user: replace the six invented modules)
+**Context:** Audit v3 (`PLAYABILITY_AUDIT.md` §6) found that the overworld, the fights and the
+places are original designs of this project (node graph, timer state machines, text-menu shops)
+with the real assets attached afterwards. Two remediation passes patched symptoms and left the
+models in place. The tests assert those models, so the gate stays green while the game is not
+playable.
+**Decision:**
+1. `sim/` holds the original's records and rules: the knight record and its inventory, lairs, map
+   nodes, the ten fight jobs, the turn scheduler. The fight script interpreter is the only source
+   of fighter animation *and* state; `app/` reads the jobs' draw lists and never runs scripts itself.
+2. `sim/overworld.py`, `sim/locations.py`, `sim/knight_combat.py`, `sim/monster_ai.py`,
+   `app/combat_bridge.py` and `app/location_screens.py` are replaced, not patched. Their tests go
+   with them.
+3. Every Phase 11 implementation task starts from a new `ARCHITECTURE.md` section; a task whose
+   section is missing is blocked.
+4. A presentation task is `DONE` only with a reviewed contact sheet from the real disks
+   (`scripts/audit_shots.py`), in addition to the gate.
+**Consequences:** Roughly 5,600 lines of `sim/` and `app/` and their tests are rewritten. The
+decoders, renderer, audio, intro and title code stay. Supersedes the parts of ADR-008 that tie
+tasks to the Phase 5 to 8 module list.
+**Alternative considered:** keep the graph overworld and text shops and repair only the fight
+rendering. Cheaper, but the result is a different game with Moonstone's art, and the fight
+defects come from the same split between an invented state machine and replayed scripts.

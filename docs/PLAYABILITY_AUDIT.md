@@ -244,3 +244,60 @@ Verified across [tests/unit/test_playability_v2.py](file:///c:/_WORKSPACE/ANTIGR
    - `uv run python scripts/quality_gate.py`: **7/7 gates PASSED** (`238 passed, 8 deselected`, `958` blocks graded A/B).
    - `uv run pytest -m adf`: **15 passed**; `uv run pytest -m gl`: **8 passed**.
    - `uv run python scripts/quality_gate.py` passes all 7 gates (`ruff format`, `ruff check`, `mypy --strict`, `lint-imports`, `radon`, `vulture`, `pytest`).
+
+---
+
+## 6. Audit v3 (2026-11-15, commit `5ad7ec3`): why the game is still unplayable
+
+Method: `GameSession` driven on the real disks, every scene rendered through the GL canvas and
+reviewed as contact sheets; decoded tables probed; behaviour compared with `reference/moonstone-ace`
+(docs `GAME_FLOW.md`, `GAME_STATE.md`, `MONSTER_KIT.md`, and the header comments of
+`include/game/*.hpp`). The gate is green (248 tests) at this commit, so the tests do not measure
+playability: most of them assert the behaviour of models that the original game does not have.
+
+### 6.1 Root cause
+
+Three subsystems are **invented designs**, not reimplementations, and the presentation layer was
+then wired to them:
+
+| Area | What the original does | What the code does |
+|---|---|---|
+| Overworld | Free one-pixel-per-step movement on the map picture, terrain slow-down mask, move budget, proximity scan that lists nearby nodes / knights / lairs, node menu | A 35-node graph with hand-placed road nodes (`_CANONICAL_ROAD_SITES`), three hops per day, an encounter on almost every hop |
+| Fights | The fight script *is* the fighter's state: ten jobs run scripts, the AI handler only picks the next script, damage comes from per-action tables, death happens inside the hurt scripts | Timer state machines (`sim/knight_combat.py`, `sim/monster_ai.py`) with invented stamina, reach and score; the scripts are replayed from their start every frame only to choose sprites (`_run_mog_action_draws`) |
+| Places | Button screens per town plus one shared item "sheet" loop (smith, market, temple, loot, exchange, offer) and dedicated dice / healer / mystic / ritual / wizard screens | Text menus with invented goods and services (`SWORD UPGRADE`, `STAMINA TONIC`, `TRAINING`, `FIREBALL SCROLL`, `LAIR KEY`) |
+
+`docs/ARCHITECTURE.md` has no section for any of the three, so there was nothing to implement from.
+
+### 6.2 Observed defects
+
+1. **First overworld step starts a Balok fight** in a wasteland arena; the knight takes damage with
+   no input.
+2. **Arena colours are wrong**: `assemble_combat_palette` overwrites indices 1..5 with a grey ramp.
+   The backdrops use index 5 for about 8,900 pixels (black in the picture), which is the white
+   foliage and white ground on screen.
+3. **Knight tunic and creature colours are literals** in `app/game.py`
+   (`_KNIGHT_COMBAT_TUNIC_WORDS`, `_CREATURE_SCENE_COLOR_WORDS`) instead of the `mog` scene tables.
+4. **Creatures render as scrambled parts** (Trogg, Balok), as a stretched knight-like figure
+   (Ratman) or as stripes (Beastman): `_draws_to_pieces` ignores the frame-set opcode `$C0`, wraps
+   out-of-range frame numbers with a modulo and substitutes slot 0 for a missing cel slot.
+5. **Creature script tables are guessed**: `parse_monster_script_tables` scans `S_0` code
+   heuristically and keys records by values (24, 28, 32, ...) that are then mapped to archetypes by
+   a hand-written dict. Seven of eleven records have no action scripts at all.
+6. **Fight HUD is invented** (HP / ST bars, score), and the hit flash recolours the HUD.
+7. **Town sub-screens**: no smith, market or temple sheet, no item icons (`ki.cel`), no pointer
+   (`po.cel`); Highwood's "High Temple" button is not selectable; dice, healer and mystic show the
+   right picture under an invented text menu.
+8. **Stonehenge** is a two-line menu over `ch.piv`; the ritual assets (`hen1.p`, `hen1.c`) are
+   never shown. **The wizard's tower does not exist**, and its picture (`WI1.P`) is used as the
+   victory screen.
+9. **Game-over screen** shows `message.piv` with the wrong palette (nearly black).
+10. **Status and new-day screens** are text over the title backdrop rather than the status sheet and
+    the "Next Day" moon screen.
+11. Not present at all: lair loot, knight-versus-knight duel and exchange, dragon hoard, valley
+    guardian, home villages, computer-controlled knights, the ending.
+
+What works and is kept: the disk and codec layer, picture / cel / hit / arena decoders, the intro
+cinematic, the title menu and knight select, the map picture and its markers, the audio decoders,
+the fight-script opcode decoder (`sim/combat_vm.py`), the renderer.
+
+The remediation is Phase 11 in `IMPLEMENTATION_PLAN.md`; the decision it depends on is ADR-009.
