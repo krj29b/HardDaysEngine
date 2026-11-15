@@ -151,7 +151,7 @@ def test_build_mog_encounter_with_mog_tables_lair_waves_and_arena() -> None:
     assert len(encounter.waves[1].spawns) == 1
     boss_spec = encounter.waves[1].spawns[0]
     assert boss_spec.params.archetype == MonsterArchetype.BALOK
-    assert boss_spec.params.defense == 9
+    assert boss_spec.params.defense == default_monster_params(MonsterArchetype.BALOK).defense
     assert boss_spec.params.max_hp == default_monster_params(MonsterArchetype.BALOK).max_hp + 25
     assert len(encounter.obstacles) == 1
     assert encounter.obstacles[0].y == 100
@@ -182,7 +182,10 @@ def test_build_mog_encounter_wandering_and_dragon() -> None:
     assert len(wandering.waves) == 1
     assert len(wandering.monsters) == 2
     assert wandering.monsters[0].params.archetype == MonsterArchetype.RATMAN
-    assert wandering.monsters[0].params.defense == 3
+    assert (
+        wandering.monsters[0].params.defense
+        == default_monster_params(MonsterArchetype.RATMAN).defense
+    )
 
     dragon_trigger = EncounterTrigger(
         kind=TriggerKind.DRAGON_INTERCEPT,

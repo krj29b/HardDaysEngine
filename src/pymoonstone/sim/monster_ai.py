@@ -328,7 +328,7 @@ def params_from_creature_node(
         ranged_min_x=base.ranged_min_x,
         ranged_max_x=base.ranged_max_x,
         base_damage=base.base_damage,
-        defense=max(0, node.defence),
+        defense=base.defense,
         attack_cooldown_ticks=base.attack_cooldown_ticks,
         attack_duration_ticks=base.attack_duration_ticks,
         hit_stun_ticks=base.hit_stun_ticks,

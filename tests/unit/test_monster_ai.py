@@ -304,7 +304,8 @@ def test_params_from_creature_node_applies_runtime_fields() -> None:
         node,
         script_ids={"idle": 10, "melee": 12},
     )
-    assert params.defense == 7
+    # node.defence is not flat armor subtraction against knight contact damage
+    assert params.defense == default_monster_params(MonsterArchetype.DEMON).defense
     assert params.max_hp == default_monster_params(MonsterArchetype.DEMON).max_hp + 12
     assert params.idle_script_id == 10
     assert params.melee_script_id == 12
