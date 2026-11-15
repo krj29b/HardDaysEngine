@@ -723,8 +723,7 @@ Twelve 2-byte slots. The count is the byte at the even offset; the odd byte is u
 | `$14` | Keys, bits 0..3; `$0F` is all four | valley test |
 | `$16` | Moonstones, bits 0..3, matched against the moon frame | damage and Stonehenge tests |
 
-The display names of slots `$00`, `$02` and `$08`..`$10` are not established here; T11.5 takes
-them from the item strings in `mog`.
+The display names of all slots are given in §12.6.
 
 **Transfer order.** After a fight the winner takes from the loser's inventory in this slot order:
 `$16, $14, $04, $06, $0E, $12, $08, $0C, $10, $00, $02, $0A`. If the loser still has lives, only
@@ -741,7 +740,7 @@ everything moves. A winner of type `$14` takes the gold first.
 | +0 | u32 | `loot` | Reference to the loot Inventory. |
 | +4 | u16 | `handler_offset` | Byte offset into the arena set-up table: which creature fight this lair starts (§10). |
 | +6 | u16 | `creatures_left` | Written back after a fight: creatures still to come. |
-| +8 | u16 | `occupied` | Cleared at set-up; non-zero keeps the lair occupied. |
+| +8 | u16 | `gold` | The lair's gold. Cleared at set-up, filled by gold rolls, emptied on the loot sheet; non-zero keeps the lair on the map (§12.24 corrects the earlier name `occupied`). |
 | +10 | s16 | `map_x` | Drawn position. Negative hides the lair. |
 | +12 | s16 | `map_y` | Drawn position. |
 | +14 | u16 | `param14` | Per-lair arena parameter, copied into the fight set-up. |
@@ -1232,7 +1231,7 @@ In this order (the draws are consecutive):
 4. The market stock is cleared and filled by six item rolls; the count of slot `$08` then gets
    2 added (§12).
 5. The 24 lairs and their loot inventories are cleared; each lair's `loot` is linked and
-   `occupied` cleared.
+   its `gold` cleared.
 6. **Keys.** The lairs form four groups of six (records 0..5, 6..11, 12..17, 18..23). One index
    0..5 is drawn (low 3 bits of a draw, redrawn while above 5). The lair at that index in group
    0 gets key mask 8, in group 1 mask 4, in group 2 mask 2, in group 3 mask 1.
@@ -1400,13 +1399,13 @@ The action's result goes back to the frame; non-zero re-enters the map screen.
 **Lair entry.** Without travel mode: the creature fight for the lair's `handler_offset`
 (§10.3). A lost fight shows the temple sheet and returns. A won fight gives `progress + 1` and
 shows the loot sheet (sheet 2, §12). In travel mode there is no fight: the loot sheet opens
-directly. After the loot sheet the lair is tidied (§11.9) and, in travel mode, the knight is
+directly, but only to look (nothing can be taken there, §12.5). After the loot sheet the lair is tidied (§11.9) and, in travel mode, the knight is
 put back on the saved position and the modes are cleared.
 
 ### 11.9 Lair visibility and map modes
 
 **Visibility.** A lair is on the map while its `map_x` is not negative. After a lair's loot
-sheet (not in travel mode) the lair is hidden, both coordinates set to -1, when its `occupied`
+sheet (not in travel mode) the lair is hidden, both coordinates set to -1, when its `gold`
 word is zero and all 24 bytes of its loot inventory are zero. A lair that still holds loot
 stays visible and can be entered again; `creatures_left` (§10.7) says how many creatures the
 next fight has. Hidden lairs are skipped by drawing and by the scan; the computer knights'
@@ -1416,7 +1415,7 @@ roam list gives them the largest distance (§11.13).
 
 | Mode | Set by | Effect |
 |---|---|---|
-| **Travel** | The position-mark item (§9.4 slot `$02`): flag set, position saved | Terrain never blocks, walking costs no budget, the scan lists only lairs, fire enters the first listed lair without a fight, and afterwards the knight is back on the saved position. Drawn with frame `kind + 10`. |
+| **Travel** | The position-mark item (§9.4 slot `$02`): flag set, position saved | Terrain never blocks, walking costs no budget, the scan lists only lairs, fire shows the loot of the first listed lair without a fight and without taking anything (§12.5), and afterwards the knight is back on the saved position. Drawn with frame `kind + 10`. |
 | **Ambush** | A good roll of the teleport item (slot `$0C`): flag set, position saved | Terrain never blocks and walking costs no budget. Fire clears the modes before the menu runs, so the knight walks anywhere for free and then acts normally from there. Drawn with frame `kind + 15`. |
 
 A bad roll of the teleport item instead moves the knight to a random spot:
@@ -1542,8 +1541,8 @@ named here happens whether or not its result is used.
    is hidden the first candidate is engaged at once; otherwise one draw decides: low 7 bits
    of 25 or less engage, anything else moves on. Computer knights never pick each other;
    knights out of lives are not excluded.
-6. **Scroll:** with an opponent engaged and a count in the inventory byte at offset 14 (slot
-   `$0E`), one piece is used, the good jingle plays and the meeting is settled without a
+6. **Scroll of Acquisition:** with an opponent engaged and a count in slot `$0E`, one piece is
+   used, the good jingle plays and the meeting is settled without a
    fight, the opponent as the loser (§9.4 transfer order).
 7. **Speed item:** with a count in slot `$0A`, an opponent engaged, and that opponent at a
    Manhattan distance of at least `derived_endurance << 4`: the jingle plays, one piece is
@@ -1654,13 +1653,595 @@ frame time, the menu layout, the masks and thresholds of the draws.
   code compares the translated key with the character codes of `E`, `Q` and space, and the
   menu compares with digit characters, so the translation yields characters. This section
   follows the code. T11.12 confirms it from the key translation table in `mog`.
-- §9.4 names slot `$12` as the scroll that avoids a duel (from the duel prologue) and slot
-  `$0E` as the item that opens the exchange sheet. The computer knight's scroll rule reads
-  the inventory byte at offset 14, which is slot `$0E`. Both are kept as the sources state
-  them; T11.5 settles the item names from the `mog` strings and T11.14 implements the offset
-  the rule reads.
+- The computer knight's scroll rule (§11.13 step 6) reads slot `$0E`, the Scroll of
+  Acquisition (§12.6): it takes loot from the engaged opponent without a fight.
 - A lock cell is tested in the frame's charge step and cleared after the valley fight; nothing
   sets it. It is not modelled.
 - The plan's acceptance line for T11.13 ("a four-knight round visits each knight once per
   day") is read as: each knight plays once per **round**, the "Next Day" screen follows every
   round, and the day counter and the moon step every fourth round.
+
+---
+
+## 12. Places and Sheets (`T11.5`)
+
+Everything that is neither the map (§11) nor a fight (§10) is one of two kinds of screen:
+
+- a **sheet**: the knight's status panel with icons for stats, equipment and items, optionally
+  beside a second panel (another knight, a lair's loot, the market stock, the smith's offer).
+  One loop and one click handler serve all sheets; the sheet number selects the second panel
+  and which clicks do something;
+- a **picture screen**: a backdrop with a few buttons or a short animation (the two towns, the
+  healer, the mystic, the dice house, the wizard, the Stonehenge ritual, text messages).
+
+Sources: the reference project's place visit, sheet loop, click handler, item, shop, healing,
+dice and ritual rules. Texts, prices, odds tables and layouts that the original holds in `mog`
+are read from the user's `mog` (§12.22); numbers given here pin the behaviour. `sim/` holds the
+rules and the sheet state; `app/` draws and feeds the pointer.
+
+### 12.1 Sheet numbers
+
+| No. | Sheet | Second panel | Opened by |
+|---|---|---|---|
+| 1 | Meeting | The other knight | After a knight fight, or a meeting without one (§12.18) |
+| 2 | Lair loot | The lair's loot and gold | A won lair fight, or a look into a lair in travel mode (§11.8) |
+| 3 | Offer | none (wide layout) | Stonehenge without the right moonstone (§12.16) |
+| 5 | Smith | The smith's fixed offer | Town button |
+| 6 | Market | The market stock | Town button (Highwood) |
+| 8 | Acquisition | Another knight, selectable | Using the Scroll of Acquisition |
+| 9 | Status / temple | none (wide layout) | Space on the map or in Highwood, home village, after a lost fight, after the wizard, after Stonehenge |
+| 10 | Dragon hoard | The dragon's inventory and gold | A won dragon fight |
+| 11 | Wyrm | Another knight, selectable | Using the Scroll of the Wyrm |
+
+### 12.2 The sheet loop
+
+**Open** with a sheet number: the change counter and the done flag are cleared, the screen
+fades out, the pointer is switched on, the button text tables are built (§12.4), the sheet is
+drawn (below).
+
+**Loop**, until the done flag is set: hit-test the pointer against the region list. A region
+under the pointer has its text line shown. If a region is under the pointer and the pointer is
+not locked, the click handler runs (§12.5). Then flip and redraw the moving parts.
+
+**Pointer.** A hardware-sprite pointer moved by the joystick of the knight the sheet belongs
+to, 2 pixels per VBL, clamped to x 0..314 and y 0..195. It is "locked" except while fire is
+held, so a click is: fire down while over a region. There is no debounce in the loop itself;
+every handler that changes something redraws the sheet, which takes long enough to act as one.
+
+**Close:** fade out, pointer off. If the hand-over flag is set (sheet 11), the dragon's
+`engaged_with` takes the knight shown in the second panel and the flag is cleared.
+
+**Draw** (also after every change):
+
+1. Clear the region list. Draw the panel frames from a fixed draw list (§12.3); the frame
+   piece with number `$1A` also registers the **done** region at its position (25 x 117).
+2. Pick the two knights of the sheet and fill the two button arrays (§12.4).
+3. Left panel: the sheet's knight (§12.3), with the "use" array. Sheets 9 and 3 use the wide
+   layout: everything shifted right by 74 pixels, one panel only.
+4. Right panel, shifted by 150 pixels, with the "take" array:
+   - sheet 2: the lair's loot (§12.8);
+   - sheet 1: if the other knight has no lives the change counter is cleared; if the change
+     counter is non-zero the sheet number becomes 9 and drawing starts again (so one take from
+     a living knight ends the meeting, a dead knight can be emptied); else the other knight's
+     panel;
+   - sheet 11, and sheet 8 while nothing has changed: the other knight's panel and the
+     **next knight** button (frame `$2C` at (146, 71), 20 x 20);
+   - sheet 8 after a change: the change counter is cleared, the sheet number returns to the
+     sheet the scroll was used from, drawing starts again;
+   - sheet 5: the smith's icons; sheet 6: the market stock as an inventory; sheet 10: the
+     dragon's inventory and gold.
+5. Set the four colours of the panels: two for the sheet's knight and, on sheets 1, 8 and 11,
+   two for the other knight, by `kind` (the class colour pairs come from `mog`, §12.22).
+6. Flip and show.
+
+### 12.3 Panel layout
+
+All icons are frames of `ki.cel` (§3.2); positions are for the left panel before any shift.
+Every icon drawn through the icon routine also registers a region of the icon's size carrying
+`{button index, type, mask, field}` (§12.4).
+
+**Knight panel** (derived values are recalculated first, §9.3):
+
+| Element | Frame | Position | Step | Count | Button | Type | Field |
+|---|---|---|---|---|---|---|---|
+| Name (text) | – | (60, 24) | – | – | – | – | – |
+| Strength row | `$26` | (41, 35) | 0 | `strength` | 0 | 3 | `$46` |
+| Constitution row | `$27` | (41, 42) | 0 | `constitution` | 2 | 3 | `$47` |
+| Endurance row | `$28` | (41, 49) | 0 | `endurance` | 1 | 3 | `$48` |
+| Gold icon | `$2A` | (89, 42) | 0 | 1 | 4 | 2 | `$4A` |
+| Stat bars (draw list) | `$29`, `$2A`, `$2B` | (89, 35), (89, 42), (89, 49) | – | – | – | – | – |
+| Numbers: strength, constitution, endurance | – | x 63, y 35 / 42 / 49 | – | – | – | – | – |
+| Numbers: progress, gold | – | (112, 35), (112, 42) | – | – | – | – | – |
+| "hp/max" text | – | (112, 49) | – | – | – | – | – |
+| Lives | `$11` (second panel `$12`), +2 while frogged | (41, 59) | 19 | `lives` (a byte with bit 7 set shows 5) | 3 | 3 | `$49` |
+| Daggers | `$15` | (38, 78) | 10 | `daggers` | 5 | 3 | `$4C` |
+| Sword | the sword code (capped at `$19`) | (43, 95) | – | 1 | 10 + (code - `$16`) | 2 | `$58` |
+| Armour | the armour code | (29, 112) | – | 1 | 6 + (code - `$1B`) | 2 | `$5C` |
+
+A stat row with step 0 draws all its icons on one spot; the number beside it carries the value.
+
+**Inventory icons** (same routine for a knight, a lair's loot, the market stock, the hoard):
+
+| Slot (§12.6) | Frame | Position | Step | Shown at most | Button | Type |
+|---|---|---|---|---|---|---|
+| `$02` | 9 | (87, 164) | 16 | 4 | 19 | 5 |
+| `$06` | 3 | (33, 149) | 12 | 3 | 20 | 1 |
+| `$08` | `$0A` | (69, 133) | 20 | 4 | 21 | 1 |
+| `$14` keys, bits 0..3 | 5, 6, 7, 8 | x 76, 94, 112, 130, y 111 | – | 1 each | 17 | 1, mask = the bit |
+| `$16` moonstones, bits 0..3 | 2, 1, 0, 0 | from (103, 111), see below | – | 1 each | 14, 15, 16, 14 | 1, mask = the bit |
+| `$00` | 4 | (31, 165) | 13 | 4 | 18 | 5 |
+| `$0A`..`$12` (five scrolls) | `$0B`..`$0F` | columns from x 30, 25 apart, y 183 | – | 2 each (the second as frame `$10`, 4 right) | 22..26 | 5 |
+
+Quirk kept: the moonstone icons set their x once and advance by whatever step the previously
+drawn row left behind, so their spacing depends on what else the inventory holds.
+
+**Lair loot panel** (sheet 2): three decoration frames (`$1F` at (58, 46), `$20` at (76, 33),
+`$21` at (58, 60)); if the lair's gold word is non-zero, the gold icon `$25` at (87, 64)
+(button 4, type 2, field `$4A`) with the text "*n* gp." at (92, 91); the sword-of-sharpness
+icon `$19` at (43, 95) when slot `$04` is non-zero (button 13, type 1, field 4); then the
+inventory icons of the loot. The **hoard** (sheet 10) is the same without the decoration,
+using the dragon's inventory and `gold`. The **market** panel is the stock's inventory icons
+plus the sword-of-sharpness icon.
+
+**Smith panel** (sheet 5): mail `$1C` at (23, 145), plate `$1D` at (64, 145), battle armour
+`$1E` at (106, 144), type `$A` with masks 1, 2, 4, field `$5C`; broad sword `$17` at
+(50, 107) and claymore `$18` at (47, 125), type `$A`, masks 1 and 2, field `$58`; thirteen
+dagger icons `$15` from (32, 89), 9 apart, type `$A`, field `$4C`.
+
+T11.15 checks every frame and position against the real `ki.cel` on a contact sheet.
+
+### 12.4 Regions and button text tables
+
+A **region** is a rectangle with: the button cell it belongs to, an id long (7 marks the done
+region), a word whose low nibble is the **type** and whose next nibble is the **mask**, and a
+**field** word (an inventory slot offset `$00`..`$16`, or an actor field offset: `$46`..`$48`
+stats, `$49` lives, `$4A` gold, `$4C` daggers, `$58` sword, `$5C` armour).
+
+A **button cell** holds a text and a flags word. There are two arrays of 27 cells, "use" for
+the left panel and "take" for the right one; a region's button index selects the cell. Index
+order: 0 strength, 1 endurance, 2 constitution, 3 lives, 4 gold, 5 daggers, 6..9 the four
+armours, 10..13 the four swords, 14..16 moonstones, 17 key, 18..26 the items in the order of
+§12.6.
+
+Seven text tables of 27 entries exist; the sheet number picks one per array:
+
+| Table | Texts | Array and sheets | Flags |
+|---|---|---|---|
+| Plain | names only | default for both arrays | `$03` |
+| Temple | names; "drink" / "use" / "cast" wording for items | use, sheet 9 | `$13` |
+| Offer | blank except moonstones, key and "offer ..." for items | use, sheet 3 | `$13` |
+| Sell | "sell ..." | use, sheet 6 | `$13` |
+| Take | "take ..." | take, sheets 1, 8, 10, and 2 unless in travel mode | `$23` |
+| Buy | "buy ..." | take, sheets 5 and 6 | `$23` |
+| Stat | "increase ..." for the three stats | see below | – |
+
+Bit 4 (`$10`) of the flags means "may be used", bit 5 (`$20`) "may be taken", bit 6 (`$40`)
+"stat may be bought".
+
+**Stat buttons.** After the use array is filled, if the sheet's knight has at least 3
+`progress` points, each of the first three use cells whose stat is not exactly 5 gets the
+"increase" text and has bit 6 toggled. Quirk kept: this happens on every sheet, not only on
+sheet 9.
+
+### 12.5 Click dispatch
+
+1. The **done** region sets the done flag.
+2. The **next knight** button advances the second panel to the next of the four knights that
+   is not the sheet's knight (a counter stepping modulo 4), and redraws.
+3. Otherwise by region type, with the flags of the region's button cell:
+
+| Type | Action |
+|---|---|
+| 5 | On sheet 6: the market click (§12.11). Else, without flag bit 4: the take action if flag bit 5 is set, else nothing. With bit 4: **use the item** (§12.7). |
+| 1 | On sheet 6: the market click. Else the **take** action if flag bit 5 is set (§12.8). |
+| 3 | With flag bit 6: **buy the stat** of the field (§12.9), redraw. Then, with flag bit 5 and field `$4C`: the dagger top-up (§12.8). |
+| `$A` | The smith click (§12.10). |
+| `$C` | **Give up** one piece of the field's slot (§12.16), redraw. |
+| other | With flag bit 5, by field: `$4A` take gold, `$5C` take armour, `$58` take sword (§12.8); redraw. |
+
+On sheet 3 every icon drawn through the sheet-aware routine has its type forced to `$C`; the
+keys and moonstones are drawn through the plain routine and keep type 1, so they cannot be
+offered.
+
+Consequences that the implementation must reproduce: items can be **used** only on sheet 9
+(the only sheet whose use array has bit 4); things can be **taken** only from the right panel
+of sheets 1, 2, 8 and 10; in travel mode sheet 2 shows the loot with the plain table, so
+nothing can be taken (the Gem of Seeing only looks).
+
+### 12.6 Items
+
+The display names come from the text tables in `mog`; they complete §9.4.
+
+| Slot | Name | Kind |
+|---|---|---|
+| `$00` | Potion of Healing | used (rest) |
+| `$02` | Gem of Seeing | used (travel mode, §11.9) |
+| `$04` | Sword of Sharpness | worn while held |
+| `$06` | Ring of Protection | passive (+20 `hp_max` each) |
+| `$08` | Talisman of the Wyrm | passive (halves incoming damage per piece, §10.11) |
+| `$0A` | Scroll of Haste | used (gamble on the move budget) |
+| `$0C` | Scroll of the Hawk | used (ambush mode or a random spot, §11.9) |
+| `$0E` | Scroll of Acquisition | used (sheet 8) |
+| `$10` | Scroll of the Wyrm | used (sheet 11: sends the dragon after a knight) |
+| `$12` | Scroll of Protection | used when challenged (§12.18) |
+| `$14` | Keys to the Valley | four flag bits |
+| `$16` | Moonstones | four flag bits |
+
+Moonstone texts by bit: bit 0 "new moon", bit 1 "full", bit 2 "half"; bit 3 has no text or
+icon of its own and shows as bit 0's text with bit 2's icon.
+
+### 12.7 Using an item
+
+The count of the slot drops by one (unchecked) and the slot is remembered as the **last item
+used** (the callers of §12.16 and §12.18 read it). Then by slot:
+
+| Slot | Effect |
+|---|---|
+| `$00` | **Rest:** `life_loss` cleared; if `hp == hp_max` the knight gains a life (a result of 6 or more becomes 5); `hp = hp_max`. Click sound. |
+| `$0A` | Percent draw. Above 10: good jingle, `budget` doubled. Else: bad jingle, `bad_luck = 1`, `budget` halved. |
+| `$0E` | Good jingle; the current sheet number is remembered, the second panel starts at the first other knight, and sheet 8 opens in place of this one. |
+| `$02` | Good jingle; travel mode on with the position saved (§11.9); the sheet ends. |
+| `$0C` | Percent draw. Above 15: good jingle, ambush mode on; else bad jingle and the random spot (§11.9). The sheet ends either way. |
+| `$10` | Good jingle; the hand-over flag is set, the second panel starts at the first other knight, and sheet 11 opens in place of this one. |
+| `$12` | Percent draw. Above 10: the sheet ends, good jingle. Else: the sheet ends, bad jingle, `bad_luck = 1`, bad jingle again. |
+| others | Only the decrement. |
+
+The draw is made only for slots `$0A`, `$0C` and `$12`. The sheet is redrawn unless another
+sheet opened. On sheet 8 the player takes one thing from the shown knight with the take
+actions; the sheet then returns to the one the scroll was used from. On sheet 11 nothing can
+be taken; the knight shown when the sheet is closed becomes the dragon's target.
+
+### 12.8 Taking
+
+Each successful take adds one to the change counter and redraws.
+
+**Take an item** (type 1 or 5 region of the right panel, click sound first):
+
+- Keys and moonstones: the whole mask byte moves (OR into mine, source cleared).
+- Slot `$04`: the source loses one; my `sword = $19`; except on sheet 2, my count gains one
+  and the other knight's `sword` falls back to `$16`.
+- Any other slot: one piece moves. For slot `$06` my `hp += 20` first.
+- Then my `hp_max` and derived endurance are recalculated.
+
+No check is made that the source holds a piece; counts wrap in the byte (the sheet only shows
+regions for what is there).
+
+**Take gold** (field `$4A`): gold moves one piece at a time from the source (the other
+knight's `gold`, or on sheet 2 the lair's gold word) until the source is empty or my gold is
+**exactly** 150; a knight already above 150 takes everything. A coin sound plays when the
+source ran empty.
+
+**Take armour** (field `$5C`): if my armour code is lower than the other's, I take it and the
+other falls back to `$1B`. A hit-point amount also moves from the other's `hp` to mine; the
+original looks it up by **my previous** armour with a byte offset into a word table, which
+yields 0 when I wore padded armour or mail and 10 when I wore plate (quirk kept).
+
+**Take sword** (field `$58`): if my sword is `$19`: the other's slot `$04` loses one, and
+except on sheet 2 my slot `$04` gains one and the other's sword becomes `$16`; then derived
+values are recalculated. Otherwise, if my sword code is lower than the other's, the two codes
+swap.
+
+**Dagger top-up** (type 3, field `$4C`, flag bit 5): daggers move one at a time from the
+other knight until I have exactly 10 or the other has none.
+
+### 12.9 Buying a stat
+
+With flag bit 6 on the clicked stat row: the stat byte of the field gains one; constitution
+also gives `hp += 10`; `progress -= 3`; derived values are recalculated. The price (3) is a
+word in `mog`. Because of the stat-button rule (§12.4) a stat at exactly 5 cannot be bought,
+one above 5 can.
+
+**Stat pick** (used by the wizard, the mystic, the valley and the computer knights): if all
+three stats are 5 or more, no stat is picked. Otherwise: one draw, low 4 bits, a value above
+8 has 7 subtracted; the result 0..8 indexes a nine-row table in `mog` that names a stat per
+row (the original order is strength, endurance, constitution, endurance, strength, endurance,
+constitution, constitution, strength); redraw while the picked stat is exactly 5.
+
+The computer knight's purchase (§11.13 step 3): with at least 3 `progress`, a stat pick; if a
+stat was picked it gains one and `progress -= 3`. No recalculation is done there.
+
+### 12.10 The smith (sheet 5)
+
+Fixed prices, read from `mog`; a purchase needs `gold >= price` (signed).
+
+- **Armour** (the lowest set mask bit): mail 30, plate 50, battle armour 75. The armour is
+  replaced without comparing with the worn one (a cheaper one replaces a better one); `hp`
+  gains 10 / 20 / 30; `hp_max` is recalculated.
+- **Sword:** broad sword 10, claymore 25; refused when the worn sword's code is the same or
+  higher.
+- **Dagger:** 2 gold each while the knight carries fewer than 10.
+
+### 12.11 The market (sheet 6)
+
+The stock is an inventory filled at the start of the game (§11.3) and changed only by trade.
+The price list has one word per slot (index = slot / 2), set up from `mog` when the text
+tables are built. The pointer's x decides: at x >= 160 (the stock panel) a click **buys**,
+left of it a click **sells**.
+
+- **Buy:** refused when the price exceeds the gold. Else `gold -= price`; keys and moonstones
+  move by mask (OR into the knight, XOR out of the stock) with no recalculation; any other
+  slot moves one piece; slot `$06` gives `hp += 20` and recalculates `hp_max`. For the other
+  counted slots the original runs the recalculation on the wrong record (the inventory
+  address instead of the knight), which writes into unrelated memory. That write is **not**
+  reproduced here (a deliberate deviation); the knight's own values are not recalculated on
+  this path, exactly as in the original. The buy sound plays before the price test.
+- **Sell:** the piece (or mask) moves to the stock; `gold += price >> 1`, then gold above 150
+  is cut to 150; selling slot `$04` puts the knight's sword back to `$16`; `hp_max` is
+  recalculated. Then redraw and the sell sound.
+
+### 12.12 Gift rolls
+
+Three routines fill inventories at random; the new game (§11.3), the wizard and the valley
+use them.
+
+- **Gold roll:** one draw, low 5 bits; above 21 subtract 10; add 10. The result 10..31 is
+  added to the knight's `gold` (no cap) or to a lair's gold word.
+- **Item roll** into a target inventory: a percent draw is matched against a ten-band table in
+  `mog` (limits 25, 35, 45, 55, 65, 75, 80, 85, 94, 100 for slots `$00`, `$02`, `$04`, `$06`,
+  `$08`, `$0A`, `$0E`, `$0C`, `$10`, `$12`). The roll is repeated when the slot equals the
+  previous gift (one shared memory, initially none), or when it is slot `$04` and the target
+  already holds one. The memory is updated before the second test (so a refused sword also
+  blocks a sword on the next try). The slot's count gains one. When the target is a knight's
+  own inventory, slot `$04` sets `sword = $19` and slot `$06` gives `hp += 20` and a
+  recalculation.
+- **Wizard's gift:** one percent draw plus the knight's `recency` (byte addition, wrapping):
+  up to 30 an item roll into the knight's inventory; up to 70 a stat point by the stat pick
+  (no stat pickable: the whole gift is rolled again; constitution recalculates `hp_max` and
+  then adds 10 `hp`; endurance recalculates derived endurance); up to 90 a gold roll; above
+  that the frog curse, `frog_days = 3`, except that a knight with `recency == $FF` rolls the
+  whole gift again. Which of several message variants is shown cycles per kind (four item
+  messages, three gold messages).
+
+### 12.13 The visit: prologue, classification, exits
+
+Choosing a place in the node menu (§11.8) runs, before anything else: map colours off (fade
+out), turn set-up (§11.11), the arena reset (all jobs and fight objects freed, fighter script
+tables rebuilt, fade out, key state cleared), and `dragon_active = 0`.
+
+| Id | Place | Section |
+|---|---|---|
+| `$15`..`$18` | Home village | §12.14 |
+| `$19` | Highwood | §12.15 |
+| `$1A` | Waterdeep | §12.15 |
+| `$1B` | Stonehenge | §12.16 |
+| `$1C` | Valley of the Gods | §12.17 |
+| `$1E` | The wizard's tower | §12.20 |
+| other | Nothing happens; the id is returned | – |
+
+**Exits.** Three shared tails, each falling into the next:
+
+1. **Temple exit:** sheet 9, then
+2. **Spent exit:** `spent = budget` (the turn is over), then
+3. **Set-up exit:** the map scene set-up of §11.3 (jobs freed, colours stopped, turn set-up,
+   all knights recalculated, keys cleared) and a non-zero result, which re-enters the map
+   screen.
+
+### 12.14 Home village
+
+The knight gains a life if it has fewer than 3 (signed byte). Then the temple exit: the status
+sheet, where progress can be spent and items used, and the turn ends.
+
+### 12.15 The towns
+
+**Loading:** the loading-text screen is shown with the town's text; the town picture
+(`HighWood.PIV` or `WaterDeep.PIV`, §12.22) is loaded with its palette.
+
+**Screen:** the pointer starts at (290, 100) in Highwood and (30, 100) in Waterdeep. Five
+button regions 64 wide are registered, ids 1..5 from top to bottom:
+
+| | x | y of buttons 1..5 | Heights |
+|---|---|---|---|
+| Highwood | 256 | 30, 66, 106, 140, 183 | 16, 16, 16, 26, 12 |
+| Waterdeep | 0 | 26, 63, 101, 134, 182 | 16, 16, 16, 31, 12 |
+
+The picture fades in. The loop then polls: if the pointer is over a button and fire is
+pressed, the button's action runs and the screen is drawn again; otherwise the keyboard is
+read.
+
+| Id | Highwood | Waterdeep |
+|---|---|---|
+| 1 | Smith (sheet 5) | Smith (sheet 5) |
+| 2 | Dice house (§12.21) | Dice house |
+| 3 | Healer (§12.19) | Healer |
+| 4 | Market (sheet 6) | Mythral the mystic (§12.19) |
+| 5 | Exit: pointer off, spent exit | Exit |
+
+**Space key:** in Highwood it opens the status sheet (sheet 9). In Waterdeep the original
+does not load a sheet number and opens the number the key translation left behind, the space
+character's code 32. The sheet loop treats an unknown number as a sheet with the left panel
+only, the narrow layout and the plain tables: the knight's panel can be looked at, nothing
+can be used. The sheet loop therefore accepts any number, and Waterdeep's space key passes 32
+(quirk kept).
+
+A town visit always ends the turn (the only way out is the exit button).
+
+### 12.16 Stonehenge
+
+**Match test.** With the knight's moonstone mask and the current `moon_frame`: bit 2 or bit 3
+with frame 46, bit 1 with frame 45, bit 0 with frame 49.
+
+**No match: the offer.** A recoloured message screen with the offer text; wait for fire; fade
+out. The last-item memory is set to "none" and sheet 3 opens. There every item icon is a
+give-up region: clicking one drops one piece of that slot (slot `$04` also puts the sword
+back to `$16`), records the slot as the last item, recalculates and ends the sheet. If an
+item was given: the **ritual screen** plays (below) and the knight is blessed: one life more
+unless it has exactly 5, `hp_max` recalculated, `hp = hp_max`, `life_loss` cleared. Then fade
+out and the temple exit.
+
+**Ritual screen:** all jobs freed; the recoloured message screen with the ritual text;
+`Hen1.p` loaded with its palette, `Hen1.c` as the cel set, the `he.a` sound bank; two jobs
+(type `$28`) run the two ritual scripts at (160, 0, 100); the knight's four class shades are
+written into the palette from entry 8 on; three sounds start; the palette fades towards the
+picture's with period 4. The loop runs the jobs every 6 VBLs until the first script calls the
+type handler, which ends the screen; fade.
+
+**Match: the ending.** The **ending code** is built: bit 0 for frame 46, bit 2 for frame 45,
+bit 1 for frame 49; bit 3 for knight kind 3, bit 4 for kind 0, bit 5 for kind 1, bit 6 for
+kind 2; bit 7 is always added. The quest-complete message is shown, 20 frames pass, fire is
+awaited, and the game hands over to the `program` executable with the code (§12.23). It does
+not return.
+
+### 12.17 The Valley of the Gods
+
+Without all four keys (`$0F`): a message, wait for fire, and the set-up exit; the turn is
+**kept**.
+
+With them: turn set-up, the guardian arena (§10.3), the fight.
+
+- **Lost:** turn set-up; a stat pick, then two lives are lost and the picked stat drops by
+  one unless it is 1. (With no stat pickable the original decrements an unrelated byte of the
+  record; here nothing is lowered.) Then the temple exit.
+- **Won:** `progress += 3`, the keys are taken away; a recoloured message; wait for fire, then
+  10 frames; key state cleared, turn set-up, and a **moonstone**: the bit numbered by the low
+  2 bits of a draw is set in the knight's moonstone mask. The original returns the result of
+  that draw to the map, so a draw of 0 leaves the map screen not re-entered; here the screen
+  is always re-entered. The turn is kept.
+
+### 12.18 Knight meets knight
+
+Started from the node menu on another knight, or by a computer knight's arrival (§11.13), with
+a first knight (the one whose turn it is) and a second.
+
+1. Map colours off. The pair becomes `current` and `opponent` of the active-fight block.
+2. If the second knight is frogged or has no lives, there is no fight: continue at step 6 with
+   the first knight as the winner.
+3. **Scroll of Protection.** If the second knight is human and holds one: a message screen
+   naming it, wait for fire; then sheet 9 opens **for the second knight** (it becomes
+   `current` for the length of the sheet). If the last item used there is slot `$12`: with
+   `bad_luck` clear the fight is avoided and the map returns; with `bad_luck` set the fight
+   goes ahead.
+4. Two computer knights never fight: back to the map.
+5. **Fight** (§10.1, duel arena). Both lost: a human first knight sees sheet 9; back to the
+   map. If the first lost, the pair is swapped so that the winner is first.
+6. **Settlement.** A computer winner gets `progress + 1` and the loot transfer of §9.4, and
+   the map returns. A human winner gets sheet 1 with the loser in the second panel; the pair
+   is swapped back afterwards.
+
+### 12.19 Donation screen, healer and mystic
+
+Both screens load their picture (`HEA.piv` / `MYS.piv`) and the cel set `mys.cel`, put the
+pointer at (160, 170), show a greeting text, start four synth voices and wait for fire. Then
+the **donation screen**:
+
+- the knight's gold becomes the **purse**, the donation starts at 0;
+- drawn: the portrait (frame 0 mystic, 1 healer) at (2, 162) and (270, 162); button frames 4
+  ("-") at (144, 169) and 5 ("+") at (162, 169), 3 (accept) at (131, 185), 2 (leave) at
+  (173, 185); the purse at (20, 175) and the donation at (288, 175) with their labels;
+- regions: "-" 14 x 8, "+" 14 x 8, accept 20 x 8, leave 32 x 8;
+- "+" moves one gold from purse to donation, "-" one back, each followed by a redraw and a
+  2-frame wait; **leave** clears both amounts and returns; **accept** writes the purse back
+  as the knight's `gold` and returns.
+
+**Leave** never touches the knight's `gold`; **accept** pays the donation whatever the service
+then gives.
+
+**Healer.** Not accepted: the refusal text. Accepted with a donation of 0: the "nothing given"
+text. Otherwise, while at least 10 remains of the donation: clear `life_loss` if set; if
+`hp != hp_max`, set `hp = hp_max` for 10 and go round again; else, unless `lives` is exactly
+5, add a life for 15 and go round again; else stop. (The life step does not test that 15
+remain; the donation word may go negative, which ends the loop.) Whatever remains of the
+donation is lost. The reply text depends on whether less than 10 was given and whether a
+curse was lifted.
+
+**Mystic.** No donation: the "nothing given" text. Not accepted: the refusal text. Otherwise
+the gamble: a stat pick (§12.9), then a percent draw plus a bonus by donation size (up to 9
+gold +20, up to 19 +10, up to 29 0, up to 39 -10, up to 49 -20, up to 250 -30; table in
+`mog`; above 250 the original reads past the table, here the bonus is 0). A sum of 50 or more
+**wins**: the picked stat gains one (constitution also `hp += 10`), derived values are
+recalculated; with no stat pickable the "nothing to raise" text. Otherwise it **loses**: a
+stat of 1 stays ("unchanged" text); else it drops by one (constitution also `hp -= 10`, not
+below 1) and derived values are recalculated. Larger donations lower the odds; the original
+table is kept as it is.
+
+Both screens end with the reply shown, a 50-frame wait, wait for fire, fade.
+
+### 12.20 The wizard's tower
+
+1. `WI2.P` and `WI1.P` are loaded with their palettes and the cel set `Wi1.C` (§12.22); the
+   knight's five class shades are written into the palette from entry 6 on.
+2. **Arrival:** a job (type `$28`, at (160, 0, 100)) runs the tower script; the greeting is
+   printed at (150, 5); four synth voices start; the palette fades in; the loop runs every 5
+   VBLs until fire.
+3. **Gift:** the wizard's gift is rolled (§12.12). The second picture is shown with the gift
+   text at (50, 130) and two jobs running the gift scripts; loop every 6 VBLs until fire.
+4. **Farewell:** the first picture again with a speech chosen by the kind of gift (item, stat,
+   gold, curse, or an omen text otherwise); loop every 4 VBLs until fire.
+5. `recency = 70`. Fade out.
+
+Then sheet 9 and the spent exit: the visit uses up the turn. A recent visit shifts the next
+gift roll towards gold and the curse, and `recency` falls by 10 per round (§9.3).
+
+### 12.21 The dice house
+
+Not entered with `gold <= 0`. `tav.piv` is the room, `dice.piv` the table shown for a roll,
+`dice.cel` the dice and the thrower. Regions: five bet buttons at x 268, y 38, 66, 94, 121,
+147 (43 x 24) for bets of 1..5 gold, and a leave button at (268, 181) (45 x 16). The knight's
+five class shades go into the palette from entry 6 on; three sounds start.
+
+**Round:** leave at once if `gold <= 0`. Show the room, the gold at (282, 14), and start the
+thrower's job (type `$44`) on its idle script. Its handler, once per job frame:
+
+- fire not pressed, or pressed over nothing: stay idle;
+- fire over a bet button: if the bet exceeds the gold, stay idle; else `gold -= bet` and the
+  throw script starts;
+- fire over leave: the screen ends;
+- when the throw script ends: the roll.
+
+**Roll:** three dice, each the low 3 bits of a draw, redrawn while above 5. They are drawn on
+the table picture as frames of `dice.cel` at (115, 15), (49, 38), (75, 88) in the order
+rolled, then sorted ascending and looked up in the payout table in `mog`: rows of three dice
+values and a multiplier (the original has eleven rows with multipliers 4, 5, 6, 8, 10, 12,
+14, 16, 18, 20, 30). A listed combination pays `bet * multiplier` into `gold` (no cap) with
+the winning text; any other loses the stake. After 20 frames and a fire press the next round
+starts.
+
+### 12.22 Reading the place data from `mog`
+
+Read as data by offset (through the relocations of the code that uses them, §10.15): all
+texts (button texts, item names, greetings, replies, messages, speeches), the file name
+strings of the pictures and cel sets (which is also how the exact spelling and case of
+`HighWood.PIV`, `WaterDeep.PIV`, `HEA.piv`, `MYS.piv`, `mys.cel`, `tav.piv`, `dice.piv`,
+`dice.cel`, `Hen1.p`, `Hen1.c`, `he.a`, `WI1.P`, `WI2.P`, `Wi1.C` is confirmed), the item
+band table, the lair loot odds, the stat row table, the mystic's bonus table, the dice payout
+table, the panel draw lists, the scripts of the dice thrower, the ritual and the wizard, the
+loading-text cycle.
+
+Read as code operands with the instruction word checked (§10.15): the smith's prices, the
+market price list, the stat price, the healer's prices and caps, the gold cap, the village
+life cap, the wizard's roll limits, the class colour pairs and shades, the town button
+layouts.
+
+Rule constants that stay in code: region types and flag bits, the icon positions of §12.3
+(they are immediates spread over one long routine; T11.15 may move them to operand reads if
+the contact sheet shows a mismatch), the order of tests in every rule.
+
+### 12.23 Ending, farewell and message screens
+
+- **Message screen:** `message.piv` with a list of text lines from `mog`, in the picture's
+  palette. The **recoloured** variant overwrites palette entries 1..6 with a dark red ramp.
+  The **loading-text** variant shows the next of 14 texts in a cycle and is used before fights
+  and towns (§10.2).
+- **Farewell** (quit key, or no human knight left, §11.11): the farewell text on a message
+  screen; wait for a fire press and release; map colours off; back to the title.
+- **Ending:** Stonehenge with the right moonstone stores the ending code (§12.16) where
+  `program` reads its start flags and starts `program` again; with bit 7 set, `program` plays
+  the ending sequence with `vmusic.cmp` (§7.4), choosing the moon and knight colours from the
+  other bits. T11.22 specifies that sequence from `program`.
+
+### 12.24 Corrections to earlier sections
+
+- **§9.5, lair `occupied` (+8):** the word is the lair's **gold**. Gold rolls at the start of
+  the game add to it, the loot sheet's gold icon shows and empties it, and the lair stays on
+  the map while it or the loot inventory is non-zero (§11.9).
+- **§9.4 names:** given by §12.6. Slot `$0E` is the Scroll of Acquisition and slot `$10` the
+  Scroll of the Wyrm; "opens the exchange sheet 8 / hand-over sheet 11" described their
+  mechanics correctly.
+- **§9.6, moonstone pairing:** the damage rule (§10.11) pairs bits 0 and 3 with frame 46, bit
+  1 with frame 45 and bit 2 with frame 49. Stonehenge (§12.16) pairs bits **2** and 3 with
+  frame 46, bit 1 with frame 45 and bit **0** with frame 49. The two rules differ on bits 0
+  and 2 in the original; both are kept as they are.
+- **§11.8 / §11.9, travel mode:** entering a lair in travel mode opens the loot sheet with
+  the plain table, so the Gem of Seeing shows a lair's contents and nothing can be taken.
+- **§11.13 step 6 and §11.17:** the scroll the computer knight uses against an engaged
+  opponent is the Scroll of Acquisition (slot `$0E`); there is no conflict with §9.4.
+- **§10.1:** "temple sheet" and "status sheet" are the same sheet 9.
