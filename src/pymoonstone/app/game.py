@@ -24,6 +24,12 @@ from pymoonstone.app.input import (
     save_replay,
 )
 from pymoonstone.app.loop import Accumulator50Hz
+from pymoonstone.app.scene_assets import (
+    GameAssetBundle,
+    make_sprite,
+    select_knight_frame,
+    select_monster_frame,
+)
 from pymoonstone.assets.adf import DiskSet
 from pymoonstone.assets.palette import default_combat_palette
 from pymoonstone.render.renderer import (
@@ -37,6 +43,7 @@ from pymoonstone.render.scene import (
     CombatHudState,
     OverworldHudState,
     SceneRenderer,
+    SceneSprite,
     default_bitmap_font,
     render_combat_hud,
     render_overworld_hud,
@@ -58,6 +65,7 @@ from pymoonstone.sim.monster_ai import (
     LairEncounter,
     MonsterArchetype,
     MonsterSpawnSpec,
+    MonsterState,
     TargetSnapshot,
     WaveSpec,
     apply_hit_to_monster,
@@ -218,6 +226,9 @@ class GameSession:
         self.active_encounter: ActiveEncounter | None = None
         self.audio = audio
         self.disk_set = disk_set
+        self.asset_bundle: GameAssetBundle | None = (
+            GameAssetBundle(disk_set) if disk_set is not None else None
+        )
         self.last_status: str = "PRESS ENTER TO BEGIN"
 
     def _reset_campaign(self, count: int) -> None:
@@ -569,8 +580,8 @@ class GameSession:
         font.draw_text(
             scene_renderer.canvas,
             f"NODE:{ow_k.node_id} -> {target}",
-            88,
-            120,
+            104,
+            236,
             color_index=31,
         )
 
@@ -598,32 +609,153 @@ class GameSession:
             font,
         )
 
+    def _compose_picture_or_solid(
+        self,
+        scene_renderer: SceneRenderer,
+        *names: str,
+        sprites: Sequence[SceneSprite] = (),
+        fill_index: int = 1,
+    ) -> None:
+        if self.asset_bundle is not None:
+            pic = self.asset_bundle.get_picture(*names)
+            if pic is not None:
+                scene_renderer.set_palette(pic.palette)
+                scene_renderer.compose_scene(
+                    background=pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
+                    sprites=sprites,
+                    border_index=0,
+                )
+                return
+        bg: npt.NDArray[np.uint8] = np.full(
+            (PLAYFIELD_HEIGHT, CANVAS_WIDTH), np.uint8(fill_index), dtype=np.uint8
+        )
+        scene_renderer.set_palette(default_combat_palette())
+        scene_renderer.compose_scene(background=bg, sprites=sprites, border_index=0)
+
+    def _overworld_sprites(self) -> list[SceneSprite]:
+        if self.asset_bundle is None:
+            return []
+        sprites: list[SceneSprite] = []
+        marker_cel = self.asset_bundle.get_cel("ov1.cel", "KN1.ob")
+        if marker_cel is not None:
+            for idx, kid in enumerate(self.overworld.turn_order):
+                ow_k = self.overworld.knights[kid]
+                if not ow_k.alive:
+                    continue
+                node = self.overworld.graph.nodes.get(ow_k.node_id)
+                px = node.x if node is not None else 40 + idx * 32
+                py = node.y if node is not None else 90
+                sp = make_sprite(marker_cel, idx, x=px, y=py, layer=2, order=idx)
+                if sp is not None:
+                    sprites.append(sp)
+        self._append_dragon_marker(sprites)
+        return sprites
+
+    def _append_dragon_marker(self, sprites: list[SceneSprite]) -> None:
+        if self.asset_bundle is None:
+            return
+        dragon_cel = self.asset_bundle.get_cel("DRAGON1.CEL")
+        dnode = self.overworld.graph.nodes.get(self.overworld.dragon.node_id)
+        if dragon_cel is None or dnode is None:
+            return
+        dsp = make_sprite(dragon_cel, 0, x=dnode.x, y=dnode.y, layer=3, order=99)
+        if dsp is not None:
+            sprites.append(dsp)
+
+    def _combat_sprites(self, active: ActiveEncounter) -> list[SceneSprite]:
+        sprites: list[SceneSprite] = []
+        if self.asset_bundle is None:
+            return sprites
+        for idx, kid in enumerate(active.knight_ids):
+            kstate = self.knight_combat[kid]
+            kcel = self.asset_bundle.get_knight_cel(int(kid))
+            if kcel is None:
+                continue
+            fidx = select_knight_frame(kcel, kstate.action, self.tick_count)
+            sp = make_sprite(
+                kcel,
+                fidx,
+                x=kstate.x,
+                y=kstate.y,
+                z=kstate.z,
+                flipped=kstate.direction.is_left,
+                layer=2,
+                order=idx,
+            )
+            if sp is not None:
+                sprites.append(sp)
+        for idx, monster in enumerate(active.encounter.monsters):
+            if not monster.is_alive:
+                continue
+            mcel = self.asset_bundle.get_monster_cel(monster.params.archetype)
+            if mcel is None:
+                continue
+            attacking = monster.state in (
+                MonsterState.MELEE_ATTACK,
+                MonsterState.RANGED_ATTACK,
+                MonsterState.BREATH_ATTACK,
+            )
+            fidx = select_monster_frame(mcel, self.tick_count, attacking)
+            sp = make_sprite(
+                mcel,
+                fidx,
+                x=monster.pos.x,
+                y=monster.pos.y,
+                z=monster.pos.z,
+                flipped=monster.direction.is_left,
+                layer=2,
+                order=10 + idx,
+            )
+            if sp is not None:
+                sprites.append(sp)
+        return sprites
+
+    def _render_combat_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
+        active = self.active_encounter
+        if active is None:
+            self._compose_picture_or_solid(scene_renderer)
+            return
+        lair_idx = max(0, active.trigger.lair_index)
+        arena_loaded = (
+            self.asset_bundle.get_combat_arena(lair_idx) if self.asset_bundle is not None else None
+        )
+        sprites = self._combat_sprites(active)
+
+        if arena_loaded is not None:
+            _arena_data, arena_bg, pal = arena_loaded
+            scene_renderer.set_palette(pal)
+            scene_renderer.compose_scene(background=arena_bg, sprites=sprites, border_index=0)
+        else:
+            self._compose_picture_or_solid(scene_renderer, sprites=sprites)
+        self._render_combat_hud(scene_renderer, font)
+
     def render_to_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         """Render the active game scene and HUD onto ``scene_renderer``."""
-        bg: npt.NDArray[np.uint8] = np.zeros((PLAYFIELD_HEIGHT, CANVAS_WIDTH), dtype=np.uint8)
-        bg.fill(np.uint8(1))
-        scene_renderer.compose_scene(background=bg, border_index=0)
-
         if self.scene == GameScene.TITLE:
-            font.draw_text(scene_renderer.canvas, "MOONSTONE", 124, 90, color_index=30)
-            font.draw_text(scene_renderer.canvas, "PRESS ENTER", 116, 120, color_index=31)
+            self._compose_picture_or_solid(scene_renderer, "bg1a.PIV", "mindscape")
+            font.draw_text(scene_renderer.canvas, "PRESS ENTER", 116, 236, color_index=31)
         elif self.scene == GameScene.KNIGHT_SELECT:
-            font.draw_text(scene_renderer.canvas, "KNIGHT SELECT", 108, 86, color_index=30)
+            self._compose_picture_or_solid(scene_renderer, "ch.piv")
             font.draw_text(
                 scene_renderer.canvas,
-                f"KNIGHTS: {self.selected_player_count}",
-                120,
-                116,
+                f"KNIGHTS: {self.selected_player_count} (ARROWS+ENTER)",
+                64,
+                236,
                 color_index=31,
             )
         elif self.scene == GameScene.OVERWORLD:
+            self._compose_picture_or_solid(
+                scene_renderer, "bg2.PIV", sprites=self._overworld_sprites()
+            )
             self._render_overworld_hud(scene_renderer, font)
         elif self.scene == GameScene.COMBAT:
-            self._render_combat_hud(scene_renderer, font)
+            self._render_combat_scene(scene_renderer, font)
         elif self.scene == GameScene.VICTORY:
-            font.draw_text(scene_renderer.canvas, "VICTORY!", 128, 116, color_index=30)
+            self._compose_picture_or_solid(scene_renderer, "WI1.P", "WI2.P")
+            font.draw_text(scene_renderer.canvas, "VICTORY!", 128, 236, color_index=30)
         else:
-            font.draw_text(scene_renderer.canvas, "GAME OVER", 124, 116, color_index=15)
+            self._compose_picture_or_solid(scene_renderer, "message.piv")
+            font.draw_text(scene_renderer.canvas, "GAME OVER", 124, 236, color_index=15)
 
         scene_renderer.flush_to_fbo()
 
@@ -732,6 +864,11 @@ def run_game_window(
         audio=audio,
         disk_set=disk_set,
     )
+    if session.asset_bundle is not None:
+        session.asset_bundle.preload_audio(audio)
+        title_mod = session.asset_bundle.load_title_music()
+        if title_mod is not None:
+            audio.play_music(title_mod)
 
     pygame.init()
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
