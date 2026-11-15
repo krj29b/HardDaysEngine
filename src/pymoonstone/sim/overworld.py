@@ -18,6 +18,11 @@ ALL_MOONSTONES_MASK: int = 0x0F
 ALL_KEYS_MASK: int = 0x0F
 DEFAULT_KNIGHT_LIVES: int = 3
 DEFAULT_ENCOUNTER_ROLL_MAX: int = 100
+DEFAULT_ROAD_MOVES_PER_TURN: int = 4
+MOG_ROAD_SITE_THRESHOLD: int = 20
+VALLEY_BLESSING_XP: int = 15
+MATHS_TOWER_XP: int = 20
+MATHS_TOWER_GOLD: int = 25
 
 
 class RegionId(IntEnum):
@@ -39,6 +44,9 @@ class NodeKind(IntEnum):
     WATERDEEP = 3
     STONEHENGE = 4
     START = 5
+    ROAD = 6
+    VALLEY_OF_THE_GODS = 7
+    MATHS_TOWER = 8
 
 
 class MoonPhase(IntEnum):
@@ -65,6 +73,9 @@ class TriggerKind(IntEnum):
     TOWN_VISIT = 5
     STONEHENGE_RITUAL = 6
     VICTORY = 7
+    HOME_CASTLE = 8
+    VALLEY_OF_THE_GODS = 9
+    MATHS_TOWER = 10
 
 
 @dataclass(slots=True, frozen=True)
@@ -101,6 +112,7 @@ class MapSiteInput:
     kind: NodeKind | None = None
     region_id: int | None = None
     neighbors: tuple[int, ...] = ()
+    lair_index: int = -1
 
 
 @dataclass(slots=True, frozen=True)
@@ -112,6 +124,7 @@ class OverworldGraph:
     start_nodes: dict[KnightId, int]
     dragon_patrol_route: tuple[int, ...]
     encounter_bands: tuple[EncounterBand, ...] = ()
+    moves_per_turn: int = 1
 
     def node(self, node_id: int) -> OverworldNode:
         """Return the node for ``node_id`` or raise ``KeyError``."""
@@ -139,7 +152,7 @@ class EncounterTrigger:
 
 @dataclass(slots=True, frozen=True)
 class TurnResult:
-    """Summary of one knight movement turn on the overworld board."""
+    """Summary of one knight movement step or turn on the overworld board."""
 
     knight_id: KnightId
     from_node_id: int
@@ -149,6 +162,8 @@ class TurnResult:
     moon_phase: MoonPhase
     dragon_node_id: int
     triggers: tuple[EncounterTrigger, ...]
+    moves_remaining: int = 0
+    turn_ended: bool = True
 
 
 @dataclass(slots=True)
@@ -212,6 +227,7 @@ class OverworldState:
     turn_index: int = 0
     total_turns: int = 0
     day: int = 1
+    moves_remaining: int = 1
     claimed_moonstones_mask: int = 0
     winner: KnightId | None = None
     game_over: bool = False
@@ -397,9 +413,12 @@ def _infer_start_nodes(
     nodes: dict[int, OverworldNode],
     stonehenge_id: int,
 ) -> dict[KnightId, int]:
-    candidates = [
-        n for n in nodes.values() if n.node_id != stonehenge_id and n.kind != NodeKind.LAIR
-    ]
+    start_tagged = [n for n in nodes.values() if n.kind == NodeKind.START]
+    candidates = (
+        start_tagged
+        if len(start_tagged) >= 4
+        else [n for n in nodes.values() if n.node_id != stonehenge_id and n.kind != NodeKind.LAIR]
+    )
     if not candidates:
         candidates = [nodes[stonehenge_id]]
     starts: dict[KnightId, int] = {}
@@ -407,6 +426,71 @@ def _infer_start_nodes(
         best = min(candidates, key=lambda n: (_dist2(n.x, n.y, tx, ty), n.node_id))
         starts[kid] = best.node_id
     return starts
+
+
+_PATROL_QUADRANTS: tuple[tuple[RegionId, int, int], ...] = (
+    (RegionId.FOREST, 60, 50),
+    (RegionId.GLEN, 260, 50),
+    (RegionId.WASTELAND, 260, 160),
+    (RegionId.SWAMP, 60, 160),
+)
+
+
+def _patrol_candidates(
+    nodes: dict[int, OverworldNode],
+    stonehenge_id: int,
+) -> list[OverworldNode]:
+    non_lair = [n for n in nodes.values() if n.node_id != stonehenge_id and n.kind != NodeKind.LAIR]
+    if non_lair:
+        return non_lair
+    return [n for n in nodes.values() if n.node_id != stonehenge_id]
+
+
+def _pick_regional_patrol_node(
+    candidates: list[OverworldNode],
+    region_id: RegionId,
+    tx: int,
+    ty: int,
+    chosen: list[int],
+) -> int | None:
+    regional = [n for n in candidates if n.region_id == region_id and n.node_id not in chosen]
+    if not regional:
+        return None
+    best = min(
+        regional,
+        key=lambda n: (
+            0 if n.kind in (NodeKind.ROAD, NodeKind.WILDERNESS) else 1,
+            _dist2(n.x, n.y, tx, ty),
+            n.node_id,
+        ),
+    )
+    return best.node_id
+
+
+def _infer_dragon_patrol_route(
+    nodes: dict[int, OverworldNode],
+    stonehenge_id: int,
+) -> tuple[int, ...]:
+    """Build a deterministic clockwise outer-region patrol route for the Dragon."""
+    candidates = _patrol_candidates(nodes, stonehenge_id)
+    if not candidates:
+        return ()
+
+    route: list[int] = []
+    for region_id, tx, ty in _PATROL_QUADRANTS:
+        picked = _pick_regional_patrol_node(candidates, region_id, tx, ty, route)
+        if picked is not None:
+            route.append(picked)
+
+    if len(route) >= 2:
+        return tuple(route)
+
+    for cand in sorted(candidates, key=lambda n: n.node_id):
+        if cand.node_id not in route:
+            route.append(cand.node_id)
+        if len(route) >= 4:
+            break
+    return tuple(route)
 
 
 def _connect_mst(
@@ -485,19 +569,34 @@ def _connect_isolated_lairs(
         adj[nearest].add(lid)
 
 
+def _default_site_kind(site_id: int, stonehenge_id: int, has_road_network: bool) -> NodeKind:
+    if site_id == stonehenge_id:
+        return NodeKind.STONEHENGE
+    if has_road_network and (0 <= site_id <= 20 or site_id == 29):
+        return NodeKind.ROAD
+    return NodeKind.WILDERNESS
+
+
 def _build_site_and_lair_nodes(
     sites: Sequence[MapSiteInput],
     lair_entries: dict[int, tuple[int, int, int]],
     adj: dict[int, set[int]],
     stonehenge_id: int,
+    has_road_network: bool,
 ) -> dict[int, OverworldNode]:
     nodes: dict[int, OverworldNode] = {}
+    next_site_lair_idx = 0
     for site in sites:
         kind = (
             site.kind
             if site.kind is not None
-            else (NodeKind.STONEHENGE if site.site_id == stonehenge_id else NodeKind.WILDERNESS)
+            else _default_site_kind(site.site_id, stonehenge_id, has_road_network)
         )
+        lair_idx = -1
+        if kind == NodeKind.LAIR:
+            lair_idx = site.lair_index if site.lair_index >= 0 else next_site_lair_idx
+            _validate_lair_index(lair_idx)
+            next_site_lair_idx += 1
         region_id = (
             site.region_id if site.region_id is not None else _region_for_coords(site.x, site.y)
         )
@@ -508,6 +607,7 @@ def _build_site_and_lair_nodes(
             x=site.x,
             y=site.y,
             neighbors=tuple(sorted(adj[site.site_id])),
+            lair_index=lair_idx,
         )
     for lid, (lair_index, lx, ly) in lair_entries.items():
         nodes[lid] = OverworldNode(
@@ -522,21 +622,23 @@ def _build_site_and_lair_nodes(
     return nodes
 
 
-def build_overworld_graph_from_sites(
-    sites: Sequence[MapSiteInput],
-    *,
-    lairs: Sequence[tuple[int, int, int]] = (),
-    dragon_route: Sequence[int] = (),
-    encounter_bands: Sequence[EncounterBand] = (),
-) -> OverworldGraph:
-    """Build an ``OverworldGraph`` from 320x200 ``MapSiteInput`` entries (ARCHITECTURE.md §5)."""
-    if not sites:
-        msg = "sites must not be empty"
-        raise ValueError(msg)
+def _resolve_moves_per_turn(sites: Sequence[MapSiteInput], moves_per_turn: int | None) -> int:
+    if moves_per_turn is not None:
+        if moves_per_turn < 1:
+            msg = f"moves_per_turn must be >= 1, got {moves_per_turn}"
+            raise ValueError(msg)
+        return moves_per_turn
+    has_roads = len(sites) >= MOG_ROAD_SITE_THRESHOLD or any(s.kind == NodeKind.ROAD for s in sites)
+    return DEFAULT_ROAD_MOVES_PER_TURN if has_roads else 1
 
+
+def _index_sites(
+    sites: Sequence[MapSiteInput],
+) -> tuple[dict[int, tuple[int, int]], dict[int, tuple[int, ...]], list[int], int]:
     coords: dict[int, tuple[int, int]] = {}
     explicit_neighbors: dict[int, tuple[int, ...]] = {}
     site_ids: list[int] = []
+    site_lair_count = 0
     for site in sites:
         if site.site_id in coords:
             msg = f"Duplicate site_id {site.site_id}"
@@ -545,14 +647,42 @@ def build_overworld_graph_from_sites(
         site_ids.append(site.site_id)
         if site.neighbors:
             explicit_neighbors[site.site_id] = site.neighbors
+        if site.kind == NodeKind.LAIR:
+            site_lair_count += 1
+    return coords, explicit_neighbors, site_ids, site_lair_count
 
-    next_id = max(site_ids) + 1
+
+def _collect_lair_entries(
+    lairs: Sequence[tuple[int, int, int]],
+    next_id: int,
+    coords: dict[int, tuple[int, int]],
+) -> dict[int, tuple[int, int, int]]:
     lair_entries: dict[int, tuple[int, int, int]] = {}
     for lair_index, lx, ly in lairs:
         _validate_lair_index(lair_index)
         lair_entries[next_id] = (lair_index, lx, ly)
         coords[next_id] = (lx, ly)
         next_id += 1
+    return lair_entries
+
+
+def build_overworld_graph_from_sites(
+    sites: Sequence[MapSiteInput],
+    *,
+    lairs: Sequence[tuple[int, int, int]] = (),
+    dragon_route: Sequence[int] = (),
+    encounter_bands: Sequence[EncounterBand] = (),
+    moves_per_turn: int | None = None,
+) -> OverworldGraph:
+    """Build an ``OverworldGraph`` from 320x200 ``MapSiteInput`` entries (ARCHITECTURE.md §5)."""
+    if not sites:
+        msg = "sites must not be empty"
+        raise ValueError(msg)
+
+    coords, explicit_neighbors, site_ids, site_lair_count = _index_sites(sites)
+    lair_entries = (
+        _collect_lair_entries(lairs, max(site_ids) + 1, coords) if site_lair_count == 0 else {}
+    )
 
     all_ids = [*site_ids, *lair_entries]
     adj: dict[int, set[int]] = {nid: set() for nid in all_ids}
@@ -564,19 +694,25 @@ def build_overworld_graph_from_sites(
         _connect_nearest_sites(site_ids, coords, adj)
 
     stonehenge_id = _infer_stonehenge_id(sites)
-    nodes = _build_site_and_lair_nodes(sites, lair_entries, adj, stonehenge_id)
+    resolved_moves = _resolve_moves_per_turn(sites, moves_per_turn)
+    has_road_network = resolved_moves > 1
+    nodes = _build_site_and_lair_nodes(sites, lair_entries, adj, stonehenge_id, has_road_network)
 
     for nid in dragon_route:
         if nid not in nodes:
             msg = f"Dragon route node {nid} not in graph"
             raise ValueError(msg)
 
+    resolved_route = (
+        tuple(dragon_route) if dragon_route else _infer_dragon_patrol_route(nodes, stonehenge_id)
+    )
     return OverworldGraph(
         nodes=nodes,
         stonehenge_node_id=stonehenge_id,
         start_nodes=_infer_start_nodes(nodes, stonehenge_id),
-        dragon_patrol_route=tuple(dragon_route),
+        dragon_patrol_route=resolved_route,
         encounter_bands=tuple(encounter_bands),
+        moves_per_turn=resolved_moves,
     )
 
 
@@ -612,6 +748,7 @@ def create_campaign(
         turn_order=order,
         knights=knight_states,
         dragon=DragonState(node_id=dragon_start, patrol_index=0, active=True),
+        moves_remaining=active_graph.moves_per_turn,
     )
 
 
@@ -726,6 +863,51 @@ def _collect_pvp_and_dragon_triggers(
     return triggers
 
 
+def _collect_special_site_trigger(
+    state: OverworldState,
+    knight_id: KnightId,
+    node: OverworldNode,
+) -> EncounterTrigger | None:
+    """Evaluate town, Home Castle, Valley of the Gods, and Math's Tower triggers."""
+    phase = state.moon_phase
+    if node.kind in (NodeKind.HIGHWOOD, NodeKind.WATERDEEP):
+        return EncounterTrigger(
+            kind=TriggerKind.TOWN_VISIT,
+            knight_id=knight_id,
+            node_id=node.node_id,
+            day=state.day,
+            moon_phase=phase,
+        )
+    if node.kind == NodeKind.START and node.node_id == state.graph.start_nodes.get(knight_id):
+        knight = state.knights[knight_id]
+        if knight.lives < DEFAULT_KNIGHT_LIVES:
+            knight.lives += 1
+        return EncounterTrigger(
+            kind=TriggerKind.HOME_CASTLE,
+            knight_id=knight_id,
+            node_id=node.node_id,
+            day=state.day,
+            moon_phase=phase,
+        )
+    if node.kind == NodeKind.VALLEY_OF_THE_GODS:
+        return EncounterTrigger(
+            kind=TriggerKind.VALLEY_OF_THE_GODS,
+            knight_id=knight_id,
+            node_id=node.node_id,
+            day=state.day,
+            moon_phase=phase,
+        )
+    if node.kind == NodeKind.MATHS_TOWER:
+        return EncounterTrigger(
+            kind=TriggerKind.MATHS_TOWER,
+            knight_id=knight_id,
+            node_id=node.node_id,
+            day=state.day,
+            moon_phase=phase,
+        )
+    return None
+
+
 def _collect_location_trigger(
     state: OverworldState,
     knight_id: KnightId,
@@ -763,14 +945,6 @@ def _collect_location_trigger(
             day=state.day,
             moon_phase=phase,
         )
-    if node.kind in (NodeKind.HIGHWOOD, NodeKind.WATERDEEP):
-        return EncounterTrigger(
-            kind=TriggerKind.TOWN_VISIT,
-            knight_id=knight_id,
-            node_id=node.node_id,
-            day=state.day,
-            moon_phase=phase,
-        )
     if node.kind == NodeKind.WILDERNESS:
         enc_kind = _roll_wilderness_encounter(state, knight_id, node)
         if enc_kind > 0:
@@ -782,7 +956,8 @@ def _collect_location_trigger(
                 moon_phase=phase,
                 encounter_kind=enc_kind,
             )
-    return None
+        return None
+    return _collect_special_site_trigger(state, knight_id, node)
 
 
 def _collect_node_triggers(
@@ -821,28 +996,16 @@ def _advance_turn_counter(state: OverworldState) -> bool:
     return day_wrapped
 
 
-def move_knight(state: OverworldState, target_node_id: int) -> TurnResult:
-    """Move the active knight to ``target_node_id``, advance patrol/day, and emit triggers."""
-    if state.game_over:
-        msg = "Cannot move knight after campaign victory"
-        raise ValueError(msg)
-
-    knight_id = state.current_knight_id
-    knight = state.knights[knight_id]
-    allowed = legal_moves(state, knight_id)
-    if target_node_id not in allowed:
-        msg = f"Node {target_node_id} is not reachable from {knight.node_id}"
-        raise ValueError(msg)
-
-    from_node_id = knight.node_id
-    knight.node_id = target_node_id
+def _finalize_turn_end(
+    state: OverworldState,
+    knight: KnightOverworldState,
+    triggers: list[EncounterTrigger],
+) -> tuple[bool, int]:
+    """Advance turn/day counters, reset movement budget, and step Dragon on new day."""
     knight.turns_taken += 1
-
-    dest_node = state.graph.node(target_node_id)
-    triggers = _collect_node_triggers(state, knight_id, dest_node)
-
     dragon_node = state.dragon.node_id
     day_advanced = _advance_turn_counter(state)
+    state.moves_remaining = state.graph.moves_per_turn
     if day_advanced and not state.game_over:
         dragon_node = step_dragon_patrol(state)
         for kid in state.turn_order:
@@ -857,6 +1020,61 @@ def move_knight(state: OverworldState, target_node_id: int) -> TurnResult:
                         moon_phase=state.moon_phase,
                     )
                 )
+    return day_advanced, dragon_node
+
+
+def end_turn(state: OverworldState) -> TurnResult:
+    """Voluntarily end the active knight's turn without moving further."""
+    if state.game_over:
+        msg = "Cannot end turn after campaign victory"
+        raise ValueError(msg)
+
+    knight_id = state.current_knight_id
+    knight = state.knights[knight_id]
+    triggers: list[EncounterTrigger] = []
+    day_advanced, dragon_node = _finalize_turn_end(state, knight, triggers)
+    trigger_tuple = tuple(triggers)
+    state.last_triggers = trigger_tuple
+    return TurnResult(
+        knight_id=knight_id,
+        from_node_id=knight.node_id,
+        to_node_id=knight.node_id,
+        day_advanced=day_advanced,
+        new_day=state.day,
+        moon_phase=state.moon_phase,
+        dragon_node_id=dragon_node,
+        triggers=trigger_tuple,
+        moves_remaining=state.moves_remaining,
+        turn_ended=True,
+    )
+
+
+def move_knight(state: OverworldState, target_node_id: int) -> TurnResult:
+    """Move the active knight to ``target_node_id``, update budget/day, and emit triggers."""
+    if state.game_over:
+        msg = "Cannot move knight after campaign victory"
+        raise ValueError(msg)
+
+    knight_id = state.current_knight_id
+    knight = state.knights[knight_id]
+    allowed = legal_moves(state, knight_id)
+    if target_node_id not in allowed:
+        msg = f"Node {target_node_id} is not reachable from {knight.node_id}"
+        raise ValueError(msg)
+
+    from_node_id = knight.node_id
+    knight.node_id = target_node_id
+    state.moves_remaining = max(0, state.moves_remaining - 1)
+
+    dest_node = state.graph.node(target_node_id)
+    triggers = _collect_node_triggers(state, knight_id, dest_node)
+
+    turn_ended = state.game_over or state.moves_remaining <= 0 or bool(triggers)
+    if turn_ended:
+        day_advanced, dragon_node = _finalize_turn_end(state, knight, triggers)
+    else:
+        day_advanced = False
+        dragon_node = state.dragon.node_id
 
     trigger_tuple = tuple(triggers)
     state.last_triggers = trigger_tuple
@@ -869,7 +1087,26 @@ def move_knight(state: OverworldState, target_node_id: int) -> TurnResult:
         moon_phase=state.moon_phase,
         dragon_node_id=dragon_node,
         triggers=trigger_tuple,
+        moves_remaining=state.moves_remaining,
+        turn_ended=turn_ended,
     )
+
+
+def resolve_valley_of_the_gods(state: OverworldState, knight_id: KnightId) -> int:
+    """Apply the Valley of the Gods blessing (restore 1 life up to 3, grant XP)."""
+    knight = state.knights[knight_id]
+    if knight.lives < DEFAULT_KNIGHT_LIVES:
+        knight.lives += 1
+    knight.xp += VALLEY_BLESSING_XP
+    return VALLEY_BLESSING_XP
+
+
+def resolve_maths_tower(state: OverworldState, knight_id: KnightId) -> int:
+    """Apply Math's Tower visit reward (grant XP and gold)."""
+    knight = state.knights[knight_id]
+    knight.xp += MATHS_TOWER_XP
+    knight.gold += MATHS_TOWER_GOLD
+    return MATHS_TOWER_XP
 
 
 def resolve_lair_victory(state: OverworldState, knight_id: KnightId, lair_index: int) -> bool:

@@ -7,6 +7,11 @@ import pytest
 from pymoonstone.sim.overworld import (
     ALL_MOONSTONES_MASK,
     DAYS_PER_LUNAR_CYCLE,
+    DEFAULT_KNIGHT_LIVES,
+    DEFAULT_ROAD_MOVES_PER_TURN,
+    MATHS_TOWER_GOLD,
+    MATHS_TOWER_XP,
+    VALLEY_BLESSING_XP,
     EncounterBand,
     MapSiteInput,
     MoonPhase,
@@ -20,6 +25,7 @@ from pymoonstone.sim.overworld import (
     can_enter_lair,
     collect_moonstone,
     create_campaign,
+    end_turn,
     grant_lair_key,
     is_ritual_ready,
     legal_moves,
@@ -27,7 +33,9 @@ from pymoonstone.sim.overworld import (
     moon_phase_for_day,
     move_knight,
     resolve_lair_victory,
+    resolve_maths_tower,
     resolve_pvp_duel,
+    resolve_valley_of_the_gods,
     step_dragon_patrol,
 )
 from pymoonstone.sim.types import KnightId
@@ -355,3 +363,141 @@ def test_create_campaign_with_prebuilt_site_graph() -> None:
     res = move_knight(state, dest)
     assert res.to_node_id == dest
     assert state.current_knight_id == KnightId.BLUE
+
+
+def _make_35_mog_sites() -> tuple[MapSiteInput, ...]:
+    """Synthetic 35-node mog map matching node IDs 0..34."""
+    sites: list[MapSiteInput] = []
+    # 0..20: road waypoints spread across all 4 quadrants
+    for idx in range(21):
+        qx = 45 + (idx % 5) * 55
+        qy = 35 + (idx // 5) * 35
+        sites.append(MapSiteInput(site_id=idx, x=qx, y=qy))
+    # 21..24: Home Castles
+    sites.extend(
+        [
+            MapSiteInput(site_id=21, x=60, y=50, kind=NodeKind.START),
+            MapSiteInput(site_id=22, x=260, y=50, kind=NodeKind.START),
+            MapSiteInput(site_id=23, x=60, y=160, kind=NodeKind.START),
+            MapSiteInput(site_id=24, x=260, y=160, kind=NodeKind.START),
+            MapSiteInput(site_id=25, x=115, y=90, kind=NodeKind.HIGHWOOD),
+            MapSiteInput(site_id=26, x=205, y=110, kind=NodeKind.WATERDEEP),
+            MapSiteInput(site_id=27, x=160, y=100, kind=NodeKind.STONEHENGE),
+            MapSiteInput(site_id=28, x=152, y=97, kind=NodeKind.VALLEY_OF_THE_GODS),
+            MapSiteInput(site_id=29, x=180, y=75),  # road waypoint
+            MapSiteInput(site_id=30, x=217, y=11, kind=NodeKind.MATHS_TOWER),
+            MapSiteInput(site_id=31, x=25, y=20, kind=NodeKind.LAIR),
+            MapSiteInput(site_id=32, x=295, y=20, kind=NodeKind.LAIR),
+            MapSiteInput(site_id=33, x=25, y=185, kind=NodeKind.LAIR),
+            MapSiteInput(site_id=34, x=295, y=185, kind=NodeKind.LAIR),
+        ]
+    )
+    return tuple(sites)
+
+
+@pytest.mark.sim
+def test_35_mog_nodes_road_budget_and_dragon_patrol() -> None:
+    sites = _make_35_mog_sites()
+    graph = build_overworld_graph_from_sites(sites)
+
+    assert len(graph.nodes) == 35
+    assert graph.stonehenge_node_id == 27
+    assert graph.moves_per_turn == DEFAULT_ROAD_MOVES_PER_TURN
+    assert graph.node(0).kind == NodeKind.ROAD
+    assert graph.node(29).kind == NodeKind.ROAD
+    assert graph.node(28).kind == NodeKind.VALLEY_OF_THE_GODS
+    assert graph.node(30).kind == NodeKind.MATHS_TOWER
+    assert [graph.node(31 + i).lair_index for i in range(4)] == [0, 1, 2, 3]
+    assert graph.start_nodes == {
+        KnightId.RED: 21,
+        KnightId.BLUE: 22,
+        KnightId.GREEN: 23,
+        KnightId.YELLOW: 24,
+    }
+
+    # Dragon patrol route is populated and does not keep Dragon stuck on Stonehenge (27)
+    assert len(graph.dragon_patrol_route) == 4
+    assert 27 not in graph.dragon_patrol_route
+
+    # Build a clean road-chain graph to verify multi-hop movement budget
+    road_sites = (
+        MapSiteInput(site_id=27, x=160, y=100, kind=NodeKind.STONEHENGE, neighbors=(0,)),
+        MapSiteInput(site_id=21, x=60, y=50, kind=NodeKind.START, neighbors=(0,)),
+        MapSiteInput(site_id=0, x=80, y=50, kind=NodeKind.ROAD, neighbors=(21, 1)),
+        MapSiteInput(site_id=1, x=100, y=50, kind=NodeKind.ROAD, neighbors=(0, 2)),
+        MapSiteInput(site_id=2, x=120, y=50, kind=NodeKind.ROAD, neighbors=(1, 3)),
+        MapSiteInput(site_id=3, x=140, y=50, kind=NodeKind.ROAD, neighbors=(2, 27)),
+    )
+    road_graph = build_overworld_graph_from_sites(road_sites, dragon_route=(3, 2), moves_per_turn=4)
+    state = create_campaign((KnightId.RED, KnightId.BLUE), graph=road_graph, seed=42)
+    assert state.moves_remaining == 4
+    assert state.dragon.node_id != 27
+
+    r1 = move_knight(state, 0)
+    assert r1.turn_ended is False
+    assert r1.day_advanced is False
+    assert r1.moves_remaining == 3
+    assert state.current_knight_id == KnightId.RED
+
+    r2 = move_knight(state, 1)
+    assert r2.turn_ended is False
+    assert r2.moves_remaining == 2
+
+    # Voluntary end_turn advances to BLUE without advancing day
+    r_end = end_turn(state)
+    assert r_end.turn_ended is True
+    assert r_end.day_advanced is False
+    assert state.current_knight_id == KnightId.BLUE
+    assert state.moves_remaining == 4
+
+    with pytest.raises(ValueError, match="moves_per_turn"):
+        build_overworld_graph_from_sites(road_sites, moves_per_turn=0)
+
+
+@pytest.mark.sim
+def test_home_castles_valley_of_the_gods_and_maths_tower() -> None:
+    sites = (
+        MapSiteInput(site_id=27, x=160, y=100, kind=NodeKind.STONEHENGE, neighbors=(0,)),
+        MapSiteInput(site_id=21, x=60, y=50, kind=NodeKind.START, neighbors=(0,)),
+        MapSiteInput(site_id=22, x=260, y=50, kind=NodeKind.START, neighbors=(0,)),
+        MapSiteInput(site_id=0, x=120, y=80, kind=NodeKind.ROAD, neighbors=(21, 22, 27, 28, 30)),
+        MapSiteInput(site_id=28, x=152, y=97, kind=NodeKind.VALLEY_OF_THE_GODS, neighbors=(0,)),
+        MapSiteInput(site_id=30, x=217, y=11, kind=NodeKind.MATHS_TOWER, neighbors=(0,)),
+    )
+    graph = build_overworld_graph_from_sites(sites, moves_per_turn=4)
+    state = create_campaign((KnightId.RED,), graph=graph, seed=7)
+
+    # Reduce RED's lives to 1, visit another knight's castle (22) -> no free life
+    state.knights[KnightId.RED].lives = 1
+    move_knight(state, 0)
+    other_castle = move_knight(state, 22)
+    assert all(t.kind != TriggerKind.HOME_CASTLE for t in other_castle.triggers)
+    assert state.knights[KnightId.RED].lives == 1
+
+    # Return to RED's own Home Castle (21) -> grants +1 life (1 -> 2) and HOME_CASTLE trigger
+    move_knight(state, 0)
+    own_castle = move_knight(state, 21)
+    assert any(t.kind == TriggerKind.HOME_CASTLE for t in own_castle.triggers)
+    assert state.knights[KnightId.RED].lives == 2
+
+    # Visit Valley of the Gods (28) -> VALLEY_OF_THE_GODS trigger + blessing up to 3 lives
+    move_knight(state, 0)
+    valley_res = move_knight(state, 28)
+    assert any(t.kind == TriggerKind.VALLEY_OF_THE_GODS for t in valley_res.triggers)
+    xp_gained = resolve_valley_of_the_gods(state, KnightId.RED)
+    assert xp_gained == VALLEY_BLESSING_XP
+    assert state.knights[KnightId.RED].lives == DEFAULT_KNIGHT_LIVES
+
+    # Visit Math's Tower (30) -> MATHS_TOWER trigger + XP and gold reward
+    move_knight(state, 0)
+    tower_res = move_knight(state, 30)
+    assert any(t.kind == TriggerKind.MATHS_TOWER for t in tower_res.triggers)
+    tower_xp = resolve_maths_tower(state, KnightId.RED)
+    assert tower_xp == MATHS_TOWER_XP
+    assert state.knights[KnightId.RED].xp == VALLEY_BLESSING_XP + MATHS_TOWER_XP
+    assert state.knights[KnightId.RED].gold == MATHS_TOWER_GOLD
+
+    # Calling end_turn after game_over raises ValueError
+    state.game_over = True
+    with pytest.raises(ValueError, match="victory"):
+        end_turn(state)
