@@ -67,6 +67,39 @@ Source of truth: `docs/PLAYABILITY_AUDIT.md` (Remediation Plan v2). Goal: make t
 | T10.8 | Scene-entry fade-in timing | T5.4, T9.6 | DONE | `_begin_fade_in` starts `palette_fx.fade_in` on scene transition and advances in `step_tick`, eliminating pitch-black first frames (`test_adf_blue_knight_combat_palette_and_fade_in`). |
 | T10.9 | Playability verification suite | T10.1–T10.8 | DONE | Verified via `test_playability_v2.py` (`13` synthetic + ADF checks), `scripts/quality_gate.py` (`7/7` gates, `238 passed`), `pytest -m adf` (`15 passed`), `pytest -m gl` (`8 passed`), and documented in `docs/PLAYABILITY_AUDIT.md` §5. |
 
+## Phase 11 — Original-model rebuild (post-Audit v3)
+
+Source of truth: `docs/PLAYABILITY_AUDIT.md` §6 and `IMPLEMENTATION_PLAN.md` Phase 11. ADR-009 is
+ACCEPTED: the six invented modules are replaced, not patched. The `DONE` rows of Phases 6 to 10 above describe
+code that passes its tests but does not reproduce the original; T11.24 corrects them.
+
+| ID | Task | Deps | Status | Notes |
+|---|---|---|---|---|
+| T11.1 | Audit harness & scene smoke test | – | DONE | `app/audit.py` (rig, scenarios, contact sheets), `scripts/audit_shots.py` writes `build/audit/{intro,menu_map,places,fights}.png`. Smoke test is `adf` + `gl`, so the gate (`-m "not gl"`) does not run it: run `uv run pytest tests/adf/test_scene_smoke.py --no-cov`. Scenarios call `GameSession._open_location` / `_start_combat` and must be updated in the commit that replaces those. Fights cover creature types 0..3 only until T11.7 supplies the real list. |
+| T11.2 | Spec §9: game state records | – | TODO | |
+| T11.3 | Spec §10: fights | T11.2 | TODO | |
+| T11.4 | Spec §11: overworld & turns | T11.2 | TODO | |
+| T11.5 | Spec §12: places & sheets | T11.2 | TODO | |
+| T11.6 | Fight palette from data | T11.1, T11.3 | TODO | |
+| T11.7 | Creature definitions from `mog` | T11.3 | TODO | |
+| T11.8 | Fight engine (jobs own script state) | T11.7 | TODO | |
+| T11.9 | Knight control | T11.8 | TODO | |
+| T11.10 | Creature AI handlers (a–i) | T11.8 | TODO | Troggs (a) first. |
+| T11.11 | Fight loop, outcomes, HUD | T11.9, T11.10a | TODO | |
+| T11.12 | Map movement & proximity | T11.4 | TODO | |
+| T11.13 | Turns, clock, dragon | T11.12 | TODO | |
+| T11.14 | Computer-controlled knights on the map | T11.13 | TODO | |
+| T11.15 | Sheet engine | T11.5 | TODO | |
+| T11.16 | Town button screens | T11.15 | TODO | |
+| T11.17 | Smith & market | T11.15 | TODO | |
+| T11.18 | Dice house, healer, mystic | T11.16 | TODO | |
+| T11.19 | Stonehenge offer & ritual | T11.15 | TODO | |
+| T11.20 | Wizard's tower | T11.15 | TODO | |
+| T11.21 | Valley, home villages, meetings | T11.11, T11.15 | TODO | |
+| T11.22 | Ending & game over | T11.19 | TODO | |
+| T11.23 | Sound wiring | T11.8 | TODO | |
+| T11.24 | Campaign verification & status correction | all | TODO | |
+
 ## Session log
 
 - 2026-11-14 · Antigravity · Phase 1 (T1.1–T1.6) · Skeleton, governance, gate and CI.
@@ -75,3 +108,5 @@ Source of truth: `docs/PLAYABILITY_AUDIT.md` (Remediation Plan v2). Goal: make t
 - 2026-11-15 · Antigravity · Phase 9 (T9.1–T9.6) · Overworld/location/combat bridge polish; marked DONE but Playability Audit v2 shows remaining fidelity gaps.
 - 2026-11-15 · — · Phase 10 opened from Playability Audit v2. Priority order: T10.1 → T10.2 → T10.3 → T10.4 (combat path), then T10.5 (overworld), then T10.6–T10.8 (presentation), close with T10.9 verification.
 - 2026-11-15 · Antigravity · Phase 10 (`T10.1`–`T10.9`) · Audited and fixed multi-slot knight fallback (`combat_bridge.py`), overworld index-31 highlight palette (`game.py`), added `T10.2`/`T10.6` tests (`test_playability_v2.py`), and verified `quality_gate.py` (`238 passed`), `-m adf` (`15 passed`), and `-m gl` (`8 passed`).
+- 2026-11-15 · Claude · Audit v3 on real disks (`PLAYABILITY_AUDIT.md` §6), ADR-009 proposed, Phase 11 planned. References cloned into `reference/` (`Jarskih/moonstone-ace-public`, `joetsoi/OpenMoonstone`). No source changes.
+- 2026-11-15 · Claude · User accepted ADR-009. T11.1 done (audit harness, 6 smoke tests pass on real disks).
