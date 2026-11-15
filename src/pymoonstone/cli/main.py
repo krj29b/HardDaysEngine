@@ -1,4 +1,4 @@
-"""``pymoonstone`` console script (T1.4, T3.6, T4.4)."""
+"""``pymoonstone`` console script (T1.4, T3.6, T4.4, T8.3)."""
 
 from __future__ import annotations
 
@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING
 
 from pymoonstone import __version__
 from pymoonstone.app.config import ConfigError, find_adf_images, resolve_adf_dir
+from pymoonstone.app.game import run_game_window, run_headless_session
 from pymoonstone.cli.extract import run_extraction
 from pymoonstone.cli.inspect_assets import run_inspector_cli
+from pymoonstone.sim.prng import DEFAULT_SEED
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -69,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scale",
         type=int,
         default=3,
-        help="integer window scaling factor for --inspect-assets (default: 3)",
+        help="integer window scaling factor for --inspect-assets or game window (default: 3)",
     )
     parser.add_argument(
         "--headless-frames",
@@ -82,6 +84,33 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="optional PNG path to write the rendered canvas when using --headless-frames",
     )
+    parser.add_argument(
+        "--play",
+        action="store_true",
+        help="launch the playable Moonstone game window",
+    )
+    parser.add_argument(
+        "--record",
+        default=None,
+        help="record deterministic 50 Hz input frames to a JSON replay file",
+    )
+    parser.add_argument(
+        "--replay",
+        default=None,
+        help="replay deterministic 50 Hz input frames from a JSON replay file",
+    )
+    parser.add_argument(
+        "--headless-ticks",
+        type=int,
+        default=None,
+        help="run N 50 Hz simulation ticks headlessly without opening a window",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="deterministic 32-bit simulation seed",
+    )
     return parser
 
 
@@ -92,6 +121,18 @@ def _list_disks(adf_dir: Path) -> int:
         print(f"  {image.name}")
     print(f"{len(images)} image(s) found; Moonstone needs {REQUIRED_DISK_COUNT}.")
     return 0 if len(images) >= REQUIRED_DISK_COUNT else 1
+
+
+def _should_launch_game(argv: Sequence[str] | None, args: argparse.Namespace) -> bool:
+    if argv is None or len(argv) == 0:
+        return True
+    return bool(
+        args.play
+        or args.headless_ticks is not None
+        or args.record is not None
+        or args.replay is not None
+        or args.seed is not None
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -120,5 +161,28 @@ def main(argv: Sequence[str] | None = None) -> int:
             headless_frames=args.headless_frames,
             screenshot=args.screenshot,
         )
-    parser.print_help()
-    return 0
+    if not _should_launch_game(argv, args):
+        parser.print_help()
+        return 0
+
+    record_path = Path(args.record) if args.record is not None else None
+    replay_path = Path(args.replay) if args.replay is not None else None
+    seed = DEFAULT_SEED if args.seed is None else args.seed
+
+    if args.headless_ticks is not None:
+        result = run_headless_session(
+            ticks=args.headless_ticks,
+            seed=seed,
+            record_path=record_path,
+            replay_path=replay_path,
+        )
+        print(f"ticks={result.ticks_executed} scene={result.scene.name} hash={result.final_hash}")
+        return 0
+
+    return run_game_window(
+        adf_dir,
+        scale=args.scale,
+        seed=seed,
+        record_path=record_path,
+        replay_path=replay_path,
+    )

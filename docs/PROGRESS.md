@@ -42,7 +42,7 @@ deviations, follow-ups). Task details and acceptance criteria are in `IMPLEMENTA
 | T7.2 | Sacred places, towns & shops | T7.1 | DONE | `sim/locations.py` (Highwood merchant/healer/tavern dice, Waterdeep mystic/training, Stonehenge altar ritual, Lair loot distribution). 94% coverage, zero floats/I/O. |
 | T8.1 | Paula 4-voice VBL synth & 8SVX mixer | T3.5, T5.2 | DONE | `app/audio.py` (`PaulaSynthMixer`, `AudioEngine`, 4-voice 50 Hz VBL synth `S_44`/`S_45`, `.a`/8SVX sample mixing, `.cmp` ProTracker playback with headless fallback). |
 | T8.2 | Multi-sprite 2.5D scene renderer & HUD | T4.1, T5.4, T6.1 | DONE | `render/scene.py` (`SceneRenderer`, `SceneSprite` painter Y-sorting, numpy blitting, `BitmapFont`, combat/overworld HUDs, `$0RGB` palette LUT bridge). 4/4 GL tests pass. |
-| T8.3 | Input router, scene host & playable CLI | T6.2, T6.3, T7.2, T8.1, T8.2 | IN PROGRESS (app-game/2026-11-15) | Owns `src/pymoonstone/app/input.py`, `src/pymoonstone/app/game.py`, `tests/unit/test_game_session.py` (+ `cli/main.py` playable CLI wiring). 4-player input router, full scene loop, and deterministic `--record`/`--replay`. |
+| T8.3 | Input router, scene host & playable CLI | T6.2, T6.3, T7.2, T8.1, T8.2 | DONE | `app/input.py` (4-player keyboard + `pygame.joystick` `InputRouter`, `ReplayRecording`), `app/game.py` (`GameSession` state machine `TITLE -> KNIGHT_SELECT -> OVERWORLD -> COMBAT -> VICTORY/GAME_OVER`, `state_hash()`, `run_headless_session`, `run_game_window`), and `cli/main.py` (`--play`, `--record`, `--replay`, `--headless-ticks`, `--seed`). |
 
 ## Session log
 
@@ -59,3 +59,10 @@ deviations, follow-ups). Task details and acceptance criteria are in `IMPLEMENTA
   `render/overlay.py`, `app/loop.py`, `app/inspector.py`, `cli/inspect_assets.py`). Verified
   extraction of all 32 pictures, 50 cels, 56 arenas, 13 sound banks, and 2 tracker modules from
   `./disks/`, and verified all quality gates (`scripts/quality_gate.py` + `pytest -m gl`).
+- 2026-11-15 · Antigravity Swarm · Phases 5–8 (T5.1–T5.4, T6.1–T6.3, T7.1–T7.2, T8.1–T8.3) ·
+  Completed the pure-integer 50 Hz simulation core (`sim/prng.py`, `types.py`, `collision.py`,
+  `palette_fx.py`, `combat_vm.py`, `knight_combat.py`, `monster_ai.py`, `overworld.py`,
+  `locations.py`), runtime executable table loaders (`assets/tables.py`), Paula 4-voice synth &
+  8SVX mixer (`app/audio.py`), 2.5D multi-sprite scene renderer & HUD (`render/scene.py`), and
+  4-player input router, scene host, replay system & playable CLI (`app/input.py`, `app/game.py`,
+  `cli/main.py`). Verified with `scripts/quality_gate.py` (177 passed) and `pytest -m gl` (6 passed).
