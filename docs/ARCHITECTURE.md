@@ -649,6 +649,8 @@ One layout serves knights, the dragon, creatures and fight objects.
 | +46 | u32 | `walk_scripts` | Indexed by `anim_phase * 4 + direction block` (0 sideways, 32 up, 64 down). |
 | +50 | u32 | `defence_table` | Per attacker action: the own action that defends against it. |
 | +54 | u32 | `kind` | 0..3 the four knights, 4 computer-controlled knight, 5 dragon. |
+| +58 | u16 | `box_min_x` | Union screen box of this frame's draws (§4.2), left edge. Zero means the actor drew nothing that blocks. |
+| +60 | u16 | `box_max_x` | Right edge. |
 | +62 | u16 | `input` | Low byte bits: 0 right, 1 left, 2 down, 3 up, 4 fire. |
 | +64 | u16 | `action` | Current action as a table byte offset: 0, 4, 8, ... 32 (§9.7). |
 | +66 | u16 | `tile_x` | Map tile column (§11). |
@@ -674,6 +676,8 @@ One layout serves knights, the dragon, creatures and fight objects.
 | +105 | u8 | `behaviour_flags2` | Bits 0 and 2 belong to the script handlers. |
 | +106 | u16 | `cooldown` | AI action cooldown. Knight steps use the high byte, creature steps the whole word. |
 | +108 | u32 | `name` | Reference to the NUL-terminated name. |
+| +112 | u16 | `box_min_y` | Union screen box, top edge. |
+| +114 | u16 | `box_max_y` | Bottom edge. |
 | +116 | u16 | `reach_x` | AI: stops and attacks within this horizontal distance. |
 | +118 | u16 | `too_close_x` | AI: backs away when nearer than this. |
 | +120 | u16 | `depth_reach` | AI: depth tolerance for "same lane". |
@@ -683,7 +687,7 @@ One layout serves knights, the dragon, creatures and fight objects.
 | +128 | u16 | `map_y` | Overworld position. |
 | +130 | u8 | `life_loss` | Non-zero makes the next day turnover take a life. |
 
-Bytes +58..+61, +87, +112..+115 and +131 are never used by the original.
+Bytes +87 and +131 are never used by the original.
 
 ### 9.3 Derived values
 
@@ -826,10 +830,9 @@ Armour: `$1B` padded, `$1C` mail, `$1D` plate, `$1E` battle.
 
 ### 9.9 Corrections to earlier text
 
-- §7.3 gave `hp_max` at +82, `action` at +118, `type` at +130 and a bounding box at +58 / +60 /
-  +112 / +114. The verified layout has `hp_max` at +84, `action` at +64, `type` at +77, and never
-  touches +58..+61 or +112..+115. The union bounding box of §4.2 is therefore not stored in the
-  actor record; where it lives is settled in §10.
+- §7.3 gave `hp_max` at +82, `action` at +118 and `type` at +130. The verified layout has
+  `hp_max` at +84, `action` at +64 and `type` at +77. Its bounding box offsets (+58, +60, +112,
+  +114) were right and are kept.
 - §7.3 gave the job's facing at +12, its type at +13 and its work block at +28. The verified
   layout has them at +22, +32 and +36, with the frame list at +28.
 - The creature-type keys that `assets/tables.py` reports (24, 28, 32, 36, ...) are the decimal
