@@ -204,8 +204,23 @@ class LocationStepResult:
     victory: bool = False
 
 
-def location_backdrop_names(location: LocationKind) -> tuple[str, ...]:
+def location_backdrop_names(
+    location: LocationKind,
+    parent_location: LocationKind | None = None,
+) -> tuple[str, ...]:
     """Return ordered picture candidate names for ``location``."""
+    if parent_location == LocationKind.WATERDEEP:
+        town_fallbacks = ("WaterDeep.PIV", "waterdeep.piv", "ch.piv")
+        waterdeep_overrides: dict[LocationKind, tuple[str, ...]] = {
+            LocationKind.HEALER: ("hea.piv", *town_fallbacks),
+            LocationKind.TAVERN: ("tav.piv", "dice.piv", *town_fallbacks),
+            LocationKind.DICE: ("dice.piv", "tav.piv", *town_fallbacks),
+            LocationKind.MYSTIC: ("mys.piv", *town_fallbacks),
+            LocationKind.SHOP: town_fallbacks,
+            LocationKind.TRAINING: town_fallbacks,
+        }
+        if location in waterdeep_overrides:
+            return waterdeep_overrides[location]
     return _BACKDROP_CANDIDATES.get(location, ("ch.piv",))
 
 
@@ -452,14 +467,21 @@ def _brightest_color_index(palette: Sequence[tuple[int, int, int]]) -> int:
     return max(range(1, limit), key=lambda idx: sum(palette[idx]))
 
 
-def _compose_picture(scene_renderer: SceneRenderTarget, pic: DecodedPicture) -> int:
+def _darkest_color_index(palette: Sequence[tuple[int, int, int]]) -> int:
+    limit = min(len(palette), 32)
+    if limit <= 0:
+        return 0
+    return min(range(limit), key=lambda idx: sum(palette[idx]))
+
+
+def _compose_picture(scene_renderer: SceneRenderTarget, pic: DecodedPicture) -> tuple[int, int]:
     scene_renderer.set_palette(pic.palette)
     scene_renderer.compose_scene(
         background=pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
         sprites=(),
         border_index=0,
     )
-    return _brightest_color_index(pic.palette)
+    return _brightest_color_index(pic.palette), _darkest_color_index(pic.palette)
 
 
 def _compose_backdrop(
@@ -468,7 +490,7 @@ def _compose_backdrop(
     names: tuple[str, ...],
     *,
     fill_index: int = 1,
-) -> int:
+) -> tuple[int, int]:
     if bundle is not None:
         pic = bundle.get_picture(*names)
         if pic is not None:
@@ -479,21 +501,52 @@ def _compose_backdrop(
     pal = default_combat_palette()
     scene_renderer.set_palette(pal)
     scene_renderer.compose_scene(background=bg, sprites=(), border_index=0)
-    return 31
+    return 31, _darkest_color_index(pal)
 
 
 def _compose_location_backdrop(
     scene_renderer: SceneRenderTarget,
     bundle: PictureBundle | None,
     location: LocationKind,
-) -> tuple[int, bool]:
-    names = location_backdrop_names(location)
+    parent_location: LocationKind | None = None,
+) -> tuple[int, int, bool]:
+    names = location_backdrop_names(location, parent_location=parent_location)
     if bundle is not None and location in _TOWN_SCROLL_RECTS and len(names) > 1:
         town_pic = bundle.get_picture(*names[:-1])
         if town_pic is not None:
-            return _compose_picture(scene_renderer, town_pic), True
-        return _compose_backdrop(scene_renderer, bundle, (names[-1],)), False
-    return _compose_backdrop(scene_renderer, bundle, names), False
+            fg, bg_panel = _compose_picture(scene_renderer, town_pic)
+            return fg, bg_panel, True
+        fg, bg_panel = _compose_backdrop(scene_renderer, bundle, (names[-1],))
+        return fg, bg_panel, False
+    fg, bg_panel = _compose_backdrop(scene_renderer, bundle, names)
+    return fg, bg_panel, False
+
+
+def draw_rect(
+    canvas: npt.NDArray[np.uint8],
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    color_index: int,
+    *,
+    filled: bool = False,
+) -> None:
+    """Draw a filled or 1px-outlined rectangle clipped to the playfield."""
+    x0 = max(0, x)
+    y0 = max(PLAYFIELD_Y_OFFSET, y)
+    x1 = min(CANVAS_WIDTH, x + width)
+    y1 = min(PLAYFIELD_Y_OFFSET + PLAYFIELD_HEIGHT, y + height)
+    if x0 >= x1 or y0 >= y1:
+        return
+    c = np.uint8(color_index & 0x1F)
+    if filled:
+        canvas[y0:y1, x0:x1] = c
+        return
+    canvas[y0, x0:x1] = c
+    canvas[y1 - 1, x0:x1] = c
+    canvas[y0:y1, x0] = c
+    canvas[y0:y1, x1 - 1] = c
 
 
 def _draw_scroll_highlight(
@@ -502,17 +555,7 @@ def _draw_scroll_highlight(
     color_index: int,
 ) -> None:
     bx, by, bw, bh = rect
-    x0 = max(0, bx)
-    y0 = max(PLAYFIELD_Y_OFFSET, PLAYFIELD_Y_OFFSET + by)
-    x1 = min(CANVAS_WIDTH, bx + bw)
-    y1 = min(PLAYFIELD_Y_OFFSET + PLAYFIELD_HEIGHT, y0 + bh)
-    if x0 >= x1 or y0 >= y1:
-        return
-    c = np.uint8(color_index & 0x1F)
-    canvas[y0, x0:x1] = c
-    canvas[y1 - 1, x0:x1] = c
-    canvas[y0:y1, x0] = c
-    canvas[y0:y1, x1 - 1] = c
+    draw_rect(canvas, bx, PLAYFIELD_Y_OFFSET + by, bw, bh, color_index, filled=False)
 
 
 def _render_town_scroll_cursor(
@@ -544,7 +587,9 @@ def render_location_menu(
     bundle: PictureBundle | None = None,
 ) -> None:
     """Render the active location backdrop, menu options, and knight stats."""
-    fg, has_scroll = _compose_location_backdrop(scene_renderer, bundle, state.location)
+    fg, bg_panel, has_scroll = _compose_location_backdrop(
+        scene_renderer, bundle, state.location, state.parent_location
+    )
     canvas = scene_renderer.canvas
     title = _LOCATION_TITLES.get(state.location, "LOCATION")
     font.draw_text(canvas, title, 8, 8, color_index=fg)
@@ -561,6 +606,13 @@ def render_location_menu(
         )
     else:
         start_y = 44
+        max_chars = max((len(label) + 2 for label in options), default=12)
+        panel_x = 16
+        panel_y = 38
+        panel_w = min(CANVAS_WIDTH - panel_x - 16, max(184, max_chars * 8 + 16))
+        panel_h = len(options) * 14 + 10
+        draw_rect(canvas, panel_x, panel_y, panel_w, panel_h, bg_panel, filled=True)
+        draw_rect(canvas, panel_x, panel_y, panel_w, panel_h, fg, filled=False)
         for idx, label in enumerate(options):
             prefix = "+ " if idx == selected_idx else "  "
             font.draw_text(canvas, f"{prefix}{label}", 24, start_y + idx * 14, color_index=fg)
@@ -578,7 +630,7 @@ def render_status_screen(
     bundle: PictureBundle | None = None,
 ) -> None:
     """Render the knight character status sheet on ``ch.piv`` (or solid fallback)."""
-    fg = _compose_backdrop(scene_renderer, bundle, ("ch.piv",))
+    fg, _ = _compose_backdrop(scene_renderer, bundle, ("ch.piv",))
     canvas = scene_renderer.canvas
     ow_knight = overworld.knights.get(knight.knight_id)
     keys_mask = ow_knight.keys_mask if ow_knight is not None else knight.keys
@@ -606,7 +658,7 @@ def render_new_day_screen(
     bundle: PictureBundle | None = None,
 ) -> None:
     """Render the New Day lunar banner on ``ch.piv`` (or solid fallback)."""
-    fg = _compose_backdrop(scene_renderer, bundle, ("ch.piv",))
+    fg, _ = _compose_backdrop(scene_renderer, bundle, ("ch.piv",))
     canvas = scene_renderer.canvas
     phase_label = overworld.moon_phase.name.replace("_", " ")
     font.draw_text(canvas, f"DAY {overworld.day}", 120, 96, color_index=fg)
