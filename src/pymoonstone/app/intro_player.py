@@ -142,6 +142,31 @@ def _build_wipe_progress_curve() -> tuple[int, ...]:
     return tuple(positions)
 
 
+def render_bold_string(
+    buf: npt.NDArray[np.uint8],
+    charmap: bytes,
+    bold_cel: DecodedCel,
+    text: str,
+    x: int,
+    y: int,
+    *,
+    centered: bool = False,
+) -> None:
+    """Render an ASCII string onto ``buf`` using ``bold.f`` and ``S_2`` charmap (§7.4)."""
+    if not bold_cel.frames or not charmap:
+        return
+    glyphs = [
+        bold_cel.frames[charmap[(ord(ch) - 0x20) & 0xFF] % len(bold_cel.frames)]
+        for ch in text
+        if 0 <= (ord(ch) - 0x20) < len(charmap)
+    ]
+    total_w = sum(cf.meta.width - 2 for cf in glyphs)
+    cx = (((CANVAS_WIDTH - total_w) & 0xFFFF) >> 1) if centered else x
+    for cf in glyphs:
+        _blit_playfield(buf, cf.pixels, cx, y)
+        cx += cf.meta.width - 2
+
+
 def render_bold_text_list(
     buf: npt.NDArray[np.uint8],
     h2: bytes,
@@ -157,16 +182,7 @@ def render_bold_text_list(
         if end < 0:
             break
         text = h2[t_off:end].decode("ascii", errors="replace")
-        glyphs = [
-            bold_cel.frames[charmap[(ord(ch) - 0x20) & 0xFF] % len(bold_cel.frames)]
-            for ch in text
-            if 0 <= (ord(ch) - 0x20) < len(charmap)
-        ]
-        total_w = sum(cf.meta.width - 2 for cf in glyphs)
-        cx = (((CANVAS_WIDTH - total_w) & 0xFFFF) >> 1) if (style & 1) else tx
-        for cf in glyphs:
-            _blit_playfield(buf, cf.pixels, cx, ty)
-            cx += cf.meta.width - 2
+        render_bold_string(buf, charmap, bold_cel, text, tx, ty, centered=bool(style & 1))
         cur = nxt
 
 
@@ -628,6 +644,40 @@ class IntroCinematicPlayer:
             fade_out=spec.fade_out,
         )
 
+    def total_ticks(self) -> int:
+        """Return total 50 Hz VBL duration of the starting cinematic before main menu."""
+        wipe_ticks = len(self.wipe_curve) * 2
+        story_ticks = sum(s.num_frames * s.vbls_per_frame for s in _STORY_SCENE_SPECS)
+        return 120 + 150 + 540 + wipe_ticks + story_ticks + 220
+
+    def is_finished(self, tick_count: int) -> bool:
+        """Return ``True`` once ``tick_count`` reaches the end of the intro cinematic."""
+        return tick_count >= self.total_ticks()
+
+    def build_main_menu(
+        self,
+        bundle: GameAssetBundle,
+        selected_player_count: int,
+        menu_cursor: int = 0,
+    ) -> tuple[npt.NDArray[np.uint8] | None, tuple[RGBColor, ...]]:
+        """Render ``ch.piv`` main menu with ``bold.f`` title/items and ``sel.cel`` cursor."""
+        ch_pic = bundle.get_picture("ch.piv")
+        if ch_pic is None:
+            return None, default_combat_palette()
+        buf = ch_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH].copy()
+        bold = bundle.get_cel("bold.f")
+        sel = bundle.get_cel("sel.cel")
+        charmap = self.h2[_CHARMAP_OFFSET : _CHARMAP_OFFSET + 104]
+        if bold is not None:
+            if len(bold.frames) > _TITLE_LOGO_FRAME:
+                _blit_playfield(buf, bold.frames[_TITLE_LOGO_FRAME].pixels, 5, 10)
+            render_bold_string(buf, charmap, bold, f"Players   {selected_player_count}", 98, 86)
+            render_bold_string(buf, charmap, bold, "Start Quest", 0, 118, centered=True)
+        if sel is not None and sel.frames:
+            cursor_y = 86 if menu_cursor == 0 else 118
+            _blit_playfield(buf, sel.frames[0].pixels, 50, cursor_y)
+        return buf, tuple(_pad_palette_32(ch_pic.palette))
+
     def render_tick(
         self,
         bundle: GameAssetBundle,
@@ -635,11 +685,9 @@ class IntroCinematicPlayer:
     ) -> tuple[npt.NDArray[np.uint8], tuple[RGBColor, ...]]:
         """Return ``(playfield_pixels, palette)`` for ``tick_count`` at 50 Hz."""
         wipe_ticks = len(self.wipe_curve) * 2
-        story_ticks = sum(s.num_frames * s.vbls_per_frame for s in _STORY_SCENE_SPECS)
-        # 120 Mindscape + 150 Title + 6*90 Credits + wipe_ticks + story_ticks + 220 Caption
-        cycle_len = 120 + 150 + 540 + wipe_ticks + story_ticks + 220
+        cycle_len = self.total_ticks()
         round_idx = max(0, tick_count) // cycle_len
-        t = max(0, tick_count) % cycle_len
+        t = min(max(0, tick_count), cycle_len - 1)
 
         if t < 120:
             ms_pic = bundle.get_picture("mindscape")

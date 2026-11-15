@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from pymoonstone.app.game import GameScene, GameSession
+from pymoonstone.app.input import InputFrame
 from pymoonstone.app.scene_assets import GameAssetBundle, build_intro_cinematic_frame
 from pymoonstone.assets import (
     DiskSet,
@@ -135,3 +137,13 @@ def test_real_intro_cinematic_player_all_scenes(adf_dir: Path) -> None:
             distinct_frames += 1
         prev_bg = bg
     assert distinct_frames >= 10
+
+    menu_bg, menu_pal = player.build_main_menu(bundle, 2)
+    assert menu_bg is not None
+    assert menu_bg.shape == (200, 320)
+    assert len(menu_pal) == 32
+
+    session = GameSession(disk_set=ds, start_scene=GameScene.TITLE)
+    session.tick_count = player.total_ticks() - 1
+    session.step_tick(InputFrame())
+    assert session.scene == GameScene.KNIGHT_SELECT

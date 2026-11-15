@@ -267,7 +267,11 @@ class GameSession:
             self.audio.step_vbl()
 
     def _step_title(self, primary: PlayerInput) -> None:
-        if primary.confirm or primary.fire:
+        finished = False
+        if self.asset_bundle is not None:
+            player = self.asset_bundle.get_intro_player()
+            finished = player is not None and player.is_finished(self.tick_count)
+        if primary.confirm or primary.fire or finished:
             self.scene = GameScene.KNIGHT_SELECT
             self.last_status = "SELECT KNIGHTS"
 
@@ -730,6 +734,28 @@ class GameSession:
             self._compose_picture_or_solid(scene_renderer, sprites=sprites)
         self._render_combat_hud(scene_renderer, font)
 
+    def _render_knight_select_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
+        menu_rendered = False
+        if self.asset_bundle is not None:
+            player = self.asset_bundle.get_intro_player()
+            if player is not None:
+                menu_bg, menu_pal = player.build_main_menu(
+                    self.asset_bundle, self.selected_player_count
+                )
+                if menu_bg is not None:
+                    scene_renderer.set_palette(menu_pal)
+                    scene_renderer.compose_scene(background=menu_bg, border_index=0)
+                    menu_rendered = True
+        if not menu_rendered:
+            self._compose_picture_or_solid(scene_renderer, "ch.piv")
+        font.draw_text(
+            scene_renderer.canvas,
+            f"KNIGHTS: {self.selected_player_count} (ARROWS+ENTER)",
+            64,
+            236,
+            color_index=31,
+        )
+
     def render_to_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         """Render the active game scene and HUD onto ``scene_renderer``."""
         if self.scene == GameScene.TITLE:
@@ -745,14 +771,7 @@ class GameSession:
                 self._compose_picture_or_solid(scene_renderer, "bg1a.PIV", "mindscape")
                 font.draw_text(scene_renderer.canvas, "PRESS ENTER", 116, 236, color_index=31)
         elif self.scene == GameScene.KNIGHT_SELECT:
-            self._compose_picture_or_solid(scene_renderer, "ch.piv")
-            font.draw_text(
-                scene_renderer.canvas,
-                f"KNIGHTS: {self.selected_player_count} (ARROWS+ENTER)",
-                64,
-                236,
-                color_index=31,
-            )
+            self._render_knight_select_scene(scene_renderer, font)
         elif self.scene == GameScene.OVERWORLD:
             self._compose_picture_or_solid(
                 scene_renderer, "bg2.PIV", sprites=self._overworld_sprites()
