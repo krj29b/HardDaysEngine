@@ -280,11 +280,57 @@ def test_arena_and_stile_decoding_and_compositing() -> None:
     comp = composite_arena_background(arena, test_pics)
     assert comp.width == 320
     assert comp.height == 200
+    # Forest (region 0) base backdrop is test_pics[4] (fill_index=5),
+    # non-0x0300 tile at (32, 40) comes from test_pics[1] (fill_index=2),
+    # 0x0300 tile at (64, 65) comes from test_pics[0] (fill_index=1).
+    assert int(comp.pixels[10, 10]) == 5
+    assert int(comp.pixels[40, 32]) == 2
+    assert int(comp.pixels[65, 64]) == 1
 
     stile_bytes = struct.pack(">480H", *range(480))
     words = decode_stile(stile_bytes)
     assert len(words) == 480
     assert words[479] == 479
+
+
+def test_arena_region_sheet_dispatch_and_signed_coords() -> None:
+    from pymoonstone.assets.lzss import compress_lzss_literals
+
+    test_pics = [
+        decode_picture(build_synthetic_picture(planes=5, fill_index=i + 1)) for i in range(9)
+    ]
+
+    # Build a script with 0x0400 tile_index=1 at (-10, -5), 0x0300 tile_index=2 at (64, 65)
+    obs = struct.pack(">H", 0)
+    script = bytearray(2400)
+    struct.pack_into(">Hhh", script, 0, 0x0401, -10, -5)
+    struct.pack_into(">Hhh", script, 6, 0x0302, 64, 65)
+    struct.pack_into(">Hhh", script, 12, 0xFF00, 0, 0)
+    packed = compress_lzss_literals(obs + bytes(script))
+    blob = struct.pack(">I", len(packed)) + packed
+
+    expected_sheets = (
+        # (filename, expected_region, expected_base_fill, expected_fg_fill)
+        ("fo1.t", 0, 5, 1),  # test[4] backdrop, test[0] fg
+        ("gll1.t", 1, 8, 1),  # test[7] backdrop, test[0] fg (no +40 offset)
+        ("sw1.t", 2, 7, 3),  # test[6] backdrop, test[2] fg
+        ("wal1.t", 3, 6, 4),  # test[5] backdrop, test[3] fg
+    )
+    for name, exp_region, exp_base, exp_fg in expected_sheets:
+        arena = decode_arena(name, blob)
+        assert arena.region == exp_region
+        assert arena.tiles[0].x == -10
+        assert arena.tiles[0].y == -5
+        comp = composite_arena_background(arena, test_pics)
+        # Uncovered floor pixel comes from region base backdrop
+        assert int(comp.pixels[150, 150]) == exp_base
+        # Clipped negative-coord 0x0401 tile blits from shared test_pics[1] (fill_index=2)
+        assert int(comp.pixels[0, 0]) == 2
+        # 0x0302 tile at (64, 65) blits from region fg sheet
+        assert int(comp.pixels[65, 64]) == exp_fg
+
+    with pytest.raises(ArenaFormatError):
+        composite_arena_background(decode_arena("fo1.t", blob), test_pics[:7])
 
 
 def test_audio_bank_8svx_wav_and_mod_decoders() -> None:

@@ -33,6 +33,11 @@ REGION_PREFIXES: dict[str, int] = {
     "wa": 3,
 }
 
+# B/test pack picture indices per region (0=fo, 1=gl, 2=sw, 3=wa) (ARCHITECTURE.md §3.1, §4.3).
+_REGION_BACKDROP_INDEX: tuple[int, int, int, int] = (4, 7, 6, 5)
+_REGION_FG_SHEET_INDEX: tuple[int, int, int, int] = (0, 0, 2, 3)
+_MAIN_SHEET_INDEX = 1
+
 
 class ArenaFormatError(ValueError):
     """Raised when an arena `.t` or `.stile` file is malformed."""
@@ -83,7 +88,7 @@ def _parse_tile_script(script_view: memoryview) -> list[ArenaTileOp]:
     tiles: list[ArenaTileOp] = []
     max_entries = len(script_view) // 6
     for idx in range(max_entries):
-        kind_tile, dx, dy = struct.unpack_from(">HHH", script_view, idx * 6)
+        kind_tile, dx, dy = struct.unpack_from(">Hhh", script_view, idx * 6)
         kind = kind_tile & 0xFF00
         tile_idx = kind_tile & 0x00FF
         if kind == 0xFF00:
@@ -160,27 +165,22 @@ def composite_arena_background(
     test_pictures: Sequence[DecodedPicture],
 ) -> DecodedPicture:
     """Composite a 320x200 arena background from `B/test` tile sheets (ARCHITECTURE.md §4.3)."""
-    if len(test_pictures) < 7:
-        msg = f"Expected at least 7 pictures from B/test, got {len(test_pictures)}"
+    if len(test_pictures) < 8:
+        msg = f"Expected at least 8 pictures from B/test, got {len(test_pictures)}"
         raise ArenaFormatError(msg)
 
+    region = arena.region & 3
     hud_pic = test_pictures[0]
-    main_sheet = test_pictures[1 + (arena.region & 3)]
-    fg_sheet = test_pictures[5 if (arena.region & 2) == 0 else 6]
-    fg_tile_offset = 40 if (arena.region & 1) == 1 else 0
+    base_pic = test_pictures[_REGION_BACKDROP_INDEX[region]]
+    main_sheet = test_pictures[_MAIN_SHEET_INDEX]
+    fg_sheet = test_pictures[_REGION_FG_SHEET_INDEX[region]]
 
-    canvas = (
-        test_pictures[7].pixels.copy() if len(test_pictures) >= 8 else np.zeros_like(hud_pic.pixels)
-    )
+    canvas = base_pic.pixels.copy()
     for op in arena.tiles:
-        if op.kind == 0x0300:
-            _blit_tile_cookie_cut(
-                canvas, fg_sheet.pixels, op.tile_index + fg_tile_offset, op.x, op.y
-            )
-        else:
-            _blit_tile_cookie_cut(canvas, main_sheet.pixels, op.tile_index, op.x, op.y)
+        sheet = fg_sheet if op.kind == 0x0300 else main_sheet
+        _blit_tile_cookie_cut(canvas, sheet.pixels, op.tile_index, op.x, op.y)
 
-    palette = assemble_combat_palette(hud_pic.palette, main_sheet.palette)
+    palette = assemble_combat_palette(hud_pic.palette, base_pic.palette)
     raw_planes = indexed_to_planar(canvas, planes=5)
     return DecodedPicture(
         width=PICTURE_WIDTH,

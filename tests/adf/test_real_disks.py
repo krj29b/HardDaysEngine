@@ -74,11 +74,21 @@ def test_real_cels_and_collide_hit(adf_dir: Path) -> None:
 def test_real_arenas_stiles_audio_and_hunks(adf_dir: Path) -> None:
     ds = DiskSet.from_directory(adf_dir)
     test_pics = decode_picture_pack(ds.read_file("test"))
-    for lair_name in ("fol1.t", "gll1.t", "swl1.t", "wal1.t"):
-        arena = decode_arena(lair_name, ds.read_file(lair_name))
-        assert arena.is_lair is True
+    for arena_name, exp_lair in (
+        ("fo1.t", False),
+        ("fol1.t", True),
+        ("gl1.t", False),
+        ("gll1.t", True),
+        ("sw1.t", False),
+        ("swl1.t", True),
+        ("wa1.t", False),
+        ("wal1.t", True),
+    ):
+        arena = decode_arena(arena_name, ds.read_file(arena_name))
+        assert arena.is_lair is exp_lair
         bg = composite_arena_background(arena, test_pics)
         assert bg.pixels.shape == (200, 320)
+        assert len(bg.palette) == 32
 
     assert len(decode_stile(ds.read_file("co.stile"))) == 480
     assert len(decode_stile(ds.read_file("intro.stile"))) == 480

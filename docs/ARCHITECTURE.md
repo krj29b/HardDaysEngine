@@ -174,14 +174,14 @@ followed by all 8,000 bytes of plane 1, etc.).
     header and body) used by `mog` (`combat_load.hpp`) for combat HUD, region tile sheets, victory,
     and defeat screens.
   - Exact byte sizes of the 9 packed pictures (`dbf_count + 1`):
-    1. Picture 0 (`0..22871`, `22,872` B): Combat frame / HUD (`5` planes).
-    2. Picture 1 (`22872..43680`, `20,809` B): Region 0 (`fo` Forest) main tile sheet (`5` planes).
-    3. Picture 2 (`43681..61688`, `18,008` B): Region 1 (`gl` Glen) main tile sheet (`5` planes).
-    4. Picture 3 (`61689..76621`, `14,933` B): Region 2 (`sw` Swamp) main tile sheet (`5` planes).
-    5. Picture 4 (`76622..102114`, `25,493` B): Region 3 (`wa` Wasteland) main tile sheet (`5` planes).
-    6. Picture 5 (`102115..123046`, `20,932` B): Region 0/1 foreground overlay tile sheet (`5` planes).
-    7. Picture 6 (`123047..142512`, `19,466` B): Region 2/3 foreground overlay tile sheet (`5` planes).
-    8. Picture 7 (`142513..163413`, `20,901` B): Combat Victory screen (`5` planes).
+    1. Picture 0 (`0..22871`, `22,872` B): Forest/Glen foreground/object tile sheet (`5` planes; `BUF_B` for `0x0300` in regions 0 & 1) and HUD/knight palette source.
+    2. Picture 1 (`22872..43680`, `20,809` B): Shared main tile sheet (`5` planes; `SCREEN_B` for non-`0x0300` opcodes across all 4 regions).
+    3. Picture 2 (`43681..61688`, `18,008` B): Swamp foreground/object tile sheet (`5` planes; `BUF_B` for `0x0300` in region 2).
+    4. Picture 3 (`61689..76621`, `14,933` B): Wasteland foreground/object tile sheet (`5` planes; `BUF_B` for `0x0300` in region 3).
+    5. Picture 4 (`76622..102114`, `25,493` B): Forest (`fo`, region 0) base backdrop (`5` planes).
+    6. Picture 5 (`102115..123046`, `20,932` B): Wasteland (`wa`, region 3) base backdrop (`5` planes).
+    7. Picture 6 (`123047..142512`, `19,466` B): Swamp (`sw`, region 2) base backdrop (`5` planes).
+    8. Picture 7 (`142513..163413`, `20,901` B): Glen (`gl`, region 1) base backdrop (`5` planes).
     9. Picture 8 (`163414..198744`, `35,331` B): Combat Death / Defeat screen (`5` planes).
   - Note: Computing `6 + (32 if planes == 4 else 64) + packed_size` for each picture yields the
     exact same offsets sequentially without needing hardcoded sizes.
@@ -330,16 +330,18 @@ for normal sites; `fol1..6.t`, `gll1..6.t`, `swl1..6.t`, `wal1..6.t` for Lair si
        $X$ lies in `[x1, x2]`, and blocks horizontal movement into `[x1, x2]` when the actor's depth
        is within `|depth - y| <= 6`.
   2. **Arena Background Tile Compositor Script (`2,400` bytes / `0x960` bytes following the obstacle table):**
-     - Sequence of 6-byte records `(BE16 kind_tile, BE16 dest_x, BE16 dest_y)` terminated by
-       `kind_tile & 0xFF00 == 0xFF00` (up to 400 entries).
+     - Initial canvas: copied from the region's base backdrop in `B/test` (`test[4]` for region 0 Forest,
+       `test[7]` for region 1 Glen, `test[6]` for region 2 Swamp, `test[5]` for region 3 Wasteland).
+     - Sequence of 6-byte records `(BE16 kind_tile, signed BE16 dest_x, signed BE16 dest_y)` terminated by
+       `kind_tile & 0xFF00 == 0xFF00` (up to 400 entries). Negative `dest_x`/`dest_y` are clipped at `0`.
      - High byte `kind = kind_tile & 0xFF00`, low byte `tile_index = kind_tile & 0x00FF`:
        - `0xFF00`: End of script.
        - `0xFE00`: No-op / skip slot.
-       - `0x0300`: Blit a `32 × 25` 5-plane cookie-cut tile from the region's **foreground overlay
-         sheet** (`test` picture 5 for regions 0/1, picture 6 for regions 2/3). For regions 1 and 3,
-         `tile_index` is offset by `+40` (the lower half of the shared overlay picture).
-       - Any other high byte (`0x0000`, `0x0100`, `0x0200`): Blit a `32 × 25` 5-plane cookie-cut
-         tile from the region's **main tile sheet** (`test` picture `1 + region`).
+       - `0x0300`: Blit a `32 × 25` 5-plane cookie-cut tile from the region's **foreground/object
+         sheet** (`test[0]` for regions 0/1, `test[2]` for region 2, `test[3]` for region 3), with
+         no tile index offset.
+       - Any other high byte (`0x0000`, `0x0100`, `0x0200`, `0x0400`): Blit a `32 × 25` 5-plane
+         cookie-cut tile from the **shared main tile sheet** (`test[1]`).
      - **Tile Source Coordinates:** Within a 320 × 200 tile sheet (10 columns of 32 px × 8 rows of
        25 px = 80 tiles), `tile_index` (`0..79`) maps to
        `src_x = (tile_index % 10) * 32`, `src_y = (tile_index // 10) * 25`.
