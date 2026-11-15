@@ -100,9 +100,11 @@ __all__ = [
     "CombatActionTables",
     "CreatureNodeRecord",
     "EncounterBandRecord",
+    "KnightScriptTables",
     "LairRegionMetadata",
     "MapSiteRecord",
     "MogRuntimeTables",
+    "MonsterScriptTables",
     "ProgramRuntimeTables",
     "SynthSequenceEntry",
     "SynthSequenceTables",
@@ -113,9 +115,11 @@ __all__ = [
     "parse_creature_nodes",
     "parse_encounter_bands",
     "parse_knight_names",
+    "parse_knight_script_tables",
     "parse_lair_region_metadata",
     "parse_map_sites",
     "parse_mog_synth_sequences",
+    "parse_monster_script_tables",
 ]
 
 
@@ -196,6 +200,31 @@ class SynthSequenceTables:
 
 
 @dataclass(slots=True, frozen=True)
+class KnightScriptTables:
+    """Knight fight-script pointer tables (`mog` `S_4` offsets via `S_0`/`S_1` relocs)."""
+
+    idle_script: int
+    alt_script: int
+    action_scripts: tuple[int, ...]
+    hurt_scripts: tuple[int, ...]
+    walk_scripts: tuple[tuple[int, ...], ...]
+    cel_slot_table_s1_offset: int = 0
+
+
+@dataclass(slots=True, frozen=True)
+class MonsterScriptTables:
+    """Monster fight-script and cel-slot pointer tables (`mog` `S_4` offsets via `S_0`/`S_1`)."""
+
+    creature_type: int
+    idle_script: int
+    alt_script: int
+    action_scripts: tuple[int, ...]
+    hurt_scripts: tuple[int, ...]
+    walk_scripts: tuple[tuple[int, ...], ...]
+    cel_slot_table_s1_offset: int = 0
+
+
+@dataclass(slots=True, frozen=True)
 class ProgramRuntimeTables:
     """Runtime tables extracted from the `program` executable."""
 
@@ -211,6 +240,8 @@ class MogRuntimeTables:
     lair_region: LairRegionMetadata
     builtin_font: BuiltinFontTable
     synth: SynthSequenceTables
+    knight_scripts: KnightScriptTables | None = None
+    monster_scripts: tuple[MonsterScriptTables, ...] = ()
 
 
 def _require_section(
@@ -410,14 +441,148 @@ def parse_mog_synth_sequences(mog_exec: DecodedHunkExecutable) -> SynthSequenceT
     )
 
 
+def _scan_s1_pointer_tables(s0: HunkSection) -> dict[int, dict[int, int]]:
+    """Scan `mog` `S_0` `LEA S_1+base, A0` initializers for `S_4` script-pointer tables."""
+    data = s0.data
+    r1 = set(s0.relocs.get(1, ()))
+    r4 = set(s0.relocs.get(4, ()))
+    tables: dict[int, dict[int, int]] = {}
+    cur_a0: int | None = None
+    seq = 0
+    pos = 0
+    while pos + 2 <= len(data):
+        (op,) = struct.unpack_from(">H", data, pos)
+        if op == 0x41F9 and (pos + 2) in r1 and pos + 6 <= len(data):
+            (cur_a0,) = struct.unpack_from(">I", data, pos + 2)
+            tables.setdefault(cur_a0, {})
+            seq = 0
+            pos += 6
+        elif cur_a0 is not None and op == 0x217C and (pos + 2) in r4 and pos + 8 <= len(data):
+            val, disp = struct.unpack_from(">Ih", data, pos + 2)
+            tables[cur_a0][disp] = val
+            pos += 8
+        elif cur_a0 is not None and op == 0x20FC and pos + 6 <= len(data):
+            if (pos + 2) in r4:
+                (tables[cur_a0][seq],) = struct.unpack_from(">I", data, pos + 2)
+            seq += 4
+            pos += 6
+        elif cur_a0 is not None and op == 0x4298:
+            seq += 4
+            pos += 2
+        else:
+            pos += 2
+    return tables
+
+
+def _scan_actor_init_blocks(s0: HunkSection) -> list[dict[int | str, int]]:
+    """Scan `mog` `S_0` `RTS`-delimited actor initializers writing `22(A1)` (`ulIdleScript`)."""
+    data = s0.data
+    r1 = set(s0.relocs.get(1, ()))
+    r4 = set(s0.relocs.get(4, ()))
+    blocks: list[dict[int | str, int]] = []
+    cur: dict[int | str, int] = {}
+    pos = 0
+    while pos + 2 <= len(data):
+        (op,) = struct.unpack_from(">H", data, pos)
+        if op == 0x4E75:
+            if 22 in cur:
+                blocks.append(cur)
+            cur = {}
+            pos += 2
+        elif op == 0x237C and pos + 8 <= len(data) and ((pos + 2) in r4 or (pos + 2) in r1):
+            val, disp = struct.unpack_from(">Ih", data, pos + 2)
+            cur[disp] = val
+            pos += 8
+        elif op == 0x137C and pos + 6 <= len(data):
+            val, disp = struct.unpack_from(">Hh", data, pos + 2)
+            if disp == 77:
+                cur["type"] = val
+            pos += 6
+        else:
+            pos += 2
+    return blocks
+
+
+def _extract_9_entries(tables: dict[int, dict[int, int]], s1_base: int | None) -> tuple[int, ...]:
+    if s1_base is None or s1_base not in tables:
+        return (0,) * 9
+    entries = tables[s1_base]
+    return tuple(entries.get(idx * 4, 0) for idx in range(9))
+
+
+def _extract_walk_blocks(
+    tables: dict[int, dict[int, int]],
+    s1_base: int | None,
+) -> tuple[tuple[int, ...], ...]:
+    if s1_base is None or s1_base not in tables:
+        return ((0, 0, 0, 0), (0, 0, 0, 0), (0, 0, 0, 0))
+    entries = tables[s1_base]
+    return tuple(
+        tuple(entries.get(block * 32 + phase * 4, 0) for phase in range(4)) for block in range(3)
+    )
+
+
+def parse_knight_script_tables(mog_exec: DecodedHunkExecutable) -> KnightScriptTables:
+    """Decode knight fight-script pointer tables from `mog` `S_0`/`S_1`/`S_4` (§7.2)."""
+    s0 = _require_section(mog_exec, 0, 2)
+    _require_section(mog_exec, MOG_TABLES_SECTION, 2)
+    s1_tables = _scan_s1_pointer_tables(s0)
+    for block in _scan_actor_init_blocks(s0):
+        if "type" not in block and 34 in block:
+            return KnightScriptTables(
+                idle_script=block.get(22, 0),
+                alt_script=block.get(26, 0),
+                action_scripts=_extract_9_entries(s1_tables, block.get(34)),
+                hurt_scripts=_extract_9_entries(s1_tables, block.get(30)),
+                walk_scripts=_extract_walk_blocks(s1_tables, block.get(46)),
+                cel_slot_table_s1_offset=block.get(38, 0),
+            )
+    msg = f"Executable {mog_exec.name!r} S_0 contains no knight script-table initializer"
+    raise HunkFormatError(msg)
+
+
+def parse_monster_script_tables(mog_exec: DecodedHunkExecutable) -> tuple[MonsterScriptTables, ...]:
+    """Decode monster fight-script pointer tables from `mog` `S_0`/`S_1`/`S_4` (§7.2)."""
+    s0 = _require_section(mog_exec, 0, 2)
+    _require_section(mog_exec, MOG_TABLES_SECTION, 2)
+    s1_tables = _scan_s1_pointer_tables(s0)
+    results: list[MonsterScriptTables] = []
+    seen_types: set[int] = set()
+    for block in _scan_actor_init_blocks(s0):
+        if "type" not in block:
+            continue
+        creature_type = block["type"]
+        if creature_type in seen_types:
+            continue
+        seen_types.add(creature_type)
+        results.append(
+            MonsterScriptTables(
+                creature_type=creature_type,
+                idle_script=block.get(22, 0),
+                alt_script=block.get(26, 0),
+                action_scripts=_extract_9_entries(s1_tables, block.get(34)),
+                hurt_scripts=_extract_9_entries(s1_tables, block.get(30)),
+                walk_scripts=_extract_walk_blocks(s1_tables, block.get(46)),
+                cel_slot_table_s1_offset=block.get(38, 0),
+            )
+        )
+    return tuple(results)
+
+
 def load_mog_tables(mog_exec: DecodedHunkExecutable) -> MogRuntimeTables:
     """Load all runtime data tables from a parsed `mog` executable."""
+    s0 = mog_exec.sections[0] if mog_exec.sections else None
+    has_script_relocs = s0 is not None and 1 in s0.relocs and 4 in s0.relocs
+    knight_scripts = parse_knight_script_tables(mog_exec) if has_script_relocs else None
+    monster_scripts = parse_monster_script_tables(mog_exec) if has_script_relocs else ()
     return MogRuntimeTables(
         knight_names=parse_knight_names(mog_exec),
         combat_actions=parse_combat_action_tables(mog_exec),
         lair_region=parse_lair_region_metadata(mog_exec),
         builtin_font=parse_builtin_font(mog_exec, MOG_BOLD_FONT_SECTION),
         synth=parse_mog_synth_sequences(mog_exec),
+        knight_scripts=knight_scripts,
+        monster_scripts=monster_scripts,
     )
 
 

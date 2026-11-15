@@ -27,13 +27,13 @@ from pymoonstone.sim.types import Direction, EntityId, Pos25D
 
 def _make_loop_script() -> bytes:
     """Minimal 6-VBL combat script that yields each frame and loops."""
-    return bytes([OP_END_FRAME, OP_JUMP, 0, 0, 0, 0])
+    return bytes([OP_END_FRAME, 0x00, OP_JUMP, 3, 0, 0, 0, 0])
 
 
 def _make_projectile_script(type_id: int = 7) -> bytes:
     """Combat script that spawns a projectile on frame 1 and yields."""
     return bytes(
-        [OP_SPAWN_PROJECTILE, 0, type_id, 0, 8, 0, 0, 0, 0, OP_END_FRAME, OP_JUMP, 0, 0, 0, 0]
+        [OP_SPAWN_PROJECTILE, 0, 0, 0, 0, type_id, OP_END_FRAME, 0x00, OP_JUMP, 3, 0, 0, 0, 0]
     )
 
 

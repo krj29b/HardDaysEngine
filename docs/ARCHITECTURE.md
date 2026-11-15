@@ -463,33 +463,55 @@ AmigaDOS Hunk executables on Disk A.
 
 ### 7.2 Animation & Combat Bytecode Virtual Machines
 Both `program` (`animTick`) and `mog` (`combatTick`) execute bytecode scripts from their DATA hunks
-on up to **10 concurrent job slots**:
+on up to **10 concurrent job slots** (sorted each tick by ascending depth `uwZ` for painter's order).
 
-- **Draw Instruction (`opcode 0x00..0x1F`, 6 bytes):**
-  - `+0`: `uint8` `cel_slot` (`0..31`, indexing `pCelTables[cel_slot]`).
+- **Draw Instruction (`opcode 0x00..0x7F`, 6 bytes):**
+  - `+0`: `uint8` `op` — `cel_slot = (op & 0x1F) >> 2` (encoded as `slot * 4`: `0x00, 0x04, 0x08, 0x0C, 0x10` for the 5 cel-table slots in `ulFrames`).
   - `+1`: `uint8` `frame_index` (`0..frame_count-1`).
-  - `+2`: `int8` `dy` (signed vertical offset added to job screen $Y$).
+  - `+2`: `int8` `dy` (signed vertical offset added to `job.uwY + job.uwZ`).
   - `+3`: `uint8` `draw_flags`:
     - Bit 0 (`0x01`): Register cel in job's **Hurt List** (`ulHurtList`).
     - Bit 1 (`0x02`): Register cel in job's **Attack List** (`ulAttackList`).
-    - Bit 2 (`0x04`): XOR horizontal flip with the job's facing flag (`(job.ubFlags >> 1) & 1`).
-    - Bit 5 (`0x20`): Stamp directly into the static background buffer (`SCREEN_B`) instead of the
-      per-frame restore list (used for blood splats and fallen corpses).
+    - Bit 4 (`0x10`): Stamp directly into the static background buffer (`SCREEN_B`) instead of the
+      per-frame dirty-rect restore list (used for blood splats and fallen corpses).
+    - Bit 5 (`0x20`): Set text-overlay flag (`pTextFlag`).
     - Bit 6 (`0x40`): Exclude this cel from expanding the actor's union body bounding box.
-    - Bit 7 (`0x80`): Foreground-masked draw (masks against saved background plane 3 `fgPlaneSave`).
-  - `+4`: `BE16` `dx` (`int16` signed horizontal offset; negated when the job faces left).
-- **End-of-Frame Marker (`0xFF`, 1 byte):**
-  - Ends the current script frame; `ulScript` advances past `0xFF` and waits for the next tick.
-- **Control Opcodes (`0x80..0xD4` in `mog` `combat_script.hpp`):**
-  - `0x80`: End script (`ubRunning = 0`, triggers AI/handler dispatch `creatureDispatch` on next tick).
-  - `0x81 <BE32 target>`: Unconditional jump (`ulScript = target`).
-  - `0x82`: Free job and owner record (`ubActive = 0`, `ubRunning = 0`, `owner.ulActive = 0`).
-  - `0x83..0x89`: Loop counters, relative branches, random branches, and subroutine calls using the
-    36-byte `CombatWork` scratch block.
-  - `0x8A <u16 dx> <u16 dz>`: Move job/owner position by `(±dx, dz)` with arena & obstacle clipping.
-  - `0x8E <u16 sound_id>`: Trigger synth sound effect `sfxPlay(sound_id)`.
-  - `0x90..0xD4`: Combat-specific hooks (spawn projectile/dagger, blood spray, screen shake, flash,
-    grab/throw victim alignment, dragon flight/breath, knock-out timer).
+    - Bit 7 (`0x80`): Skip this draw (and its hit/hurt registration) when Gore is off / demo mode is active.
+  - `+4`: `BE16` `dx` (`int16` signed horizontal offset). Top-left screen $X$ is `job.uwX + dx` when facing right (`!(ubFlags & 2)`), or `job.uwX - dx - frame_width` when mirrored/facing left (`ubFlags & 2`).
+  - Multiple draw instructions execute sequentially within the same tick until a 2-byte `$FF` frame-boundary marker is reached.
+
+- **2-Byte Frame Boundary Markers (`0xFF <next>`):**
+  - `0xFF 0x00` (and any `next` other than `0xFF`/`0xFE`): End current frame, advance `ulScript += 2`, and yield until the next tick.
+  - `0xFF 0xFF`: End current frame AND terminate the script (`ubRunning = 0`), unless `loop2` is active and has remaining iterations (in which case `ulScript = ulLoop2`).
+  - `0xFF 0xFE`: End current frame AND step `loop2` (decrement `ubLoop2Count`; if non-zero jump to `ulLoop2`, else clear `ubLoop2Active` and advance `ulScript += 2`).
+  - Before checking `next`, `endOfFrame` evaluates active `loop1` (`ubLoopActive`), active motion block (`ubMotionActive`), and armed deferred jump (`ubCallArmed`) in that priority order.
+
+- **Control Opcodes (`mog` `S_4` fight-script bytecode):**
+  - `0x80 <facing:u8>` (2 bytes): Set `ubFlags = facing` (1 = right, 3 = left), or toggle bit 1 (`ubFlags ^= 2`) when `facing == 0xFF`. Also updates owner `+10` (`ubFacing`).
+  - `0x84 <mode:u8> <target:BE32>` (6 bytes): If `mode == 3`, jump immediately (`ulScript = target`); otherwise arm deferred continuation (`ulCall = target`, `ubCallArmed = 1`, `ulScript += 6`) taken at the next `$FF` marker.
+  - `0x88 <count:u8>` (2 bytes): Begin `loop1` (`ubLoopActive = 1`, `ulLoop = pc + 2`). If `count == 0`, pick a random count in `1..31` from the engine PRNG.
+  - `0x8C <param:u8> <count:u8> <flags:u8> <vy:u8> <vy_lim:u8> <vx:u8> <vx_lim:u8>` (8 bytes): Arm 16-bit integer motion block (`ubMotionActive = 1`, `ulReturn = pc + 8`). Stepped at each `$FF` marker for `count` steps: `flags` bit 0 rises (`uwY -= vy`), bit 1 falls (`uwY += vy`, clamped to `0`), bit 4 moves in facing direction, bit 2 moves opposite, bit 5/7 lock `vy`/`vx` acceleration, bit 6 keeps current script instead of returning to `ulReturn`.
+  - `0x94 <count:u8>` (2 bytes): Begin `loop2` (`ubLoop2Count = count`, `ubLoop2Active = 1`, `ulLoop2 = pc + 2`).
+  - `0x98 <pad:u8> <target:BE32>` (6 bytes): Jump to `target` if Gore-off / demo flag is non-zero; else `pc += 6`.
+  - `0xA0 <flags:u8> <dx:BE16> <dy:BE16> <dz:BE16>` (8 bytes): Move job position. If `flags & 0x40`, set absolute `(uwX, uwY, uwZ) = (dx, dy, dz)`. Otherwise add/subtract `dx` (respecting `ubFlags == 3` facing and `flags & 1`), `dy` (`flags & 8` subtracts), and `dz` (`flags & 0x20` subtracts).
+  - `0xA4 <sound_id:u8>` (2 bytes): Trigger synth sound sequence `sound_id`.
+  - `0xA8 <size_flags:u8> <offset:s16> <value:BE32>` (8 bytes): Write low byte (`size_flags & 1`), word (`size_flags & 2`), or long (`else`) to owner record at signed byte offset `offset`.
+  - `0xAC <armed:u8> <target:BE32>` (6 bytes): Arm (`armed != 0`) or disarm secondary pass script (`ulSpawn = target`, `ubSpawnArmed`), executed on a scratch copy of the job (`uwY = 0`) before the main pass.
+  - `0xB0 <pad:u8> <routine_id:BE32>` (6 bytes): Invoke engine callback routine (e.g. `fightCreatureDied`).
+  - `0xB4 <pad:u8> <target:BE32>` (6 bytes): If owner `swHp <= 0`, jump to `target` and reset `CombatWork` (preserving `ubSpawnArmed`/`ulSpawn`); else `pc += 6`.
+  - `0xB8 <pad:u8> <target:BE32>` (6 bytes): Spawn child object job running script `target`.
+  - `0xBC <pad:u8>` (2 bytes): Kill job and clear owner `ulActive = 0` (`ubActive = 0`, `ubRunning = 0`).
+  - `0xC0 <set_id:u8>` (2 bytes): Select active frame-table list `set_id - 1` (`1` = knights `KN1..KN4`, `2` = creature `0..4`, `3` = map, `4` = effects).
+  - `0xC4 <pad:u8> <target:BE32>` (6 bytes): Jump to `target` if current knight's job has the same `ubFlags` facing; else `pc += 6`.
+  - `0xC8 <size_flags:u8> <offset:s16> <target:BE32>` (8 bytes): Jump to `target` if owner field at `offset` is zero.
+  - `0xCC <size_flags:u8> <offset:s16> <target:BE32>` (8 bytes): Jump to `target` if owner field at `offset` is non-zero.
+  - `0xD0 <pad:u8>` (2 bytes): Reset `CombatWork` scratch block (preserving `ubSpawnArmed` and `ulSpawn`).
+  - `0xFD` (1 byte): Jump immediately to `ulReturn` (`$8C` continuation).
+  - `0xFE` (1 byte): Jump immediately to `ulLoop2` (`$94` loop start).
+
+- **Script Pointer Tables (`mog` `S_0` / `S_1` / `S_4`):**
+  - `kActionRight` (`S_4[4130]`) and `kActionLeft` (`S_4[4152]`) are 11-entry `BE16` tables mapping joystick direction codes to byte offsets `(0, 4, 8, ..., 32)` into `ulActionScripts` — they are **not** bytecode PCs.
+  - At startup and arena initialization, `mog` `S_0` populates 9-entry `BE32` pointer tables (`ulActionScripts`, `ulHurtScripts`, `ulDamageTable`, `ulDefenseTable`) and 24-entry walk-script tables (`ulWalkScripts`: 3 directional blocks of 4 phases + terminator/padding) in BSS (`S_1`) with `HUNK_RELOC32`-relocated `S_4` bytecode offsets, and assigns per-actor `ulIdleScript` / `ulScript26` pointers directly to `Knight` / creature records.
 
 ### 7.3 Core Simulation Struct Layouts (`mog`)
 - **`Knight` / Creature Actor Record (`132` bytes):**
