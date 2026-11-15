@@ -138,10 +138,15 @@ def test_real_intro_cinematic_player_all_scenes(adf_dir: Path) -> None:
         prev_bg = bg
     assert distinct_frames >= 10
 
-    menu_bg, menu_pal = player.build_main_menu(bundle, 2)
+    menu_bg, menu_pal = player.build_main_menu(bundle, 2, menu_cursor=3, gore_on=True)
     assert menu_bg is not None
     assert menu_bg.shape == (200, 320)
     assert len(menu_pal) == 32
+
+    kbg, kpal = player.build_knight_select(bundle, 0)
+    assert kbg is not None
+    assert kbg.shape == (200, 320)
+    assert len(kpal) == 32
 
     session = GameSession(disk_set=ds, start_scene=GameScene.TITLE)
     session.tick_count = player.total_ticks() - 1

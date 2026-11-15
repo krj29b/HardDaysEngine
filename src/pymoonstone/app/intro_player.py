@@ -49,6 +49,14 @@ _FLASH_A_FN = 3780
 _FLASH_B_FN = 3814
 _FLASH_A_S0_OFFSET = 3918
 _FLASH_B_S0_OFFSET = 3982
+_MOG_MAIN_MENU_LIST_OFFSET = 8
+_MOG_GORE_ON_OFFSET = 196
+_MOG_GORE_OFF_OFFSET = 199
+_MOG_KNIGHT_SELECT_LIST_OFFSET = 772
+_MOG_KNIGHT_PALETTE_OFFSET = 1142
+_MOG_KNIGHT_NAME_OFFSETS: tuple[int, ...] = (96, 118, 140, 162)
+_MOG_MENU_CURSOR_Y: tuple[int, ...] = (85, 110, 148, 168)
+_MOG_PORTRAIT_X: tuple[int, ...] = (12, 88, 164, 240)
 _INTRO_CEL_NAMES: tuple[str, ...] = ("au1.cel", "li1.cel", "ha1.cel", "dw1.cel", "da1.cel")
 
 
@@ -169,20 +177,28 @@ def render_bold_string(
 
 def render_bold_text_list(
     buf: npt.NDArray[np.uint8],
-    h2: bytes,
+    data_section: bytes,
     bold_cel: DecodedCel,
     list_offset: int,
+    *,
+    charmap: bytes | None = None,
+    overrides: dict[int, str] | None = None,
 ) -> None:
-    """Render a 14-byte ``S_2`` text linked list using ``bold.f`` (§7.4)."""
-    charmap = h2[_CHARMAP_OFFSET : _CHARMAP_OFFSET + 104]
+    """Render a 14-byte text linked list using ``bold.f`` (§7.4)."""
+    active_map = (
+        charmap if charmap is not None else data_section[_CHARMAP_OFFSET : _CHARMAP_OFFSET + 104]
+    )
     cur = list_offset
-    while 0 < cur <= len(h2) - 14:
-        t_off, tx, ty, style, nxt = struct.unpack_from(">IHHHI", h2, cur)
-        end = h2.find(0, t_off)
-        if end < 0:
-            break
-        text = h2[t_off:end].decode("ascii", errors="replace")
-        render_bold_string(buf, charmap, bold_cel, text, tx, ty, centered=bool(style & 1))
+    while 0 < cur <= len(data_section) - 14:
+        t_off, tx, ty, style, nxt = struct.unpack_from(">IHHHI", data_section, cur)
+        if overrides is not None and cur in overrides:
+            text = overrides[cur]
+        else:
+            end = data_section.find(0, t_off)
+            if end < 0:
+                break
+            text = data_section[t_off:end].decode("ascii", errors="replace")
+        render_bold_string(buf, active_map, bold_cel, text, tx, ty, centered=bool(style & 1))
         cur = nxt
 
 
@@ -496,6 +512,7 @@ class IntroCinematicPlayer:
 
     h0: bytes
     h2: bytes
+    mog_s4: bytes
     panorama: npt.NDArray[np.uint8]
     bg1a_palette: tuple[RGBColor, ...]
     title_frame: npt.NDArray[np.uint8]
@@ -544,9 +561,16 @@ class IntroCinematicPlayer:
         caption_frame = msg_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH].copy()
         render_bold_text_list(caption_frame, h2, bold, _CAPTION_TEXT_OFFSET)
 
+        mog_s4 = b""
+        if bundle.disk_set.has_file("mog"):
+            mog_prg = parse_hunk_executable("mog", bundle.disk_set.read_file("mog"))
+            if len(mog_prg.sections) > 4:
+                mog_s4 = mog_prg.sections[4].data
+
         return cls(
             h0=h0,
             h2=h2,
+            mog_s4=mog_s4,
             panorama=panorama,
             bg1a_palette=tuple(_pad_palette_32(bg1a.palette)),
             title_frame=title_frame,
@@ -654,13 +678,21 @@ class IntroCinematicPlayer:
         """Return ``True`` once ``tick_count`` reaches the end of the intro cinematic."""
         return tick_count >= self.total_ticks()
 
+    def _read_mog_cstring(self, offset: int) -> str:
+        end = self.mog_s4.find(0, offset)
+        if end < 0:
+            return ""
+        return self.mog_s4[offset:end].decode("ascii", errors="replace")
+
     def build_main_menu(
         self,
         bundle: GameAssetBundle,
         selected_player_count: int,
         menu_cursor: int = 0,
+        *,
+        gore_on: bool = True,
     ) -> tuple[npt.NDArray[np.uint8] | None, tuple[RGBColor, ...]]:
-        """Render ``ch.piv`` main menu with ``bold.f`` title/items and ``sel.cel`` cursor."""
+        """Render the original Amiga ``mog`` title menu on ``ch.piv`` (§7.4)."""
         ch_pic = bundle.get_picture("ch.piv")
         if ch_pic is None:
             return None, default_combat_palette()
@@ -671,12 +703,55 @@ class IntroCinematicPlayer:
         if bold is not None:
             if len(bold.frames) > _TITLE_LOGO_FRAME:
                 _blit_playfield(buf, bold.frames[_TITLE_LOGO_FRAME].pixels, 5, 10)
-            render_bold_string(buf, charmap, bold, f"Players   {selected_player_count}", 98, 86)
-            render_bold_string(buf, charmap, bold, "Start Quest", 0, 118, centered=True)
+            if self.mog_s4:
+                gore_str = self._read_mog_cstring(
+                    _MOG_GORE_ON_OFFSET if gore_on else _MOG_GORE_OFF_OFFSET
+                )
+                overrides = {64: str(selected_player_count), 78: gore_str}
+                render_bold_text_list(
+                    buf,
+                    self.mog_s4,
+                    bold,
+                    _MOG_MAIN_MENU_LIST_OFFSET,
+                    charmap=charmap,
+                    overrides=overrides,
+                )
         if sel is not None and sel.frames:
-            cursor_y = 86 if menu_cursor == 0 else 118
+            cursor_y = _MOG_MENU_CURSOR_Y[menu_cursor % len(_MOG_MENU_CURSOR_Y)]
             _blit_playfield(buf, sel.frames[0].pixels, 50, cursor_y)
         return buf, tuple(_pad_palette_32(ch_pic.palette))
+
+    def build_knight_select(
+        self,
+        bundle: GameAssetBundle,
+        selected_slot: int,
+        taken_mask: int = 0,
+    ) -> tuple[npt.NDArray[np.uint8] | None, tuple[RGBColor, ...]]:
+        """Render the original Amiga ``mog`` Select a Knight portrait screen."""
+        if not self.mog_s4:
+            return None, default_combat_palette()
+        buf = np.zeros((PLAYFIELD_HEIGHT, CANVAS_WIDTH), dtype=np.uint8)
+        bold = bundle.get_cel("bold.f")
+        sel = bundle.get_cel("sel.cel")
+        charmap = self.h2[_CHARMAP_OFFSET : _CHARMAP_OFFSET + 104]
+        if bold is not None:
+            render_bold_text_list(
+                buf,
+                self.mog_s4,
+                bold,
+                _MOG_KNIGHT_SELECT_LIST_OFFSET,
+                charmap=charmap,
+            )
+            name_off = _MOG_KNIGHT_NAME_OFFSETS[selected_slot & 3]
+            knight_name = self._read_mog_cstring(name_off).strip().replace("_", " ")
+            render_bold_string(buf, charmap, bold, knight_name, 50, 50)
+        if sel is not None and len(sel.frames) >= 6:
+            for idx in range(4):
+                if not (taken_mask & (1 << idx)):
+                    _blit_playfield(buf, sel.frames[2 + idx].pixels, _MOG_PORTRAIT_X[idx], 80)
+            _blit_playfield(buf, sel.frames[1].pixels, _MOG_PORTRAIT_X[selected_slot & 3], 80)
+        pal = _unpack_pal32(self.mog_s4, _MOG_KNIGHT_PALETTE_OFFSET)
+        return buf, pal
 
     def render_tick(
         self,

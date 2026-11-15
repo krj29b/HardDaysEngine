@@ -219,6 +219,14 @@ class GameSession:
         self.tick_count: int = 0
         self.paused: bool = False
         self.selected_player_count: int = len(roster)
+        self.menu_cursor: int = 0
+        self.gore_enabled: bool = True
+        self.knight_pick_active: bool = False
+        self.knight_pick_slot: int = 0
+        self.knight_taken_mask: int = 0
+        self.picked_knights: list[KnightId] = []
+        self._menu_prev_dx: int = 0
+        self._menu_prev_dy: int = 0
         self.selected_move_index: int = 0
         self.overworld: OverworldState = create_campaign(roster, seed=seed)
         self.knight_combat: dict[KnightId, KnightState] = {
@@ -232,11 +240,15 @@ class GameSession:
         )
         self.last_status: str = "PRESS ENTER TO BEGIN"
 
-    def _reset_campaign(self, count: int) -> None:
+    def _reset_campaign(self, count: int, custom_roster: Sequence[KnightId] = ()) -> None:
         clamped = max(1, min(4, count))
-        roster = tuple(KnightId(i) for i in range(clamped))
+        roster = (
+            tuple(custom_roster[:clamped])
+            if custom_roster
+            else tuple(KnightId(i) for i in range(clamped))
+        )
         self.players = roster
-        self.selected_player_count = clamped
+        self.selected_player_count = len(roster)
         self.selected_move_index = 0
         self.overworld = create_campaign(roster, seed=self.seed)
         self.knight_combat = {
@@ -275,15 +287,87 @@ class GameSession:
             self.scene = GameScene.KNIGHT_SELECT
             self.last_status = "SELECT KNIGHTS"
 
-    def _step_knight_select(self, primary: PlayerInput) -> None:
-        if primary.dx > 0 or primary.dy > 0:
-            self.selected_player_count = (self.selected_player_count % 4) + 1
-        elif primary.dx < 0 or primary.dy < 0:
-            self.selected_player_count = ((self.selected_player_count - 2) % 4) + 1
-        if primary.confirm or primary.fire:
-            self._reset_campaign(self.selected_player_count)
+    def _step_knight_pick(self, dx_edge: int, confirm: bool) -> None:
+        if dx_edge != 0:
+            step = 1 if dx_edge > 0 else -1
+            for offset in range(1, 5):
+                cand = (self.knight_pick_slot + step * offset) & 3
+                if not (self.knight_taken_mask & (1 << cand)):
+                    self.knight_pick_slot = cand
+                    break
+        if not confirm:
+            return
+        slot = self.knight_pick_slot & 3
+        self.knight_taken_mask |= 1 << slot
+        self.picked_knights.append(KnightId(slot))
+        if len(self.picked_knights) >= self.selected_player_count:
+            self.knight_pick_active = False
+            self._reset_campaign(self.selected_player_count, self.picked_knights)
             self.scene = GameScene.OVERWORLD
             self.last_status = f"DAY {self.overworld.day}"
+            return
+        for cand in range(4):
+            if not (self.knight_taken_mask & (1 << cand)):
+                self.knight_pick_slot = cand
+                break
+
+    def _confirm_main_menu(self) -> None:
+        if self.menu_cursor == 1:
+            self.gore_enabled = not self.gore_enabled
+            return
+        if self.menu_cursor == 2:
+            self._reset_campaign(self.selected_player_count)
+            self._start_combat(
+                EncounterTrigger(
+                    kind=TriggerKind.WANDERING_MONSTER,
+                    knight_id=self.players[0],
+                    node_id=0,
+                    day=self.overworld.day,
+                    moon_phase=self.overworld.moon_phase,
+                    encounter_kind=0,
+                ),
+                self.players[0],
+            )
+            return
+        if (
+            self.menu_cursor == 3
+            and self.asset_bundle is not None
+            and self.asset_bundle.get_intro_player() is not None
+        ):
+            self.knight_pick_active = True
+            self.knight_pick_slot = 0
+            self.knight_taken_mask = 0
+            self.picked_knights = []
+            return
+        self._reset_campaign(self.selected_player_count)
+        self.scene = GameScene.OVERWORLD
+        self.last_status = f"DAY {self.overworld.day}"
+
+    def _adjust_main_menu(self, dx_edge: int, dy_edge: int) -> None:
+        if dy_edge != 0:
+            self.menu_cursor = max(0, min(3, self.menu_cursor + (1 if dy_edge > 0 else -1)))
+        if dx_edge == 0:
+            return
+        if self.menu_cursor == 0:
+            delta = 1 if dx_edge > 0 else -1
+            self.selected_player_count = ((self.selected_player_count - 1 + delta) % 4) + 1
+        elif self.menu_cursor == 1:
+            self.gore_enabled = not self.gore_enabled
+
+    def _step_knight_select(self, primary: PlayerInput) -> None:
+        dx_edge = primary.dx if primary.dx != self._menu_prev_dx else 0
+        dy_edge = primary.dy if primary.dy != self._menu_prev_dy else 0
+        self._menu_prev_dx = primary.dx
+        self._menu_prev_dy = primary.dy
+        confirm = primary.confirm or primary.fire
+
+        if self.knight_pick_active:
+            self._step_knight_pick(dx_edge, confirm)
+            return
+
+        self._adjust_main_menu(dx_edge, dy_edge)
+        if confirm:
+            self._confirm_main_menu()
 
     def _step_overworld(self, frame: InputFrame) -> None:
         if self.overworld.game_over:
@@ -739,22 +823,30 @@ class GameSession:
         if self.asset_bundle is not None:
             player = self.asset_bundle.get_intro_player()
             if player is not None:
-                menu_bg, menu_pal = player.build_main_menu(
-                    self.asset_bundle, self.selected_player_count
-                )
+                if self.knight_pick_active:
+                    menu_bg, menu_pal = player.build_knight_select(
+                        self.asset_bundle, self.knight_pick_slot, self.knight_taken_mask
+                    )
+                else:
+                    menu_bg, menu_pal = player.build_main_menu(
+                        self.asset_bundle,
+                        self.selected_player_count,
+                        self.menu_cursor,
+                        gore_on=self.gore_enabled,
+                    )
                 if menu_bg is not None:
                     scene_renderer.set_palette(menu_pal)
                     scene_renderer.compose_scene(background=menu_bg, border_index=0)
                     menu_rendered = True
         if not menu_rendered:
             self._compose_picture_or_solid(scene_renderer, "ch.piv")
-        font.draw_text(
-            scene_renderer.canvas,
-            f"KNIGHTS: {self.selected_player_count} (ARROWS+ENTER)",
-            64,
-            236,
-            color_index=31,
-        )
+            font.draw_text(
+                scene_renderer.canvas,
+                f"KNIGHTS: {self.selected_player_count} (ARROWS+ENTER)",
+                64,
+                236,
+                color_index=31,
+            )
 
     def render_to_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         """Render the active game scene and HUD onto ``scene_renderer``."""
