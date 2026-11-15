@@ -9,12 +9,26 @@ from pymoonstone.app.intro_player import IntroCinematicPlayer
 from pymoonstone.assets.arena import DecodedArena, composite_arena_background, decode_arena
 from pymoonstone.assets.audio import DecodedModule, decode_cmp_module, decode_sample_bank
 from pymoonstone.assets.cel import DecodedCel, decode_cel
+from pymoonstone.assets.hit import HitSet, parse_collide_hit
+from pymoonstone.assets.hunk import HunkFormatError, parse_hunk_executable
 from pymoonstone.assets.palette import RGBColor, assemble_combat_palette, default_combat_palette
 from pymoonstone.assets.picture import DecodedPicture, decode_picture, decode_picture_pack
+from pymoonstone.assets.tables import (
+    MogRuntimeTables,
+    ProgramRuntimeTables,
+    load_mog_tables,
+    load_program_tables,
+)
 from pymoonstone.render.renderer import CANVAS_WIDTH, PLAYFIELD_HEIGHT
 from pymoonstone.render.scene import SceneSprite
 from pymoonstone.sim.knight_combat import KnightAction
 from pymoonstone.sim.monster_ai import MonsterArchetype
+from pymoonstone.sim.overworld import (
+    EncounterBand,
+    MapSiteInput,
+    OverworldGraph,
+    build_overworld_graph_from_sites,
+)
 
 if TYPE_CHECKING:
     import numpy as np
@@ -67,6 +81,12 @@ class GameAssetBundle:
     _failed_names: set[str] = field(default_factory=set)
     _intro_player: IntroCinematicPlayer | None = None
     _intro_checked: bool = False
+    _program_tables: ProgramRuntimeTables | None = None
+    _program_tables_checked: bool = False
+    _mog_tables: MogRuntimeTables | None = None
+    _mog_tables_checked: bool = False
+    _hit_sets: dict[str, HitSet] | None = None
+    _hit_sets_checked: bool = False
 
     def get_intro_player(self) -> IntroCinematicPlayer | None:
         """Lazily build and cache the ``program`` starting cinematic player (§7.4)."""
@@ -184,6 +204,69 @@ class GameAssetBundle:
         if not self.disk_set.has_file("music.cmp"):
             return None
         return decode_cmp_module("music.cmp", self.disk_set.read_file("music.cmp"))
+
+    def load_victory_music(self) -> DecodedModule | None:
+        """Return unpacked ProTracker ``vmusic.cmp`` module if present on disk."""
+        if not self.disk_set.has_file("vmusic.cmp"):
+            return None
+        return decode_cmp_module("vmusic.cmp", self.disk_set.read_file("vmusic.cmp"))
+
+    def get_program_tables(self) -> ProgramRuntimeTables | None:
+        """Load and cache runtime tables from ``program`` if present (ARCHITECTURE.md §7)."""
+        if not self._program_tables_checked:
+            self._program_tables_checked = True
+            if self.disk_set.has_file("program"):
+                try:
+                    exe = parse_hunk_executable("program", self.disk_set.read_file("program"))
+                    self._program_tables = load_program_tables(exe)
+                except HunkFormatError:
+                    self._program_tables = None
+        return self._program_tables
+
+    def get_mog_tables(self) -> MogRuntimeTables | None:
+        """Load and cache runtime tables from ``mog`` if present (ARCHITECTURE.md §5, §6.2)."""
+        if not self._mog_tables_checked:
+            self._mog_tables_checked = True
+            if self.disk_set.has_file("mog"):
+                try:
+                    exe = parse_hunk_executable("mog", self.disk_set.read_file("mog"))
+                    self._mog_tables = load_mog_tables(exe)
+                except HunkFormatError:
+                    self._mog_tables = None
+        return self._mog_tables
+
+    def get_hit_sets(self) -> dict[str, HitSet] | None:
+        """Load and cache weapon hitboxes from ``collide.hit`` if present (ARCHITECTURE.md §4.2)."""
+        if not self._hit_sets_checked:
+            self._hit_sets_checked = True
+            if self.disk_set.has_file("collide.hit"):
+                self._hit_sets = parse_collide_hit(self.disk_set.read_file("collide.hit"))
+        return self._hit_sets
+
+    def get_blood_cel(self) -> DecodedCel | None:
+        """Load and cache the ``blo.cel`` blood/gore sprite sheet if present."""
+        return self.get_cel("blo.cel")
+
+    def build_overworld_graph(self) -> OverworldGraph | None:
+        """Build an ``OverworldGraph`` from ``mog`` sites and lair nodes (ARCHITECTURE.md §5)."""
+        mog_tables = self.get_mog_tables()
+        if mog_tables is None or len(mog_tables.lair_region.map_sites) < 4:
+            return None
+        sites = tuple(
+            MapSiteInput(site_id=site.site_id, x=site.x, y=site.y)
+            for site in mog_tables.lair_region.map_sites
+        )
+        nodes = mog_tables.lair_region.creature_nodes
+        lairs = tuple(
+            (idx, nodes[idx * 6].map_x, nodes[idx * 6].map_y)
+            for idx in range(4)
+            if idx * 6 < len(nodes)
+        )
+        bands = tuple(
+            EncounterBand(limit=band.limit, kind=band.kind)
+            for band in mog_tables.lair_region.encounter_bands
+        )
+        return build_overworld_graph_from_sites(sites, lairs=lairs, encounter_bands=bands)
 
 
 def select_knight_frame(cel: DecodedCel, action: KnightAction, tick_count: int) -> int:
