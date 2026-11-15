@@ -153,11 +153,7 @@ def test_draw_opcode_slot_decoding_flags_and_mirroring() -> None:
 
 def test_loop1_and_loop2_markers() -> None:
     # Loop1 repeats 3 times at the $FF $00 marker, then falls through to $FF $FF.
-    loop1_script = (
-        bytes([OP_LOOP_BEGIN, 3])
-        + _draw(0, 1, 0, 0, 2)
-        + bytes([OP_END_FRAME, 0xFF])
-    )
+    loop1_script = bytes([OP_LOOP_BEGIN, 3]) + _draw(0, 1, 0, 0, 2) + bytes([OP_END_FRAME, 0xFF])
     job = CombatJob()
     frames = [step_frame(job, loop1_script) for _ in range(3)]
     assert sum(1 for evs in frames for e in evs if isinstance(e, DrawFrameEvent)) == 3
@@ -222,7 +218,8 @@ def test_jump_immediate_and_deferred_call_and_conditional_branches() -> None:
 
 def test_motion_block_and_move_with_arena_clamping() -> None:
     bounds = ArenaBounds(min_x=10, max_x=120, min_y=30, max_y=150, min_z=0, max_z=50)
-    # Motion block: param=0, count=2, flags=0x11 (rise + move facing), vy=6, vy_lim=2, vx=8, vx_lim=2.
+    # Motion block: param=0, count=2, flags=0x11 (rise + move facing),
+    # vy=6, vy_lim=2, vx=8, vx_lim=2.
     script = (
         bytes([OP_MOTION_BLOCK, 0, 2, 0x11, 6, 2, 8, 2, OP_END_FRAME, 0x00])
         + struct.pack(">BBHHH", OP_MOVE, 0x01, 10, 0, 20)
@@ -243,7 +240,8 @@ def test_motion_block_and_move_with_arena_clamping() -> None:
     assert any(isinstance(e, MoveEvent) and (e.x, e.z) == (72, 16) for e in ev0)
     assert isinstance(ev0[-1], FrameCompleteEvent) and ev0[-1].next_pc == 8
 
-    # Frame 1: $FF $00 triggers motion step 2 (halved speeds: vx=4, vy=3 -> x=68, z=19), still at pc=8.
+    # Frame 1: $FF $00 triggers motion step 2
+    # (halved speeds: vx=4, vy=3 -> x=68, z=19), still at pc=8.
     ev1 = step_frame(job, script, bounds=bounds)
     moves1 = [e for e in ev1 if isinstance(e, MoveEvent)]
     assert len(moves1) == 1
@@ -294,7 +292,8 @@ def test_sound_poke_if_field_ifdead_spawn_facing_and_reset() -> None:
 
     assert events[0] == SoundEvent(job_id=0, sound_id=14)
     assert events[1] == CombatHookEvent(job_id=0, opcode=OP_POKE_OWNER, arg=104)
-    assert isinstance(events[2], BranchEvent) and events[2].opcode == OP_IF_NONZERO and events[2].taken
+    assert isinstance(events[2], BranchEvent)
+    assert events[2].opcode == OP_IF_NONZERO and events[2].taken
     assert events[3] == CombatHookEvent(job_id=0, opcode=OP_ENGINE_CALL, arg=5)
     assert events[4] == SpawnEvent(
         job_id=0,

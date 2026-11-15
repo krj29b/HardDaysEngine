@@ -441,6 +441,47 @@ def parse_mog_synth_sequences(mog_exec: DecodedHunkExecutable) -> SynthSequenceT
     )
 
 
+def _step_s1_table_write(
+    data: bytes,
+    pos: int,
+    op: int,
+    r4: set[int],
+    table: dict[int, int],
+    seq: int,
+) -> tuple[int, int]:
+    if op == 0x217C and (pos + 2) in r4 and pos + 8 <= len(data):
+        val, disp = struct.unpack_from(">Ih", data, pos + 2)
+        table[disp] = val
+        return pos + 8, seq
+    if op == 0x20FC and pos + 6 <= len(data):
+        if (pos + 2) in r4:
+            (table[seq],) = struct.unpack_from(">I", data, pos + 2)
+        return pos + 6, seq + 4
+    if op == 0x4298:
+        return pos + 2, seq + 4
+    return pos + 2, seq
+
+
+def _step_s1_pointer_op(
+    data: bytes,
+    pos: int,
+    r1: set[int],
+    r4: set[int],
+    tables: dict[int, dict[int, int]],
+    cur_a0: int | None,
+    seq: int,
+) -> tuple[int, int | None, int]:
+    (op,) = struct.unpack_from(">H", data, pos)
+    if op == 0x41F9 and (pos + 2) in r1 and pos + 6 <= len(data):
+        (next_a0,) = struct.unpack_from(">I", data, pos + 2)
+        tables.setdefault(next_a0, {})
+        return pos + 6, next_a0, 0
+    if cur_a0 is None:
+        return pos + 2, None, seq
+    next_pos, next_seq = _step_s1_table_write(data, pos, op, r4, tables[cur_a0], seq)
+    return next_pos, cur_a0, next_seq
+
+
 def _scan_s1_pointer_tables(s0: HunkSection) -> dict[int, dict[int, int]]:
     """Scan `mog` `S_0` `LEA S_1+base, A0` initializers for `S_4` script-pointer tables."""
     data = s0.data
@@ -451,27 +492,33 @@ def _scan_s1_pointer_tables(s0: HunkSection) -> dict[int, dict[int, int]]:
     seq = 0
     pos = 0
     while pos + 2 <= len(data):
-        (op,) = struct.unpack_from(">H", data, pos)
-        if op == 0x41F9 and (pos + 2) in r1 and pos + 6 <= len(data):
-            (cur_a0,) = struct.unpack_from(">I", data, pos + 2)
-            tables.setdefault(cur_a0, {})
-            seq = 0
-            pos += 6
-        elif cur_a0 is not None and op == 0x217C and (pos + 2) in r4 and pos + 8 <= len(data):
-            val, disp = struct.unpack_from(">Ih", data, pos + 2)
-            tables[cur_a0][disp] = val
-            pos += 8
-        elif cur_a0 is not None and op == 0x20FC and pos + 6 <= len(data):
-            if (pos + 2) in r4:
-                (tables[cur_a0][seq],) = struct.unpack_from(">I", data, pos + 2)
-            seq += 4
-            pos += 6
-        elif cur_a0 is not None and op == 0x4298:
-            seq += 4
-            pos += 2
-        else:
-            pos += 2
+        pos, cur_a0, seq = _step_s1_pointer_op(data, pos, r1, r4, tables, cur_a0, seq)
     return tables
+
+
+def _step_actor_init_op(
+    data: bytes,
+    pos: int,
+    r1: set[int],
+    r4: set[int],
+    cur: dict[int | str, int],
+    blocks: list[dict[int | str, int]],
+) -> tuple[int, dict[int | str, int]]:
+    (op,) = struct.unpack_from(">H", data, pos)
+    if op == 0x4E75:
+        if 22 in cur:
+            blocks.append(cur)
+        return pos + 2, {}
+    if op == 0x237C and pos + 8 <= len(data) and ((pos + 2) in r4 or (pos + 2) in r1):
+        val, disp = struct.unpack_from(">Ih", data, pos + 2)
+        cur[disp] = val
+        return pos + 8, cur
+    if op == 0x137C and pos + 6 <= len(data):
+        val, disp = struct.unpack_from(">Hh", data, pos + 2)
+        if disp == 77:
+            cur["type"] = val
+        return pos + 6, cur
+    return pos + 2, cur
 
 
 def _scan_actor_init_blocks(s0: HunkSection) -> list[dict[int | str, int]]:
@@ -483,23 +530,7 @@ def _scan_actor_init_blocks(s0: HunkSection) -> list[dict[int | str, int]]:
     cur: dict[int | str, int] = {}
     pos = 0
     while pos + 2 <= len(data):
-        (op,) = struct.unpack_from(">H", data, pos)
-        if op == 0x4E75:
-            if 22 in cur:
-                blocks.append(cur)
-            cur = {}
-            pos += 2
-        elif op == 0x237C and pos + 8 <= len(data) and ((pos + 2) in r4 or (pos + 2) in r1):
-            val, disp = struct.unpack_from(">Ih", data, pos + 2)
-            cur[disp] = val
-            pos += 8
-        elif op == 0x137C and pos + 6 <= len(data):
-            val, disp = struct.unpack_from(">Hh", data, pos + 2)
-            if disp == 77:
-                cur["type"] = val
-            pos += 6
-        else:
-            pos += 2
+        pos, cur = _step_actor_init_op(data, pos, r1, r4, cur, blocks)
     return blocks
 
 

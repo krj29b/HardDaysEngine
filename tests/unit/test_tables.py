@@ -58,13 +58,13 @@ from pymoonstone.assets.tables import (
     load_mog_tables,
     load_program_tables,
     parse_combat_action_tables,
-    parse_knight_script_tables,
-    parse_monster_script_tables,
     parse_creature_nodes,
     parse_encounter_bands,
     parse_knight_names,
+    parse_knight_script_tables,
     parse_map_sites,
     parse_mog_synth_sequences,
+    parse_monster_script_tables,
 )
 
 
@@ -345,7 +345,13 @@ def test_parse_knight_and_monster_script_tables_synthetic() -> None:
     syn_exec = DecodedHunkExecutable(
         name="syn_mog",
         sections=(
-            HunkSection(0, HUNK_CODE, len(s0_buf), bytes(s0_buf), {1: tuple(r1_offs), 4: tuple(r4_offs)}),
+            HunkSection(
+                0,
+                HUNK_CODE,
+                len(s0_buf),
+                bytes(s0_buf),
+                {1: tuple(r1_offs), 4: tuple(r4_offs)},
+            ),
             HunkSection(1, HUNK_BSS, 512, b"\x00" * 512, {}),
             HunkSection(2, HUNK_DATA, 4, b"\x00" * 4, {}),
             HunkSection(3, HUNK_DATA, 4, b"\x00" * 4, {}),
