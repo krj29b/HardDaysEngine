@@ -514,27 +514,8 @@ on up to **10 concurrent job slots** (sorted each tick by ascending depth `uwZ` 
   - At startup and arena initialization, `mog` `S_0` populates 9-entry `BE32` pointer tables (`ulActionScripts`, `ulHurtScripts`, `ulDamageTable`, `ulDefenseTable`) and 24-entry walk-script tables (`ulWalkScripts`: 3 directional blocks of 4 phases + terminator/padding) in BSS (`S_1`) with `HUNK_RELOC32`-relocated `S_4` bytecode offsets, and assigns per-actor `ulIdleScript` / `ulScript26` pointers directly to `Knight` / creature records.
 
 ### 7.3 Core Simulation Struct Layouts (`mog`)
-- **`Knight` / Creature Actor Record (`132` bytes):**
-  - `+0`: `u32 ulActive` (`0` = free, `1` = active).
-  - `+4`: `u16 uwX`, `+6`: `u16 uwHeight`, `+8`: `u16 uwY` (depth $Z$).
-  - `+10`: `u8 ubFacing` (`1` = right, `3` = left; bit 1 is the left-facing bit).
-  - `+11`: `u8 ubInputPort` (`1` = Joy0, `0` = Joy1).
-  - `+14`: `u32 ulHitTarget` (record address hit by this actor this frame).
-  - `+18`: `u32 ulAttacker` (record address that hit this actor this frame).
-  - `+22..+54`: Script table pointers (`ulIdleScript`, `ulScript26`, `ulWalkScripts`,
-    `ulActionScripts`, `ulHurtScripts`, `ulDamageTable`, `ulDefenseTable`).
-  - `+58`: `u16 uwBoxMinX`, `+60`: `u16 uwBoxMaxX`, `+112`: `u16 uwBoxMinY`, `+114`: `u16 uwBoxMaxY`
-    (per-frame union screen bounding box).
-  - `+62`: `u16 uwInput` (joystick bitmask: bit 0 right, bit 1 left, bit 2 down, bit 3 up, bit 4 fire).
-  - `+76`: `u8 ubDaggers`, `+80`: `i16 swHp`, `+82`: `i16 swMaxHp`.
-  - `+118`: `u16 uwAction`, `+120`: `u16 uwDepthReach`, `+122`: `u16 uwHitX`, `+124`: `u16 uwHitY`,
-    `+130`: `u8 ubType`.
-- **`CombatJob` Slot (`50` bytes × `10` slots):**
-  - `+0`: `u8 ubActive`, `+1`: `u8 ubRunning`, `+2`: `u32 ulScript`, `+6`: `u16 uwX`,
-    `+8`: `u16 uwY` (altitude), `+10`: `u16 uwZ` (depth), `+12`: `u8 ubFlags` (facing),
-    `+13`: `u8 ubType`, `+24`: `u32 ulOwner`, `+28`: `u32 ulWork` (`36`-byte `CombatWork`),
-    `+40`: `u32 ulAttackList` (`60` bytes = 6 × 10-byte hit entries), `+44`: `u32 ulHurtList`
-    (`60` bytes = 6 × 10-byte hurt entries), `+48`: `u16 uwPaused`.
+Superseded by §9, which holds the verified actor, inventory, lair, map-node and job layouts.
+Some of the offsets this subsection used to list were wrong (§9.9).
 
 ### 7.4 Starting Cinematic & `program` Scene Engine (`S_2` / `intro.stile`)
 The `program` executable drives the starting cinematic (`introRun`) and ending cinematic (`endingRun`)
@@ -617,3 +598,242 @@ Executed every 20 ms (50 Hz VBL):
   ticks (used on water, lava, magic auras, and Moonstone glow).
 - **Lightning / Hit Flash (`display_fx`):** Temporarily overrides background/sky registers for `1..4`
   VBLs and restores from `auwCell`.
+
+---
+
+## 9. Game State Records (`T11.2`)
+
+Everything the rules read or write lives in a handful of fixed-layout records in `mog`'s BSS and
+heap. Offsets are bytes from the start of the record, big-endian, 2-byte alignment. `u8/u16/u32`
+are unsigned, `s16` signed. In `sim/` each record is a mutable dataclass with one named integer
+field per row below; the offsets matter because fight scripts poke owner fields by offset (§7.2,
+opcodes `$A8`, `$C8`, `$CC`) and several tables in `mog` are indexed by them.
+
+Source for this section: the record headers of the reference project, which cite the routine that
+proves each offset. Where it disagrees with the earlier §7.3 text of this document, this section
+wins (ADR-002); the differences are listed in §9.9.
+
+### 9.1 Pools
+
+| Pool | Count | Record | Notes |
+|---|---|---|---|
+| Persistent actors | 5 | Actor (132 B) | Slots 0..3 are the four knights, slot 4 is the dragon. All five take part in the daily upkeep. |
+| Inventories | 5 + 24 | Inventory (24 B) | One per persistent actor, one loot inventory per lair. |
+| Fight pool | 20 | Actor (132 B) | Creatures, thrown daggers and other fight objects. A slot is in use while its first long is non-zero. |
+| Jobs | 10 | Job (50 B) | One running script for one actor (§9.6). |
+| Lairs | 24 | Lair (20 B) | Overworld encounters (§9.5). |
+| Map nodes | 9 | MapNode (6 B) | Fixed places (§9.5). |
+
+### 9.2 Actor record (132 bytes)
+
+One layout serves knights, the dragon, creatures and fight objects.
+
+| Off | Type | Field | Meaning |
+|---|---|---|---|
+| +0 | u32 | `active` | Non-zero while the slot is in use. Cleared when its job is killed. |
+| +4 | u16 | `x` | Fight position, horizontal. |
+| +6 | u16 | `height` | Height above the ground (the job's altitude). Knights 0. |
+| +8 | u16 | `y` | Fight position, depth. |
+| +10 | u8 | `facing` | 1 right, 3 left. Bit 1 mirrors horizontal motion. |
+| +11 | u8 | `input_port` | 1 = port 0, 2 = port 1, 4 = no controller (AI). |
+| +12 | u8 | `anim_phase` | Walk-cycle phase 0..3. |
+| +13 | u8 | `anim_timer` | Countdown reloaded by the fighter step. |
+| +14 | u32 | `hit_target` | Actor this one hit this frame (set by the contact pass). |
+| +18 | u32 | `attacker` | Actor that hit this one this frame. |
+| +22 | u32 | `idle_script` | Script taken when nothing else is chosen. |
+| +26 | u32 | `after_hit_script` | Alternate script, used after a successful hit. |
+| +30 | u32 | `hurt_scripts` | Table of 9 scripts indexed by the **attacker's** action. |
+| +34 | u32 | `action_scripts` | Table of 9 scripts indexed by the actor's own action. |
+| +38 | u32 | `frame_list` | The 5-entry cel list handed to the job. |
+| +42 | u32 | `damage_table` | Base damage per own action, read when this actor hits. |
+| +46 | u32 | `walk_scripts` | Indexed by `anim_phase * 4 + direction block` (0 sideways, 32 up, 64 down). |
+| +50 | u32 | `defence_table` | Per attacker action: the own action that defends against it. |
+| +54 | u32 | `kind` | 0..3 the four knights, 4 computer-controlled knight, 5 dragon. |
+| +62 | u16 | `input` | Low byte bits: 0 right, 1 left, 2 down, 3 up, 4 fire. |
+| +64 | u16 | `action` | Current action as a table byte offset: 0, 4, 8, ... 32 (§9.7). |
+| +66 | u16 | `tile_x` | Map tile column (§11). |
+| +68 | u16 | `tile_y` | Map tile row. |
+| +70 | u8 | `strength` | Added to melee damage. Starts at 1. |
+| +71 | u8 | `constitution` | Feeds maximum hit points. Starts at 1. |
+| +72 | u8 | `endurance` | Feeds the move budget. Starts at 1. |
+| +73 | u8 | `lives` | Starts at 5. One is lost per lost fight. |
+| +74 | u16 | `gold` | Starts at 10. Compared as a signed word by the shops. |
+| +76 | u8 | `daggers` | Starts at 10. |
+| +77 | u8 | `type` | Behaviour type, a multiple of 4 that indexes the handler tables (§9.8). |
+| +78 | u16 | `progress` | Points earned by victories, spent on stats at the temple. |
+| +80 | s16 | `hp` | Current hit points. Starts at 20. `$FFFF` marks dead. |
+| +82 | u8 | `frog_days` | Curse countdown; the knight's turn is skipped while non-zero. |
+| +83 | u8 | `recency` | Wizard-visit recency, minus 10 per day down to 0. `$FF` is the value a fresh or computer knight carries and is never decayed. |
+| +84 | s16 | `hp_max` | Derived (§9.3). |
+| +86 | u8 | `derived_endurance` | Derived (§9.3). The move budget is this value shifted left by 4. |
+| +88 | u32 | `sword` | Item code `$16`..`$19` (§9.7). Starts at `$16`. |
+| +92 | u32 | `armour` | Item code `$1B`..`$1E`. Starts at `$1B`. |
+| +96 | u32 | `inventory` | Reference to this actor's Inventory. |
+| +100 | u32 | `engaged_with` | The actor this one is after (dragon's target, a computer knight's opponent). Cleared at turn change. |
+| +104 | u8 | `behaviour_flags` | Bit 7 is the block latch; other bits belong to the script handlers. |
+| +105 | u8 | `behaviour_flags2` | Bits 0 and 2 belong to the script handlers. |
+| +106 | u16 | `cooldown` | AI action cooldown. Knight steps use the high byte, creature steps the whole word. |
+| +108 | u32 | `name` | Reference to the NUL-terminated name. |
+| +116 | u16 | `reach_x` | AI: stops and attacks within this horizontal distance. |
+| +118 | u16 | `too_close_x` | AI: backs away when nearer than this. |
+| +120 | u16 | `depth_reach` | AI: depth tolerance for "same lane". |
+| +122 | u16 | `hit_x` | Contact point of the last hit. |
+| +124 | u16 | `hit_y` | Contact point of the last hit. |
+| +126 | u16 | `map_x` | Overworld position, one pixel per step. |
+| +128 | u16 | `map_y` | Overworld position. |
+| +130 | u8 | `life_loss` | Non-zero makes the next day turnover take a life. |
+
+Bytes +58..+61, +87, +112..+115 and +131 are never used by the original.
+
+### 9.3 Derived values
+
+All arithmetic wraps at the stated width.
+
+1. **Maximum hit points** (16-bit): `constitution * 10 + 20 * count(slot $06) + armour bonus + 10`,
+   with armour bonus 0 / 10 / 20 / 30 for codes `$1B`..`$1E`. `hp` is then clamped down to it
+   (signed compare). The same routine forces `sword` to `$19` when inventory slot `$04` is non-zero.
+2. **Derived endurance** (8-bit): `endurance * 2 + armour bonus + 4`, with armour bonus 2 for
+   `$1C` and `$1E`, otherwise 0.
+3. **Overnight** (per actor, all five): unless `recency` is `$FF`, `recency` drops by 10 (floor 0)
+   and `frog_days` by 1; then, if `hp < hp_max`, `hp += ((hp_max - hp) >> 2) | 1`, clamped to
+   `hp_max`.
+4. **Defeat**: a fighter whose `hp <= 0` after a fight gets `hp = hp_max` and loses one life.
+
+### 9.4 Inventory (24 bytes)
+
+Twelve 2-byte slots. The count is the byte at the even offset; the odd byte is unused. Slots
+`$14` and `$16` are bit masks, every other slot is a count that wraps at 256.
+
+| Slot | Role | Evidence |
+|---|---|---|
+| `$00` | Rest item: clears `life_loss`, restores `hp` to `hp_max`; at full health it adds a life instead (cap 5) | item-use handler |
+| `$02` | Marks the knight's map position for a later return | item-use handler |
+| `$04` | Sword of sharpness: forces `sword = $19` | stat recalculation |
+| `$06` | Protection item: +20 `hp_max` per piece | stat recalculation |
+| `$08` | Each piece shifts incoming damage right by one bit | damage routine |
+| `$0A` | Gamble on the turn: doubles the move budget on a roll above 10 (roll range 0..100), else halves it and sets the bad-luck flag | item-use handler |
+| `$0C` | Teleport gamble (good on a roll above 15) | item-use handler |
+| `$0E` | Opens the exchange sheet 8 | item-use handler |
+| `$10` | Opens the hand-over sheet 11 | item-use handler |
+| `$12` | Scroll that lets the second knight avoid a duel; a luck gamble (good on a roll above 10) | duel prologue |
+| `$14` | Keys, bits 0..3; `$0F` is all four | valley test |
+| `$16` | Moonstones, bits 0..3, matched against the moon frame | damage and Stonehenge tests |
+
+The display names of slots `$00`, `$02` and `$08`..`$10` are not established here; T11.5 takes
+them from the item strings in `mog`.
+
+**Transfer order.** After a fight the winner takes from the loser's inventory in this slot order:
+`$16, $14, $04, $06, $0E, $12, $08, $0C, $10, $00, $02, $0A`. If the loser still has lives, only
+the first slot he owns moves (one piece, or the whole mask for `$16` / `$14`); if nothing moved,
+the loser's gold is halved and the winner gets the other half. If the loser has no lives left,
+everything moves. A winner of type `$14` takes the gold first.
+
+### 9.5 Lair (20 bytes) and MapNode (6 bytes)
+
+**Lair** (24 records, each with its own loot inventory):
+
+| Off | Type | Field | Meaning |
+|---|---|---|---|
+| +0 | u32 | `loot` | Reference to the loot Inventory. |
+| +4 | u16 | `handler_offset` | Byte offset into the arena set-up table: which creature fight this lair starts (§10). |
+| +6 | u16 | `creatures_left` | Written back after a fight: creatures still to come. |
+| +8 | u16 | `occupied` | Cleared at set-up; non-zero keeps the lair occupied. |
+| +10 | s16 | `map_x` | Drawn position. Negative hides the lair. |
+| +12 | s16 | `map_y` | Drawn position. |
+| +14 | u16 | `param14` | Per-lair arena parameter, copied into the fight set-up. |
+| +16 | u32 | `param16` | Per-lair arena parameter, copied into the fight set-up. |
+
+Four lairs receive one key each (masks 8, 4, 2, 1) at campaign start.
+
+**MapNode**: `s16 id, u16 x, u16 y`; the table of nine ends with a negative id.
+
+| Id | Place |
+|---|---|
+| `$15`..`$18` | Home village of knight kind 0..3; each counts only for its own knight |
+| `$19` | Highwood (town A) |
+| `$1A` | Waterdeep (town B) |
+| `$1B` | Stonehenge |
+| `$1C` | Valley of the Gods |
+| `$1E` | The wizard's tower |
+
+The arrival list (§11) also uses kind 1 for a living knight, `$21` for a knight out of lives and
+2 for a lair.
+
+### 9.6 Job (50 bytes) and the active-fight block (22 bytes)
+
+**Job**: one script running for one actor.
+
+| Off | Type | Field | Meaning |
+|---|---|---|---|
+| +0 | u8 | `active` | Slot taken. |
+| +1 | u8 | `running` | Script running. |
+| +2 | u32 | `script` | Current script position. |
+| +6 | u16 | `x` | Copied from the owner's `x` at spawn. |
+| +8 | u16 | `height` | Copied from the owner's `height`. |
+| +10 | u16 | `y` | Copied from the owner's `y`. |
+| +12 | 10 B | `draw_state` | Screen position and size of the last draw. |
+| +22 | u8 | `facing` | Copied from the owner's `facing`. |
+| +24 | u32 | `owner` | The actor. |
+| +28 | u32 | `frame_list` | The owner's cel list. |
+| +32 | u8 | `type` | The owner's `type`. |
+| +36 | u32 | `work` | 36-byte scratch block (loops, motion, armed jumps, second script). |
+| +40 | u32 | `attack_list` | 80-byte list of this frame's attack draws. |
+| +44 | u32 | `hurt_list` | 80-byte list of this frame's hurt draws. |
+| +48 | u16 | `paused` | Toggled by the pause routine. |
+
+**Active-fight block**:
+
+| Off | Type | Field | Meaning |
+|---|---|---|---|
+| +0 | u32 | `current` | The acting knight / first fighter. |
+| +4 | u32 | `opponent` | The second fighter; absent in a creature fight. |
+| +8 | u8 | `fight_active` | 1 while the fight loop runs. |
+| +14 | u16 | `player_count` | Number of human players. |
+| +16 | u8 | `end_timer` | Post-fight delay in fight frames, decremented as a byte. |
+| +18 | u16 | `moon_frame` | 45..49, the picture frame of the moon. |
+| +20 | u16 | `moon_subcount` | 0..3; one step per round, wrapping advances the day. |
+
+The moon frame for lunar index 0..7 is read from an 8-byte table in `mog` `S_4`; the sequence it
+holds is 45, 47, 46, 48, 49, 48, 46, 47. Frame 45 pairs with moonstone bit 1, frame 46 with bits 0
+and 3, frame 49 with bit 2.
+
+### 9.7 Actions and equipment codes
+
+`action` values (table byte offsets): `$00` idle; `$04`, `$08`, `$14`, `$18` strikes; `$0C` dagger
+throw; `$10` defend; `$1C` block; `$20` heavy strike (damage doubled).
+
+Swords: `$16` long (+0 damage), `$17` broad (+2), `$18` claymore (+3), `$19` sharpness (+5).
+Armour: `$1B` padded, `$1C` mail, `$1D` plate, `$1E` battle.
+
+### 9.8 Behaviour types (`type`, +77)
+
+| Value | Actor |
+|---|---|
+| `$00` | Flyer ("Be") |
+| `$04` | Mudmen |
+| `$08` | Guardian demon |
+| `$0C` | Knight in a fight |
+| `$10` | Knight on the map |
+| `$14` | Dragon / black-knight fight type |
+| `$18`, `$1C` | Trogg with axe (two variants) |
+| `$20` | Trogg with spear |
+| `$24` | Ratmen |
+| `$28` | Dragon in flight on the map |
+| `$2C` | Object of the dragon arena |
+| `$30` | Balok |
+| `$34` | Thrown dagger |
+| `$40` | Troll |
+
+### 9.9 Corrections to earlier text
+
+- §7.3 gave `hp_max` at +82, `action` at +118, `type` at +130 and a bounding box at +58 / +60 /
+  +112 / +114. The verified layout has `hp_max` at +84, `action` at +64, `type` at +77, and never
+  touches +58..+61 or +112..+115. The union bounding box of §4.2 is therefore not stored in the
+  actor record; where it lives is settled in §10.
+- §7.3 gave the job's facing at +12, its type at +13 and its work block at +28. The verified
+  layout has them at +22, +32 and +36, with the frame list at +28.
+- The creature-type keys that `assets/tables.py` reports (24, 28, 32, 36, ...) are the decimal
+  values of §9.8. The archetype mapping in `app/combat_bridge.py` assigns several of them to the
+  wrong creature: it treats 24 as the spear Trogg (it is an axe Trogg), 32 as the Ratmen (it is
+  the spear Trogg), 36 as the Troll (it is the Ratmen), 0 as Balok (it is the flyer), 44 as the
+  flyer (it is a dragon-arena object) and 64 as the Guardian (it is the Troll). T11.7 replaces it.
