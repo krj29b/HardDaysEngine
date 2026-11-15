@@ -26,6 +26,7 @@ from pymoonstone.app.input import (
 from pymoonstone.app.loop import Accumulator50Hz
 from pymoonstone.app.scene_assets import (
     GameAssetBundle,
+    build_intro_cinematic_frame,
     make_sprite,
     select_knight_frame,
     select_monster_frame,
@@ -732,7 +733,15 @@ class GameSession:
     def render_to_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         """Render the active game scene and HUD onto ``scene_renderer``."""
         if self.scene == GameScene.TITLE:
-            self._compose_picture_or_solid(scene_renderer, "bg1a.PIV", "mindscape")
+            if self.asset_bundle is not None:
+                bg, pal, sprites = build_intro_cinematic_frame(self.asset_bundle, self.tick_count)
+                if bg is not None:
+                    scene_renderer.set_palette(pal)
+                    scene_renderer.compose_scene(background=bg, sprites=sprites, border_index=0)
+                else:
+                    self._compose_picture_or_solid(scene_renderer, "bg1a.PIV", "mindscape")
+            else:
+                self._compose_picture_or_solid(scene_renderer, "bg1a.PIV", "mindscape")
             font.draw_text(scene_renderer.canvas, "PRESS ENTER", 116, 236, color_index=31)
         elif self.scene == GameScene.KNIGHT_SELECT:
             self._compose_picture_or_solid(scene_renderer, "ch.piv")

@@ -214,3 +214,103 @@ def make_sprite(
         order=order,
         mirrored=flipped,
     )
+
+
+def _fade_palette(
+    palette: tuple[RGBColor, ...],
+    local_tick: int,
+    phase_len: int,
+    fade_ticks: int = 16,
+) -> tuple[RGBColor, ...]:
+    if local_tick < fade_ticks:
+        level = local_tick
+    elif local_tick >= phase_len - fade_ticks:
+        level = max(0, phase_len - 1 - local_tick)
+    else:
+        return palette
+    return tuple(
+        ((r * level) // fade_ticks, (g * level) // fade_ticks, (b * level) // fade_ticks)
+        for r, g, b in palette
+    )
+
+
+def _append_cel_sprite(
+    sprites: list[SceneSprite],
+    bundle: GameAssetBundle,
+    cel_name: str,
+    frame_idx: int,
+    *,
+    x: int,
+    y: int,
+    order: int,
+) -> None:
+    cel = bundle.get_cel(cel_name)
+    if cel is None:
+        return
+    sp = make_sprite(cel, frame_idx, x=x, y=y, layer=2, order=order)
+    if sp is not None:
+        sprites.append(sp)
+
+
+def build_intro_cinematic_frame(
+    bundle: GameAssetBundle,
+    tick_count: int,
+) -> tuple[npt.NDArray[np.uint8] | None, tuple[RGBColor, ...], list[SceneSprite]]:
+    """Build background, faded palette, and animated sprites for the 50 Hz start cinematic."""
+    # 24-second (1200-tick) looping sequence across Mindscape, bg1a, bg1b, and bg1c.
+    cycle_tick = tick_count % 1200
+    sprites: list[SceneSprite] = []
+    anim_step = tick_count // 5
+
+    if cycle_tick < 160:
+        pic = bundle.get_picture("mindscape", "bg1a.PIV")
+        if pic is None:
+            return None, default_combat_palette(), sprites
+        return (
+            pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
+            _fade_palette(pic.palette, cycle_tick, 160),
+            sprites,
+        )
+
+    if cycle_tick < 520:
+        local = cycle_tick - 160
+        pic = bundle.get_picture("bg1a.PIV")
+        if pic is None:
+            return None, default_combat_palette(), sprites
+        _append_cel_sprite(sprites, bundle, "au1.cel", anim_step, x=160, y=148, order=0)
+        _append_cel_sprite(sprites, bundle, "ha1.cel", anim_step, x=104, y=170, order=1)
+        _append_cel_sprite(sprites, bundle, "dw1.cel", anim_step, x=216, y=172, order=2)
+        _append_cel_sprite(sprites, bundle, "li1.cel", anim_step, x=160, y=116, order=3)
+        return (
+            pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
+            _fade_palette(pic.palette, local, 360),
+            sprites,
+        )
+
+    if cycle_tick < 880:
+        local = cycle_tick - 520
+        pic = bundle.get_picture("bg1b.PIV", "bg1a.PIV")
+        if pic is None:
+            return None, default_combat_palette(), sprites
+        dragon_x = 40 + ((local * 240) // 360)
+        _append_cel_sprite(sprites, bundle, "dg1.cel", anim_step, x=dragon_x, y=96, order=0)
+        _append_cel_sprite(sprites, bundle, "Klift1.CEL", anim_step, x=156, y=172, order=1)
+        _append_cel_sprite(sprites, bundle, "da1.cel", anim_step, x=168, y=128, order=2)
+        _append_cel_sprite(sprites, bundle, "li1.cel", anim_step, x=160, y=104, order=3)
+        return (
+            pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
+            _fade_palette(pic.palette, local, 360),
+            sprites,
+        )
+
+    local = cycle_tick - 880
+    pic = bundle.get_picture("bg1c.PIV", "bg1a.PIV")
+    if pic is None:
+        return None, default_combat_palette(), sprites
+    _append_cel_sprite(sprites, bundle, "au1.cel", anim_step, x=160, y=136, order=0)
+    _append_cel_sprite(sprites, bundle, "li1.cel", anim_step, x=160, y=108, order=1)
+    return (
+        pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
+        _fade_palette(pic.palette, local, 320),
+        sprites,
+    )
