@@ -19,6 +19,8 @@ from pymoonstone.app.combat_bridge import (
     build_mog_encounter,
     clamp_entity_to_arena,
     compose_knight_pieces,
+    compose_monster_pieces,
+    pieces_to_scene_sprites,
     resolve_composed_melee_attack,
     resolve_melee_attack_points,
 )
@@ -47,7 +49,12 @@ from pymoonstone.app.scene_assets import (
     select_monster_frame,
 )
 from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.palette import RGBColor, assemble_combat_palette, default_combat_palette
+from pymoonstone.assets.palette import (
+    RGBColor,
+    assemble_combat_palette,
+    cell_word_to_rgb,
+    default_combat_palette,
+)
 from pymoonstone.render.renderer import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
@@ -77,6 +84,7 @@ from pymoonstone.sim.locations import (
 )
 from pymoonstone.sim.monster_ai import (
     LairEncounter,
+    MonsterActor,
     MonsterArchetype,
     MonsterState,
     ProjectileState,
@@ -108,7 +116,7 @@ if TYPE_CHECKING:
     import numpy.typing as npt
 
     from pymoonstone.assets.arena import DecodedArena
-    from pymoonstone.assets.cel import CelFrame
+    from pymoonstone.assets.cel import CelFrame, DecodedCel
     from pymoonstone.assets.hit import HitFrame, HitSet
 
 _ATTACK_ACTIONS: frozenset[KnightAction] = frozenset(
@@ -147,6 +155,38 @@ _REGION_WANDERING_ARENAS: dict[int, str] = {
 _REGION_LAIR_ARENAS: tuple[str, ...] = ("fol1.t", "gll1.t", "swl1.t", "wal1.t")
 _OW_REPEAT_INITIAL_TICKS = 12
 _OW_REPEAT_STEP_TICKS = 6
+
+# Knight class tunic ramps for combat palette indices 6..8 (ARCHITECTURE.md §8.1).
+_KNIGHT_COMBAT_TUNIC_WORDS: dict[KnightId, tuple[int, int, int]] = {
+    KnightId.RED: (0x0600, 0x0A11, 0x0E33),
+    KnightId.BLUE: (0x0016, 0x0139, 0x036E),
+    KnightId.GREEN: (0x0040, 0x0182, 0x02C5),
+    KnightId.YELLOW: (0x0850, 0x0B90, 0x0FD0),
+}
+
+# Creature scene colors for combat palette indices 9..14 (index 15 is blood red 0x0A00).
+_CREATURE_SCENE_COLOR_WORDS: dict[MonsterArchetype, tuple[int, int, int, int, int, int]] = {
+    MonsterArchetype.TROGG_SPEAR: (0x0231, 0x0452, 0x0673, 0x0895, 0x0AB7, 0x0CD9),
+    MonsterArchetype.TROGG_AXE: (0x0231, 0x0452, 0x0673, 0x0895, 0x0AB7, 0x0CD9),
+    MonsterArchetype.RATMAN: (0x0322, 0x0543, 0x0765, 0x0987, 0x0BA9, 0x0DCB),
+    MonsterArchetype.MUDMAN: (0x0221, 0x0432, 0x0653, 0x0874, 0x0986, 0x0BA8),
+    MonsterArchetype.BEASTMAN: (0x0321, 0x0542, 0x0753, 0x0974, 0x0B96, 0x0DB8),
+    MonsterArchetype.TROLL: (0x0232, 0x0353, 0x0575, 0x0797, 0x09B9, 0x0BDB),
+    MonsterArchetype.BALOK: (0x0311, 0x0522, 0x0743, 0x0965, 0x0B87, 0x0DA9),
+    MonsterArchetype.DEMON: (0x0301, 0x0512, 0x0723, 0x0944, 0x0B66, 0x0D88),
+    MonsterArchetype.GUARDIAN: (0x0334, 0x0556, 0x0778, 0x099A, 0x0BBC, 0x0DDE),
+}
+
+# Dragon scene uses fiery tones across indices 9..15 instead of blood red at 15.
+_DRAGON_SCENE_COLOR_WORDS: tuple[int, int, int, int, int, int, int] = (
+    0x0410,
+    0x0720,
+    0x0A40,
+    0x0D60,
+    0x0F90,
+    0x0FC4,
+    0x0FE8,
+)
 
 
 class GameScene(IntEnum):
@@ -357,16 +397,71 @@ class GameSession:
             if mod is not None:
                 self.audio.play_music(mod)
 
+    def _picture_target_palette(self, *names: str) -> tuple[RGBColor, ...]:
+        get_picture = getattr(self.asset_bundle, "get_picture", None)
+        if callable(get_picture) and names:
+            pic = get_picture(*names)
+            if pic is not None:
+                return tuple(pic.palette)
+        return default_combat_palette()
+
+    def _overworld_target_palette(self) -> tuple[RGBColor, ...]:
+        get_test_picture = getattr(self.asset_bundle, "get_test_picture", None)
+        if callable(get_test_picture):
+            map_pic = get_test_picture(8)
+            if map_pic is not None:
+                return tuple(map_pic.palette)
+        return self._picture_target_palette("bg2.PIV")
+
+    def _combat_palette(
+        self,
+        base_palette: Sequence[RGBColor],
+        active: ActiveEncounter | None,
+    ) -> tuple[RGBColor, ...]:
+        out = list(base_palette[:32])
+        while len(out) < 32:
+            out.append((0, 0, 0))
+        kid = active.knight_ids[0] if active is not None and active.knight_ids else self.players[0]
+        tunic = _KNIGHT_COMBAT_TUNIC_WORDS.get(kid, _KNIGHT_COMBAT_TUNIC_WORDS[KnightId.RED])
+        for offset, word in enumerate(tunic):
+            out[6 + offset] = cell_word_to_rgb(word)
+        archetype = self._active_monster_archetype(active)
+        if archetype == MonsterArchetype.DRAGON:
+            for offset, word in enumerate(_DRAGON_SCENE_COLOR_WORDS):
+                out[9 + offset] = cell_word_to_rgb(word)
+        else:
+            if archetype in _CREATURE_SCENE_COLOR_WORDS:
+                for offset, word in enumerate(_CREATURE_SCENE_COLOR_WORDS[archetype]):
+                    out[9 + offset] = cell_word_to_rgb(word)
+            out[15] = cell_word_to_rgb(0x0A00)
+        return tuple(out)
+
+    @staticmethod
+    def _active_monster_archetype(active: ActiveEncounter | None) -> MonsterArchetype | None:
+        if active is None or not active.encounter.monsters:
+            return None
+        for monster in active.encounter.monsters:
+            if monster.is_alive:
+                return monster.params.archetype
+        return active.encounter.monsters[0].params.archetype
+
+    def _begin_fade_in(self, target_palette: Sequence[RGBColor] | None = None) -> None:
+        if target_palette is None:
+            self._pending_fade_in = True
+            return
+        self._pending_fade_in = False
+        self.palette_fx.fade_in(_palette_to_rgb12(target_palette), divisor=1, from_black=True)
+
     def _enter_victory(self, status: str) -> None:
         self.scene = GameScene.VICTORY
         self.last_status = status
-        self._pending_fade_in = True
+        self._begin_fade_in(self._picture_target_palette("WI1.P", "WI2.P"))
         self._play_victory_music()
 
     def _enter_game_over(self) -> None:
         self.scene = GameScene.GAME_OVER
         self.last_status = "GAME OVER"
-        self._pending_fade_in = True
+        self._begin_fade_in(self._picture_target_palette("message.piv"))
 
     def _step_title(self, primary: PlayerInput) -> None:
         finished = False
@@ -395,6 +490,7 @@ class GameSession:
             self._reset_campaign(self.selected_player_count, self.picked_knights)
             self.scene = GameScene.OVERWORLD
             self.last_status = f"DAY {self.overworld.day}"
+            self._begin_fade_in(self._overworld_target_palette())
             return
         for cand in range(4):
             if not (self.knight_taken_mask & (1 << cand)):
@@ -433,6 +529,7 @@ class GameSession:
         self._reset_campaign(self.selected_player_count)
         self.scene = GameScene.OVERWORLD
         self.last_status = f"DAY {self.overworld.day}"
+        self._begin_fade_in(self._overworld_target_palette())
 
     def _adjust_main_menu(self, dx_edge: int, dy_edge: int) -> None:
         if dy_edge != 0:
@@ -727,7 +824,8 @@ class GameSession:
             arena=arena,
         )
         self.scene = GameScene.COMBAT
-        self._pending_fade_in = True
+        combat_base = arena_loaded[2] if arena_loaded is not None else default_combat_palette()
+        self._begin_fade_in(self._combat_palette(combat_base, self.active_encounter))
         self.last_status = f"COMBAT: {trigger.kind.name}"
 
     def _spawn_knight_dagger(self, kstate: KnightState, active: ActiveEncounter) -> None:
@@ -837,6 +935,11 @@ class GameSession:
         preferred = f"kn{(int(knight_id) % 4) + 1}"
         return hit_sets.get(preferred) or hit_sets.get("kn4") or hit_sets.get("kn1")
 
+    def _knight_cel_slots(self, fallback_cel: DecodedCel) -> tuple[DecodedCel, ...]:
+        if self.asset_bundle is None:
+            return ()
+        return tuple(self.asset_bundle.get_cel(f"KN{i}.ob") or fallback_cel for i in range(1, 5))
+
     def _knight_pieces(self, knight: KnightState) -> tuple[CombatSpritePiece, ...]:
         if self.asset_bundle is None:
             return ()
@@ -852,6 +955,8 @@ class GameSession:
             mog_s4=self.asset_bundle.get_mog_s4_bytes(),
             combat_actions=mog_tables.combat_actions if mog_tables is not None else None,
             hit_set=self._knight_hit_set(knight.knight_id),
+            knight_scripts=mog_tables.knight_scripts if mog_tables is not None else None,
+            cel_slots=self._knight_cel_slots(kcel),
         )
 
     def _monster_frame_info(
@@ -871,20 +976,54 @@ class GameSession:
         hit_frame = hset.frames[fidx] if hset is not None and fidx < len(hset.frames) else None
         return frame, hit_frame
 
+    @staticmethod
+    def _monster_anim_flags(monster: MonsterActor) -> tuple[bool, bool, bool]:
+        attacking = monster.state in (
+            MonsterState.MELEE_ATTACK,
+            MonsterState.RANGED_ATTACK,
+            MonsterState.BREATH_ATTACK,
+        )
+        walking = monster.state in (
+            MonsterState.APPROACH,
+            MonsterState.FLANK,
+            MonsterState.RETREAT,
+            MonsterState.FLY_PATROL,
+        )
+        hurt = monster.state in (
+            MonsterState.HIT_STUN,
+            MonsterState.KNOCKBACK,
+            MonsterState.DYING,
+        )
+        return attacking, walking, hurt
+
     def _monster_pieces(
-        self, archetype: MonsterArchetype, *, flipped: bool, attacking: bool
+        self,
+        archetype: MonsterArchetype,
+        *,
+        flipped: bool,
+        attacking: bool,
+        walking: bool = False,
+        hurt: bool = False,
     ) -> tuple[CombatSpritePiece, ...]:
-        m_frame, _ = self._monster_frame_info(archetype, attacking=attacking)
-        if m_frame is None:
+        if self.asset_bundle is None:
             return ()
-        return (
-            CombatSpritePiece(
-                frame=m_frame,
-                frame_index=m_frame.meta.index,
-                flipped=flipped,
-                hurtbox=True,
-                attack=attacking,
-            ),
+        cels = self.asset_bundle.get_monster_cels(archetype)
+        if not cels:
+            fallback = self.asset_bundle.get_cel("TROLL1.CEL")
+            if fallback is None or not fallback.frames:
+                return ()
+            cels = (fallback,)
+        mog_tables = self.asset_bundle.get_mog_tables()
+        return compose_monster_pieces(
+            cels,
+            archetype,
+            self.tick_count,
+            attacking=attacking,
+            walking=walking,
+            hurt=hurt,
+            flipped=flipped,
+            mog_s4=self.asset_bundle.get_mog_s4_bytes(),
+            monster_scripts=mog_tables.monster_scripts if mog_tables is not None else (),
         )
 
     def _resolve_knight_melee(self, knight: KnightState, active: ActiveEncounter) -> None:
@@ -898,10 +1037,13 @@ class GameSession:
         for monster in active.encounter.monsters:
             if not monster.is_alive:
                 continue
+            attacking, walking, hurt = self._monster_anim_flags(monster)
             m_pieces = self._monster_pieces(
                 monster.params.archetype,
                 flipped=monster.direction.is_left,
-                attacking=False,
+                attacking=attacking,
+                walking=walking,
+                hurt=hurt,
             )
             if resolve_composed_melee_attack(
                 attacker_id=knight.entity_id,
@@ -1201,11 +1343,13 @@ class GameSession:
         *names: str,
         sprites: Sequence[SceneSprite] = (),
         fill_index: int = 1,
+        palette_override: Sequence[RGBColor] | None = None,
     ) -> None:
         if self.asset_bundle is not None:
             pic = self.asset_bundle.get_picture(*names)
             if pic is not None:
-                scene_renderer.set_palette(pic.palette)
+                pal = palette_override if palette_override is not None else pic.palette
+                self._apply_scene_palette(scene_renderer, pal)
                 scene_renderer.compose_scene(
                     background=pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
                     sprites=sprites,
@@ -1215,7 +1359,8 @@ class GameSession:
         bg: npt.NDArray[np.uint8] = np.full(
             (PLAYFIELD_HEIGHT, CANVAS_WIDTH), np.uint8(fill_index), dtype=np.uint8
         )
-        scene_renderer.set_palette(default_combat_palette())
+        pal = palette_override if palette_override is not None else default_combat_palette()
+        self._apply_scene_palette(scene_renderer, pal)
         scene_renderer.compose_scene(background=bg, sprites=sprites, border_index=0)
 
     def _append_target_marker(
@@ -1296,14 +1441,9 @@ class GameSession:
         for idx, kid in enumerate(active.knight_ids):
             kstate = self.knight_combat[kid]
             sprites.extend(
-                self.asset_bundle.compose_knight_sprites(
-                    int(kid),
-                    kstate.action,
-                    self.tick_count,
-                    x=kstate.x,
-                    y=kstate.y,
-                    z=kstate.z,
-                    flipped=kstate.direction.is_left,
+                pieces_to_scene_sprites(
+                    self._knight_pieces(kstate),
+                    pos=kstate.pos,
                     layer=2,
                     order=idx * 8,
                 )
@@ -1311,27 +1451,22 @@ class GameSession:
         for idx, monster in enumerate(active.encounter.monsters):
             if not monster.is_alive:
                 continue
-            mcel = self.asset_bundle.get_monster_cel(monster.params.archetype)
-            if mcel is None:
-                continue
-            attacking = monster.state in (
-                MonsterState.MELEE_ATTACK,
-                MonsterState.RANGED_ATTACK,
-                MonsterState.BREATH_ATTACK,
-            )
-            fidx = select_monster_frame(mcel, self.tick_count, attacking)
-            sp = make_sprite(
-                mcel,
-                fidx,
-                x=monster.pos.x,
-                y=monster.pos.y,
-                z=monster.pos.z,
+            attacking, walking, hurt = self._monster_anim_flags(monster)
+            m_pieces = self._monster_pieces(
+                monster.params.archetype,
                 flipped=monster.direction.is_left,
-                layer=2,
-                order=10 + idx,
+                attacking=attacking,
+                walking=walking,
+                hurt=hurt,
             )
-            if sp is not None:
-                sprites.append(sp)
+            sprites.extend(
+                pieces_to_scene_sprites(
+                    m_pieces,
+                    pos=monster.pos,
+                    layer=2,
+                    order=10 + idx * 8,
+                )
+            )
         self._append_gore_sprites(sprites, active)
         return sprites
 
@@ -1355,6 +1490,7 @@ class GameSession:
         if self._pending_fade_in:
             self._pending_fade_in = False
             self.palette_fx.fade_in(words, divisor=1, from_black=True)
+            self.palette_fx.step_vbl()
         elif not self.palette_fx.is_fading and not self.palette_fx.is_flashing:
             self.palette_fx.set_palette(words)
         if self.palette_fx.is_fading or self.palette_fx.is_flashing:
@@ -1372,10 +1508,16 @@ class GameSession:
 
         if arena_loaded is not None:
             _arena_data, arena_bg, pal = arena_loaded
-            self._apply_scene_palette(scene_renderer, pal)
+            combat_pal = self._combat_palette(pal, active)
+            self._apply_scene_palette(scene_renderer, combat_pal)
             scene_renderer.compose_scene(background=arena_bg, sprites=sprites, border_index=0)
         else:
-            self._compose_picture_or_solid(scene_renderer, sprites=sprites)
+            combat_pal = self._combat_palette(default_combat_palette(), active)
+            self._compose_picture_or_solid(
+                scene_renderer,
+                sprites=sprites,
+                palette_override=combat_pal,
+            )
         self._render_combat_hud(scene_renderer, font)
 
     def _render_knight_select_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
