@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from pymoonstone.app.combat_bridge import (
     CombatSpritePiece,
@@ -13,6 +18,8 @@ from pymoonstone.app.combat_bridge import (
     cel_screen_origin,
     clamp_entity_to_arena,
     compose_knight_pieces,
+    compose_monster_pieces,
+    pieces_to_scene_sprites,
     resolve_composed_melee_attack,
     resolve_melee_attack_points,
     select_knight_body_frame,
@@ -502,7 +509,9 @@ def test_resolve_composed_melee_attack_with_hotspots() -> None:
             ),
         ),
     )
-    atk_piece = CombatSpritePiece(frame=atk_frame, frame_index=0, dx=6, dy=0, attack=True)
+    atk_piece = CombatSpritePiece(
+        frame=atk_frame, frame_index=0, cel_slot=3, dx=6, dy=0, attack=True
+    )
     def_piece = CombatSpritePiece(frame=def_frame, frame_index=1, hurtbox=True)
 
     # cel_screen_origin for attacker at x=100: 100 + 6 - 12 - 2 = 92; hit point at 92 + 22 = 114
@@ -530,3 +539,280 @@ def test_resolve_composed_melee_attack_with_hotspots() -> None:
         defender_pos=Pos25D(160, 92, 0),
         defender_pieces=(def_piece,),
     )
+
+
+def test_compose_knight_pieces_with_knight_scripts_and_top_left_sprites() -> None:
+    import struct
+
+    from pymoonstone.assets.tables import KnightScriptTables
+    from pymoonstone.render.renderer import PLAYFIELD_Y_OFFSET
+    from pymoonstone.render.scene import compute_sprite_draw_origin
+    from pymoonstone.sim.collision import DRAW_FLAG_ATTACK, DRAW_FLAG_HURTBOX
+    from pymoonstone.sim.combat_vm import DRAW_FLAG_FLIP_X, OP_END_FRAME, OP_END_SCRIPT
+    from pymoonstone.sim.knight_combat import KnightAction
+
+    kn1 = DecodedCel(
+        frame_count=4,
+        packed_size=0,
+        unpacked_bits=0,
+        frames=tuple(_make_sized_frame(i, 20, 30, hot_x=1) for i in range(4)),
+        raw_planes=b"",
+    )
+    kn4 = DecodedCel(
+        frame_count=4,
+        packed_size=0,
+        unpacked_bits=0,
+        frames=tuple(_make_sized_frame(i, 16, 12, hot_x=1) for i in range(4)),
+        raw_planes=b"",
+    )
+    cel_slots = (kn1, kn1, kn1, kn4)
+
+    # Slot 0 (KN1.ob) body + Slot 3 (KN4.ob) weapon with DRAW_FLAG_ATTACK
+    script = (
+        struct.pack(">BBbBh", 0x00, 1, -10, DRAW_FLAG_HURTBOX, -5)
+        + struct.pack(">BBbBh", 0x0C, 2, -4, DRAW_FLAG_ATTACK | DRAW_FLAG_FLIP_X, 12)
+        + bytes([OP_END_FRAME, OP_END_SCRIPT])
+    )
+    s4 = b"\x00" * 40 + script
+    ks = KnightScriptTables(
+        idle_script=40,
+        alt_script=40,
+        action_scripts=(40,) * 9,
+        hurt_scripts=(40,) * 9,
+        walk_scripts=((40, 40, 40, 40),) * 3,
+    )
+
+    pos = Pos25D(100, 90, 5)
+    pieces_r = compose_knight_pieces(
+        kn1,
+        KnightAction.THRUST,
+        0,
+        flipped=False,
+        mog_s4=s4,
+        knight_scripts=ks,
+        cel_slots=cel_slots,
+    )
+    assert len(pieces_r) == 2
+    assert pieces_r[0].cel_slot == 0
+    assert pieces_r[0].top_left is True
+    assert pieces_r[1].cel_slot == 3
+    assert pieces_r[1].frame is kn4.frames[2]
+    assert pieces_r[1].flipped is True  # DRAW_FLAG_FLIP_X flipped on right-facing
+
+    sprites_r = pieces_to_scene_sprites(pieces_r, pos=pos)
+    assert all(sp.top_left for sp in sprites_r)
+    # Piece 0: x = 100 + (-5) = 95, y = 90 - 5 + (-10) = 75 (+ PLAYFIELD_Y_OFFSET in renderer)
+    ox0, oy0 = compute_sprite_draw_origin(sprites_r[0])
+    assert (ox0, oy0) == (95, 75 + PLAYFIELD_Y_OFFSET)
+    # Piece 1: flipped=True due to DRAW_FLAG_FLIP_X -> x = 100 + 12 - 16 = 96
+    ox1, oy1 = compute_sprite_draw_origin(sprites_r[1])
+    assert (ox1, oy1) == (96, 81 + PLAYFIELD_Y_OFFSET)
+
+    # Facing left: piece 0 flipped=True -> x = 100 - (-5) - 20 = 85;
+    # piece 1 unflipped via 0x04 -> x = 100 - 12 = 88
+    pieces_l = compose_knight_pieces(
+        kn1,
+        KnightAction.THRUST,
+        0,
+        flipped=True,
+        mog_s4=s4,
+        knight_scripts=ks,
+        cel_slots=cel_slots,
+    )
+    sprites_l = pieces_to_scene_sprites(pieces_l, pos=pos)
+    lx0, _ = compute_sprite_draw_origin(sprites_l[0])
+    lx1, _ = compute_sprite_draw_origin(sprites_l[1])
+    assert lx0 == 85
+    assert lx1 == 88
+
+
+def test_kn4_hit_only_attaches_to_slot3_attack_pieces() -> None:
+    kn1_frame = _make_sized_frame(0, 24, 24, hot_x=1)
+    def_frame = _make_sized_frame(0, 20, 20, hot_x=1)
+    hit_set = HitSet(
+        name="kn4",
+        norm_name="kn4",
+        frames=(
+            HitFrame(
+                frame_index=0,
+                hit_type=1,
+                max_x=5,
+                max_y=5,
+                points=(HitPoint(5, 5),),
+            ),
+        ),
+    )
+    # Body piece (cel_slot=0) even with attack=True must NOT receive kn4.hit[0];
+    # falls back to fallback_reach_x instead of testing body-local point (5, 5).
+    body_piece = CombatSpritePiece(
+        frame=kn1_frame, frame_index=0, cel_slot=0, attack=True, top_left=True
+    )
+    def_piece = CombatSpritePiece(frame=def_frame, frame_index=0, hurtbox=True, top_left=True)
+    # Defender at x=125 is outside body cel (0..24) at x=100, but within fallback_reach_x=36.
+    assert resolve_composed_melee_attack(
+        attacker_id=EntityId(1),
+        attacker_pos=Pos25D(100, 90, 0),
+        attacker_pieces=(body_piece,),
+        attacker_hit_set=hit_set,
+        attacker_flipped=False,
+        defender_id=EntityId(2),
+        defender_pos=Pos25D(125, 90, 0),
+        defender_pieces=(def_piece,),
+        fallback_reach_x=36,
+    )
+
+
+def test_compose_monster_pieces_from_mog_bytecode() -> None:
+    import struct
+
+    from pymoonstone.assets.tables import MonsterScriptTables
+    from pymoonstone.sim.collision import DRAW_FLAG_HURTBOX
+    from pymoonstone.sim.combat_vm import OP_END_FRAME, OP_END_SCRIPT
+
+    cel0 = DecodedCel(
+        frame_count=2,
+        packed_size=0,
+        unpacked_bits=0,
+        frames=tuple(_make_sized_frame(i, 20, 24) for i in range(2)),
+        raw_planes=b"",
+    )
+    cel1 = DecodedCel(
+        frame_count=2,
+        packed_size=0,
+        unpacked_bits=0,
+        frames=tuple(_make_sized_frame(i, 18, 18) for i in range(2)),
+        raw_planes=b"",
+    )
+    script = (
+        struct.pack(">BBbBh", 0x00, 1, 4, DRAW_FLAG_HURTBOX, -10)
+        + struct.pack(">BBbBh", 0x04, 0, -12, DRAW_FLAG_HURTBOX, -8)
+        + bytes([OP_END_FRAME, OP_END_SCRIPT])
+    )
+    s4 = b"\x00" * 32 + script
+    ms = MonsterScriptTables(
+        creature_type=24,
+        idle_script=32,
+        alt_script=32,
+        action_scripts=(0,) * 9,
+        hurt_scripts=(0,) * 9,
+        walk_scripts=((32, 0, 0, 0),) * 3,
+    )
+    pieces = compose_monster_pieces(
+        (cel0, cel1),
+        MonsterArchetype.TROGG_SPEAR,
+        0,
+        mog_s4=s4,
+        monster_scripts=(ms,),
+    )
+    assert len(pieces) == 2
+    assert pieces[0].cel_slot == 0
+    assert pieces[1].cel_slot == 1
+    assert all(p.top_left for p in pieces)
+
+
+@pytest.mark.adf
+def test_real_knight_attacks_emit_multipart_top_left_sprites(adf_dir: Path) -> None:
+    from pymoonstone.assets.adf import DiskSet
+    from pymoonstone.assets.cel import decode_cel
+    from pymoonstone.assets.hunk import parse_hunk_executable
+    from pymoonstone.assets.tables import MOG_TABLES_SECTION, load_mog_tables
+    from pymoonstone.sim.knight_combat import KnightAction
+
+    disks = DiskSet.from_directory(adf_dir)
+    mog = parse_hunk_executable("mog", disks.read_file("mog"))
+    tables = load_mog_tables(mog)
+    s4 = mog.sections[MOG_TABLES_SECTION].data
+    kn_slots = tuple(decode_cel(disks.read_file(f"KN{i}.ob")) for i in range(1, 5))
+
+    for action in (KnightAction.THRUST, KnightAction.OVERHEAD_SLASH, KnightAction.LOW_SWEEP):
+        pieces = compose_knight_pieces(
+            kn_slots[0],
+            action,
+            6,
+            mog_s4=s4,
+            knight_scripts=tables.knight_scripts,
+            cel_slots=kn_slots,
+        )
+        assert len(pieces) >= 2
+        assert any(p.cel_slot == 3 and p.attack for p in pieces)
+        sprites = pieces_to_scene_sprites(pieces, pos=Pos25D(120, 100, 0))
+        assert len(sprites) == len(pieces)
+        assert all(sp.top_left for sp in sprites)
+
+
+@pytest.mark.adf
+def test_real_knight_lands_hits_and_defeats_trogg_and_ratman(adf_dir: Path) -> None:
+    from pymoonstone.assets.adf import DiskSet
+    from pymoonstone.assets.cel import decode_cel
+    from pymoonstone.assets.hit import parse_collide_hit
+    from pymoonstone.assets.hunk import parse_hunk_executable
+    from pymoonstone.assets.tables import MOG_TABLES_SECTION, load_mog_tables
+    from pymoonstone.sim.knight_combat import KnightAction
+    from pymoonstone.sim.monster_ai import MonsterActor, apply_hit_to_monster
+    from pymoonstone.sim.types import Direction
+
+    disks = DiskSet.from_directory(adf_dir)
+    mog = parse_hunk_executable("mog", disks.read_file("mog"))
+    tables = load_mog_tables(mog)
+    s4 = mog.sections[MOG_TABLES_SECTION].data
+    kn_slots = tuple(decode_cel(disks.read_file(f"KN{i}.ob")) for i in range(1, 5))
+    kn4_hit = parse_collide_hit(disks.read_file("collide.hit"))["kn4"]
+
+    cases = (
+        (
+            MonsterArchetype.TROGG_SPEAR,
+            ("TROGGSpear1.CEL", "TROGGSpear2.CEL"),
+            KnightAction.THRUST,
+            155,
+        ),
+        (
+            MonsterArchetype.RATMAN,
+            ("RATMEN1.CEL", "RATMEN2.CEL"),
+            KnightAction.OVERHEAD_SLASH,
+            155,
+        ),
+    )
+    for archetype, cel_names, action, start_x in cases:
+        mcels = tuple(decode_cel(disks.read_file(n)) for n in cel_names)
+        monster = MonsterActor(
+            entity_id=EntityId(2),
+            params=default_monster_params(archetype),
+            pos=Pos25D(start_x, 100, 0),
+            direction=Direction.LEFT,
+            hp=default_monster_params(archetype).max_hp,
+        )
+        landed = 0
+        for tick in range(0, 90, 6):
+            if not monster.is_alive:
+                break
+            k_pieces = compose_knight_pieces(
+                kn_slots[0],
+                action,
+                tick,
+                mog_s4=s4,
+                knight_scripts=tables.knight_scripts,
+                cel_slots=kn_slots,
+            )
+            m_pieces = compose_monster_pieces(
+                mcels,
+                archetype,
+                tick,
+                walking=True,
+                flipped=True,
+                mog_s4=s4,
+                monster_scripts=tables.monster_scripts,
+            )
+            if resolve_composed_melee_attack(
+                attacker_id=EntityId(1),
+                attacker_pos=Pos25D(120, 100, 0),
+                attacker_pieces=k_pieces,
+                attacker_hit_set=kn4_hit,
+                attacker_flipped=False,
+                defender_id=monster.entity_id,
+                defender_pos=monster.pos,
+                defender_pieces=m_pieces,
+            ):
+                landed += 1
+                apply_hit_to_monster(monster, 10, 120)
+        assert landed > 0, f"expected hits against {archetype.name}"
+        assert monster.hp == 0, f"expected {archetype.name} HP=0, got {monster.hp}"

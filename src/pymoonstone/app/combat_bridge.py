@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 import numpy as np
 
 from pymoonstone.assets.cel import CelFrame, DecodedCel
+from pymoonstone.render.scene import SceneSprite
 from pymoonstone.sim.collision import (
     DEFAULT_ARENA_BOUNDS,
     DEFAULT_DEPTH_THRESHOLD,
@@ -23,6 +24,7 @@ from pymoonstone.sim.collision import (
     resolve_combat_hits,
 )
 from pymoonstone.sim.combat_vm import (
+    VBL_DIVISOR_FAST,
     VBL_DIVISOR_NORMAL,
     CombatJob,
     DrawFrameEvent,
@@ -52,7 +54,9 @@ if TYPE_CHECKING:
     from pymoonstone.assets.tables import (
         CombatActionTables,
         CreatureNodeRecord,
+        KnightScriptTables,
         MogRuntimeTables,
+        MonsterScriptTables,
     )
 
 
@@ -361,12 +365,14 @@ class CombatSpritePiece:
 
     frame: CelFrame
     frame_index: int
+    cel_slot: int = 0
     dx: int = 0
     dy: int = 0
     flipped: bool = False
     hurtbox: bool = True
     attack: bool = False
     exclude_body_box: bool = False
+    top_left: bool = False
 
 
 def cel_screen_origin(
@@ -376,13 +382,60 @@ def cel_screen_origin(
     dx: int = 0,
     dy: int = 0,
     flipped: bool = False,
+    top_left: bool = False,
 ) -> tuple[int, int]:
-    """Compute top-left playfield `(screen_x, screen_y)` matching `SceneSprite` hotspot math."""
+    """Compute top-left playfield `(screen_x, screen_y)` for a cel piece."""
     w = frame.meta.width
+    if top_left:
+        return (pos.x + dx - (w if flipped else 0), pos.y - pos.z + dy)
     h = frame.meta.height
     hot_x = frame.meta.hot_x
     x_offset = hot_x if flipped else -hot_x
     return (pos.x + dx - (w // 2) + x_offset, pos.y - pos.z + dy - (h // 2))
+
+
+def pieces_to_scene_sprites(
+    pieces: Sequence[CombatSpritePiece],
+    *,
+    pos: Pos25D,
+    layer: int = 2,
+    order: int = 0,
+) -> list[SceneSprite]:
+    """Convert `CombatSpritePiece`s into `SceneSprite`s using `top_left` anchoring."""
+    sprites: list[SceneSprite] = []
+    for idx, piece in enumerate(pieces):
+        if piece.top_left:
+            sx = pos.x + piece.dx - (piece.frame.meta.width if piece.flipped else 0)
+            sprites.append(
+                SceneSprite(
+                    frame=piece.frame,
+                    x=sx,
+                    y=pos.y,
+                    z=pos.z,
+                    dx=0,
+                    dy=piece.dy,
+                    layer=layer,
+                    order=order + idx,
+                    mirrored=piece.flipped,
+                    top_left=True,
+                )
+            )
+        else:
+            sprites.append(
+                SceneSprite(
+                    frame=piece.frame,
+                    x=pos.x,
+                    y=pos.y,
+                    z=pos.z,
+                    dx=piece.dx,
+                    dy=piece.dy,
+                    layer=layer,
+                    order=order + idx,
+                    mirrored=piece.flipped,
+                    top_left=False,
+                )
+            )
+    return sprites
 
 
 def _knight_body_indices(cel: DecodedCel) -> list[int]:
@@ -430,7 +483,7 @@ def _run_mog_action_draws(
     step_count: int,
     flipped: bool,
 ) -> tuple[DrawFrameEvent, ...]:
-    if offset < 0 or offset >= len(mog_s4):
+    if offset <= 0 or offset >= len(mog_s4):
         return ()
     job = CombatJob(
         job_id=0,
@@ -453,6 +506,84 @@ def _run_mog_action_draws(
     return draws
 
 
+_KNIGHT_ACTION_TO_SCRIPT_INDEX: dict[KnightAction, int] = {
+    KnightAction.IDLE: 0,
+    KnightAction.ROLL: 6,
+    KnightAction.BLOCK: 4,
+    KnightAction.OVERHEAD_SLASH: 8,
+    KnightAction.THRUST: 1,
+    KnightAction.LOW_SWEEP: 2,
+    KnightAction.THROW_SECONDARY: 5,
+}
+
+_KNIGHT_HURT_TO_SCRIPT_INDEX: dict[KnightAction, int] = {
+    KnightAction.HIT_STUN: 4,
+    KnightAction.KNOCKDOWN: 3,
+    KnightAction.DEATH: 1,
+}
+
+
+def _resolve_knight_script_offset(
+    action: KnightAction,
+    tick_count: int,
+    knight_scripts: KnightScriptTables,
+) -> tuple[int, int]:
+    """Return `(s4_offset, step_count)` for `action` from decoded `KnightScriptTables`."""
+    if action in (KnightAction.WALK, KnightAction.RUN) and knight_scripts.walk_scripts:
+        walk_block = knight_scripts.walk_scripts[0]
+        if walk_block:
+            divisor = VBL_DIVISOR_FAST if action == KnightAction.RUN else VBL_DIVISOR_NORMAL
+            phase = (tick_count // divisor) % len(walk_block)
+            return walk_block[phase], 0
+    if action in _KNIGHT_HURT_TO_SCRIPT_INDEX:
+        h_idx = _KNIGHT_HURT_TO_SCRIPT_INDEX[action]
+        offset = (
+            knight_scripts.hurt_scripts[h_idx] if h_idx < len(knight_scripts.hurt_scripts) else 0
+        )
+        return (offset or knight_scripts.alt_script), tick_count // VBL_DIVISOR_NORMAL
+    if action == KnightAction.IDLE:
+        return knight_scripts.idle_script, tick_count // VBL_DIVISOR_NORMAL
+    a_idx = _KNIGHT_ACTION_TO_SCRIPT_INDEX.get(action, 0)
+    offset = (
+        knight_scripts.action_scripts[a_idx] if a_idx < len(knight_scripts.action_scripts) else 0
+    )
+    return (offset or knight_scripts.idle_script), tick_count // VBL_DIVISOR_NORMAL
+
+
+def _draws_to_pieces(
+    draws: tuple[DrawFrameEvent, ...],
+    default_cel: DecodedCel,
+    cel_slots: Sequence[DecodedCel] | None,
+) -> tuple[CombatSpritePiece, ...]:
+    pieces: list[CombatSpritePiece] = []
+    for ev in draws:
+        slot_cel = (
+            cel_slots[ev.cel_slot]
+            if cel_slots is not None
+            and 0 <= ev.cel_slot < len(cel_slots)
+            and cel_slots[ev.cel_slot].frames
+            else default_cel
+        )
+        if not slot_cel.frames:
+            continue
+        fidx = ev.frame_index % len(slot_cel.frames)
+        pieces.append(
+            CombatSpritePiece(
+                frame=slot_cel.frames[fidx],
+                frame_index=fidx,
+                cel_slot=ev.cel_slot,
+                dx=ev.dx,
+                dy=ev.dy,
+                flipped=ev.flipped,
+                hurtbox=ev.hurtbox,
+                attack=ev.attack,
+                exclude_body_box=ev.exclude_body_box,
+                top_left=True,
+            )
+        )
+    return tuple(pieces)
+
+
 def compose_knight_pieces(
     cel: DecodedCel,
     action: KnightAction,
@@ -462,10 +593,18 @@ def compose_knight_pieces(
     mog_s4: bytes | None = None,
     combat_actions: CombatActionTables | None = None,
     hit_set: HitSet | None = None,
+    knight_scripts: KnightScriptTables | None = None,
+    cel_slots: Sequence[DecodedCel] | None = None,
 ) -> tuple[CombatSpritePiece, ...]:
     """Compose multi-part knight `CombatSpritePiece`s from `mog` bytecode or body fallback."""
     if not cel.frames:
         return ()
+    if mog_s4 is not None and knight_scripts is not None:
+        offset, step_count = _resolve_knight_script_offset(action, tick_count, knight_scripts)
+        draws = _run_mog_action_draws(mog_s4, offset, step_count, flipped)
+        if draws:
+            return _draws_to_pieces(draws, cel, cel_slots)
+
     if mog_s4 is not None and combat_actions is not None:
         slot = _KNIGHT_ACTION_TABLE_SLOT.get(action, 0)
         offsets = combat_actions.left_offsets if flipped else combat_actions.right_offsets
@@ -477,30 +616,114 @@ def compose_knight_pieces(
                 flipped,
             )
             if draws:
-                return tuple(
-                    CombatSpritePiece(
-                        frame=cel.frames[ev.frame_index % len(cel.frames)],
-                        frame_index=ev.frame_index % len(cel.frames),
-                        dx=ev.dx,
-                        dy=ev.dy,
-                        flipped=ev.flipped,
-                        hurtbox=ev.hurtbox,
-                        attack=ev.attack,
-                        exclude_body_box=ev.exclude_body_box,
-                    )
-                    for ev in draws
-                )
+                return _draws_to_pieces(draws, cel, cel_slots)
 
     fidx = select_knight_body_frame(cel, action, tick_count, hit_set=hit_set)
     return (
         CombatSpritePiece(
             frame=cel.frames[fidx],
             frame_index=fidx,
+            cel_slot=0,
             flipped=flipped,
             hurtbox=True,
             attack=action in _KNIGHT_ATTACK_ACTIONS,
+            top_left=False,
         ),
     )
+
+
+_ARCHETYPE_CREATURE_TYPE: dict[MonsterArchetype, int] = {
+    MonsterArchetype.TROGG_SPEAR: 24,
+    MonsterArchetype.TROGG_AXE: 28,
+    MonsterArchetype.RATMAN: 32,
+    MonsterArchetype.MUDMAN: 4,
+    MonsterArchetype.BEASTMAN: 44,
+    MonsterArchetype.DEMON: 48,
+    MonsterArchetype.TROLL: 36,
+    MonsterArchetype.BALOK: 0,
+    MonsterArchetype.DRAGON: 20,
+    MonsterArchetype.GUARDIAN: 64,
+}
+
+
+def _find_monster_scripts(
+    archetype: MonsterArchetype,
+    monster_scripts: Sequence[MonsterScriptTables],
+) -> MonsterScriptTables | None:
+    target = _ARCHETYPE_CREATURE_TYPE.get(archetype)
+    if target is None:
+        return None
+    for entry in monster_scripts:
+        if entry.creature_type == target:
+            return entry
+    return None
+
+
+def _select_monster_script_offset(
+    ms: MonsterScriptTables,
+    tick_count: int,
+    *,
+    attacking: bool,
+    walking: bool,
+    hurt: bool,
+) -> tuple[int, int]:
+    if hurt:
+        offset = next((p for p in ms.hurt_scripts if p > 0), 0) or ms.alt_script or ms.idle_script
+        return offset, tick_count // VBL_DIVISOR_NORMAL
+    if attacking:
+        offset = next((p for p in ms.action_scripts if p > 0), 0) or ms.idle_script
+        return offset, tick_count // VBL_DIVISOR_NORMAL
+    if walking and ms.walk_scripts:
+        phases = [p for p in ms.walk_scripts[0] if p > 0]
+        if phases:
+            return phases[(tick_count // VBL_DIVISOR_NORMAL) % len(phases)], 0
+    return ms.idle_script, tick_count // VBL_DIVISOR_NORMAL
+
+
+def compose_monster_pieces(
+    cels: Sequence[DecodedCel],
+    archetype: MonsterArchetype,
+    tick_count: int,
+    *,
+    attacking: bool = False,
+    walking: bool = False,
+    hurt: bool = False,
+    flipped: bool = False,
+    mog_s4: bytes | None = None,
+    monster_scripts: Sequence[MonsterScriptTables] = (),
+) -> tuple[CombatSpritePiece, ...]:
+    """Compose multi-part monster `CombatSpritePiece`s from `mog` scripts or cel-slot fallback."""
+    if not cels:
+        return ()
+    if mog_s4 is not None and monster_scripts:
+        ms = _find_monster_scripts(archetype, monster_scripts)
+        if ms is not None:
+            offset, step_count = _select_monster_script_offset(
+                ms, tick_count, attacking=attacking, walking=walking, hurt=hurt
+            )
+            draws = _run_mog_action_draws(mog_s4, offset, step_count, flipped)
+            if draws:
+                return _draws_to_pieces(draws, cels[0], cels)
+
+    fallback: list[CombatSpritePiece] = []
+    for slot_idx, cel in enumerate(cels):
+        if not cel.frames:
+            continue
+        step = (tick_count // VBL_DIVISOR_NORMAL) % min(len(cel.frames), 4)
+        base = min(len(cel.frames) - 1, 2) if attacking else 0
+        fidx = (base + step) % len(cel.frames)
+        fallback.append(
+            CombatSpritePiece(
+                frame=cel.frames[fidx],
+                frame_index=fidx,
+                cel_slot=slot_idx,
+                flipped=flipped,
+                hurtbox=True,
+                attack=attacking,
+                top_left=False,
+            )
+        )
+    return tuple(fallback)
 
 
 def _build_attack_entries(
@@ -511,7 +734,8 @@ def _build_attack_entries(
 ) -> tuple[AttackEntry, ...]:
     if attacker_hit_set is None or not attacker_hit_set.frames:
         return ()
-    atk_pieces = [p for p in attacker_pieces if p.attack] or list(attacker_pieces)
+    is_kn4 = attacker_hit_set.norm_name == "kn4"
+    atk_pieces = [p for p in attacker_pieces if p.attack and (not is_kn4 or p.cel_slot == 3)]
     attacks: list[AttackEntry] = []
     for piece in atk_pieces:
         if not (0 <= piece.frame_index < len(attacker_hit_set.frames)):
@@ -520,7 +744,12 @@ def _build_attack_entries(
         if not hframe.points:
             continue
         sx, sy = cel_screen_origin(
-            attacker_pos, piece.frame, dx=piece.dx, dy=piece.dy, flipped=piece.flipped
+            attacker_pos,
+            piece.frame,
+            dx=piece.dx,
+            dy=piece.dy,
+            flipped=piece.flipped,
+            top_left=piece.top_left,
         )
         attacks.append(
             AttackEntry(
@@ -549,7 +778,12 @@ def _build_hurt_entries(
         if mask.width <= 0 or mask.height <= 0:
             continue
         sx, sy = cel_screen_origin(
-            defender_pos, piece.frame, dx=piece.dx, dy=piece.dy, flipped=piece.flipped
+            defender_pos,
+            piece.frame,
+            dx=piece.dx,
+            dy=piece.dy,
+            flipped=piece.flipped,
+            top_left=piece.top_left,
         )
         hurts.append(
             HurtEntry(
