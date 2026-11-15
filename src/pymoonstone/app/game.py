@@ -405,12 +405,23 @@ class GameSession:
                 return tuple(pic.palette)
         return default_combat_palette()
 
+    def _overworld_palette(self, base_palette: Sequence[RGBColor]) -> tuple[RGBColor, ...]:
+        out = list(base_palette[:32])
+        while len(out) < 32:
+            out.append((0, 0, 0))
+        phase = (self.tick_count // 3) % 10
+        step = phase if phase <= 5 else 10 - phase
+        level = 10 + step
+        shade = level * 17
+        out[31] = (shade, shade, shade)
+        return tuple(out)
+
     def _overworld_target_palette(self) -> tuple[RGBColor, ...]:
         get_test_picture = getattr(self.asset_bundle, "get_test_picture", None)
         if callable(get_test_picture):
             map_pic = get_test_picture(8)
             if map_pic is not None:
-                return tuple(map_pic.palette)
+                return self._overworld_palette(map_pic.palette)
         return self._picture_target_palette("bg2.PIV")
 
     def _combat_palette(
@@ -1564,7 +1575,7 @@ class GameSession:
         sprites = self._overworld_sprites()
         map_pic = self.asset_bundle.get_test_picture(8) if self.asset_bundle is not None else None
         if map_pic is not None:
-            self._apply_scene_palette(scene_renderer, map_pic.palette)
+            self._apply_scene_palette(scene_renderer, self._overworld_palette(map_pic.palette))
             scene_renderer.compose_scene(
                 background=map_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
                 sprites=sprites,

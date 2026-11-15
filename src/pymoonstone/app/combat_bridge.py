@@ -599,6 +599,110 @@ def _draws_to_pieces(
     return tuple(pieces)
 
 
+def _centered_top_left_dx(width: int, *, flipped: bool, forward: int = 0) -> int:
+    offset = (width // 2) + forward if flipped else -(width // 2) + forward
+    return offset
+
+
+def _fallback_multipart_knight_pieces(
+    cel_slots: Sequence[DecodedCel],
+    action: KnightAction,
+    tick_count: int,
+    *,
+    flipped: bool,
+) -> tuple[CombatSpritePiece, ...]:
+    slot0 = cel_slots[0]
+    slot3 = cel_slots[3]
+    is_attack = action in _KNIGHT_ATTACK_ACTIONS
+    legs_idx = 1 if len(slot0.frames) > 1 else 0
+    legs_frame = slot0.frames[legs_idx]
+    body_frame = slot0.frames[0]
+    weapon_idx = (
+        (1 + (tick_count // VBL_DIVISOR_NORMAL)) % len(slot3.frames)
+        if is_attack
+        else 1 % len(slot3.frames)
+    )
+    weapon_frame = slot3.frames[weapon_idx]
+    weapon_forward = (-12 if flipped else 12) if is_attack else 0
+    pieces: list[CombatSpritePiece] = [
+        CombatSpritePiece(
+            frame=legs_frame,
+            frame_index=legs_idx,
+            cel_slot=0,
+            dx=_centered_top_left_dx(legs_frame.meta.width, flipped=flipped),
+            dy=-legs_frame.meta.height,
+            flipped=flipped,
+            hurtbox=True,
+            attack=False,
+            top_left=True,
+        ),
+    ]
+    if len(slot0.frames) > 1:
+        pieces.append(
+            CombatSpritePiece(
+                frame=body_frame,
+                frame_index=0,
+                cel_slot=0,
+                dx=_centered_top_left_dx(body_frame.meta.width, flipped=flipped),
+                dy=-body_frame.meta.height,
+                flipped=flipped,
+                hurtbox=True,
+                attack=False,
+                top_left=True,
+            )
+        )
+    pieces.append(
+        CombatSpritePiece(
+            frame=weapon_frame,
+            frame_index=weapon_idx,
+            cel_slot=3,
+            dx=_centered_top_left_dx(
+                weapon_frame.meta.width, flipped=flipped, forward=weapon_forward
+            ),
+            dy=-weapon_frame.meta.height,
+            flipped=flipped,
+            hurtbox=False,
+            attack=is_attack,
+            top_left=True,
+        )
+    )
+    return tuple(pieces)
+
+
+def _has_multipart_slots(cel_slots: Sequence[DecodedCel] | None) -> bool:
+    return bool(
+        cel_slots is not None
+        and len(cel_slots) >= 4
+        and cel_slots[0].frames
+        and cel_slots[3].frames
+    )
+
+
+def _try_knight_mog_draws(
+    action: KnightAction,
+    tick_count: int,
+    *,
+    flipped: bool,
+    mog_s4: bytes | None,
+    knight_scripts: KnightScriptTables | None,
+    combat_actions: CombatActionTables | None,
+) -> tuple[DrawFrameEvent, ...]:
+    if mog_s4 is None:
+        return ()
+    if knight_scripts is not None:
+        offset, step_count = _resolve_knight_script_offset(action, tick_count, knight_scripts)
+        draws = _run_mog_action_draws(mog_s4, offset, step_count, flipped)
+        if draws:
+            return draws
+    if combat_actions is None:
+        return ()
+    slot = _KNIGHT_ACTION_TABLE_SLOT.get(action, 0)
+    offsets = combat_actions.left_offsets if flipped else combat_actions.right_offsets
+    if not (0 <= slot < len(offsets)):
+        return ()
+    return _run_mog_action_draws(mog_s4, offsets[slot], tick_count // VBL_DIVISOR_NORMAL, flipped)
+
+
 def compose_knight_pieces(
     cel: DecodedCel,
     action: KnightAction,
@@ -614,24 +718,19 @@ def compose_knight_pieces(
     """Compose multi-part knight `CombatSpritePiece`s from `mog` bytecode or body fallback."""
     if not cel.frames:
         return ()
-    if mog_s4 is not None and knight_scripts is not None:
-        offset, step_count = _resolve_knight_script_offset(action, tick_count, knight_scripts)
-        draws = _run_mog_action_draws(mog_s4, offset, step_count, flipped)
-        if draws:
-            return _draws_to_pieces(draws, cel, cel_slots)
+    draws = _try_knight_mog_draws(
+        action,
+        tick_count,
+        flipped=flipped,
+        mog_s4=mog_s4,
+        knight_scripts=knight_scripts,
+        combat_actions=combat_actions,
+    )
+    if draws:
+        return _draws_to_pieces(draws, cel, cel_slots)
 
-    if mog_s4 is not None and combat_actions is not None:
-        slot = _KNIGHT_ACTION_TABLE_SLOT.get(action, 0)
-        offsets = combat_actions.left_offsets if flipped else combat_actions.right_offsets
-        if 0 <= slot < len(offsets):
-            draws = _run_mog_action_draws(
-                mog_s4,
-                offsets[slot],
-                tick_count // VBL_DIVISOR_NORMAL,
-                flipped,
-            )
-            if draws:
-                return _draws_to_pieces(draws, cel, cel_slots)
+    if cel_slots is not None and _has_multipart_slots(cel_slots):
+        return _fallback_multipart_knight_pieces(cel_slots, action, tick_count, flipped=flipped)
 
     fidx = select_knight_body_frame(cel, action, tick_count, hit_set=hit_set)
     return (

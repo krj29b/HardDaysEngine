@@ -228,4 +228,19 @@ Before closing Remediation Pass 2, verify all of the following on real ADF disks
 4. **Visual & Quality Gate Verification:**
    - Blue Knight renders in blue tunic in combat.
    - Waterdeep sub-menus (`MERCHANT`, `TAVERN`, `HEALER`) render legible text over a dark backing panel without switching to Highwood's backdrop.
+
+---
+
+## 5. Remediation Pass 2 Verification Results (`T10.1`–`T10.9`)
+
+Verified across [tests/unit/test_playability_v2.py](file:///c:/_WORKSPACE/ANTIGRAVITY/pymoonstone/tests/unit/test_playability_v2.py), [tests/unit/test_combat_bridge.py](file:///c:/_WORKSPACE/ANTIGRAVITY/pymoonstone/tests/unit/test_combat_bridge.py), [tests/unit/test_tables.py](file:///c:/_WORKSPACE/ANTIGRAVITY/pymoonstone/tests/unit/test_tables.py), and real `.adf` disks:
+1. **Multi-Part Sprite Verification (`T10.1`–`T10.2`):** All 12 `KnightAction`s execute real `mog` `S_4` fight scripts (`KnightScriptTables`, `KN1.ob..KN4.ob`) and emit multi-part draw lists; `compose_knight_pieces` also provides a multi-slot (`KN1`+`KN4`) fallback when `mog_s4` is absent; all 10 `MonsterArchetype`s compose multi-part pieces across multi-slot cels (`TROGGSpear1+2`, `Balok1..3`, `Demon1..4`, etc.).
+2. **Top-Left Anchor & Combat Winnability (`T10.3`–`T10.4`):** `SceneSprite.top_left=True` anchors fight-script pieces at `(pos.x + dx, pos.y - pos.z + dy)`, `kn4` `collide.hit` attaches only to `cel_slot == 3` (`KN4.ob`) attack pieces, `params_from_creature_node` keeps `base.defense`, and `test_adf_knight_attacks_and_defeats_trogg` defeats a real Trogg (`trogg.hp == 0`).
+3. **Overworld Multi-Step Turns (`T10.5`):** `test_adf_overworld_3_moves_and_stay_in_overworld` confirms 35 nodes on real disks with `moves_remaining = 3 -> 2` on first step while staying in `GameScene.OVERWORLD`.
+4. **Palettes, Sub-Locations, Fade-In, & Quality Gate (`T10.6`–`T10.9`):**
+   - `test_adf_blue_knight_combat_palette_and_fade_in` confirms non-black frame 1 and blue tunic colors at palette indices `6..8`.
+   - `test_overworld_marker_palette_replaces_magenta_index_31` and `test_adf_overworld_marker_frames_and_highlight_palette` confirm `test[8]` index `31` uses a grayscale highlight instead of `(255, 17, 255)` magenta and `mi.c` uses class-specific frames (`5..8` / `15..18`).
+   - Waterdeep sub-locations preserve `WaterDeep.PIV` with dark panel contrast.
+   - `uv run python scripts/quality_gate.py`: **7/7 gates PASSED** (`238 passed, 8 deselected`, `958` blocks graded A/B).
+   - `uv run pytest -m adf`: **15 passed**; `uv run pytest -m gl`: **8 passed**.
    - `uv run python scripts/quality_gate.py` passes all 7 gates (`ruff format`, `ruff check`, `mypy --strict`, `lint-imports`, `radon`, `vulture`, `pytest`).

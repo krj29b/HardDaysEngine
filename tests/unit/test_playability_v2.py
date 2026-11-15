@@ -527,3 +527,60 @@ def test_adf_knight_attacks_and_defeats_trogg(adf_dir: Path) -> None:
         fire = (trogg.pos.x - kstate.x <= 36) and (tick % 18 == 0)
         session.step_tick(_p1_frame(dx=dx, fire=fire, kid=KnightId.BLUE))
     assert trogg.hp == 0
+
+
+def test_compose_knight_pieces_multipart_fallback_without_mog_s4() -> None:
+    from pymoonstone.app.combat_bridge import compose_knight_pieces
+    from pymoonstone.sim.knight_combat import KnightAction
+
+    cel0 = _make_cel(12, 24, frames=2)
+    cel1 = _make_cel(12, 24, frames=2)
+    cel2 = _make_cel(12, 24, frames=2)
+    cel3 = _make_cel(18, 16, frames=2)
+    pieces = compose_knight_pieces(
+        cel0,
+        KnightAction.THRUST,
+        tick_count=6,
+        mog_s4=None,
+        cel_slots=(cel0, cel1, cel2, cel3),
+    )
+    assert len(pieces) == 3
+    assert all(piece.top_left for piece in pieces)
+    assert [piece.cel_slot for piece in pieces] == [0, 0, 3]
+    assert any(piece.attack and piece.cel_slot == 3 for piece in pieces)
+
+
+def test_overworld_marker_palette_replaces_magenta_index_31() -> None:
+    base = list(default_combat_palette())
+    base[31] = (255, 17, 255)
+    session = GameSession(players=(KnightId.BLUE,), start_scene=GameScene.OVERWORLD)
+    resolved = session._overworld_palette(base)
+    r, g, b = resolved[31]
+    assert r == g == b
+    assert 170 <= r <= 255
+
+
+@pytest.mark.adf
+def test_adf_overworld_marker_frames_and_highlight_palette(adf_dir: Path) -> None:
+    from pymoonstone.assets.adf import DiskSet
+
+    disks = DiskSet.from_directory(adf_dir)
+    for kid, expected_slot in (
+        (KnightId.BLUE, 0),
+        (KnightId.YELLOW, 1),
+        (KnightId.GREEN, 2),
+        (KnightId.RED, 3),
+    ):
+        session = GameSession(players=(kid,), start_scene=GameScene.OVERWORLD, disk_set=disks)
+        for _ in range(16):
+            session.step_tick(InputFrame())
+        renderer = _StubSceneRenderer()
+        _render_stub(session, renderer)
+        r, g, b = renderer.palette[31]
+        assert r == g == b and 170 <= r <= 255
+        mi_cel = session.asset_bundle.get_cel("mi.c") if session.asset_bundle else None
+        assert mi_cel is not None
+        active_frame = mi_cel.frames[expected_slot + 5]
+        flag_frame = mi_cel.frames[expected_slot + 15]
+        assert any(sp.frame == active_frame for sp in renderer.sprites)
+        assert any(sp.frame == flag_frame for sp in renderer.sprites)
