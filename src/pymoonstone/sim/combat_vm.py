@@ -489,19 +489,22 @@ def _step_loop2_on_marker(ctx: _StepContext) -> bool:
     return False
 
 
-def _handle_end_frame(ctx: _StepContext) -> None:
+def _emit_frame_complete(ctx: _StepContext) -> None:
+    ctx.yielded = True
+    ctx.events.append(FrameCompleteEvent(job_id=ctx.job.job_id, next_pc=ctx.job.pc))
+
+
+def _try_end_frame_loop_or_motion(ctx: _StepContext) -> bool:
     job = ctx.job
     work = job.work
-    pc = job.pc
 
     if work.loop_active:
         work.loop_count = u8(work.loop_count - 1)
         if work.loop_count != 0:
             job.loop_counter = work.loop_count
             job.pc = _validate_target(ctx.script, work.loop_pc)
-            ctx.yielded = True
-            ctx.events.append(FrameCompleteEvent(job_id=job.job_id, next_pc=job.pc))
-            return
+            _emit_frame_complete(ctx)
+            return True
     work.loop_active = False
     job.loop_counter = 0
 
@@ -509,23 +512,29 @@ def _handle_end_frame(ctx: _StepContext) -> None:
         work.motion_count = u8(work.motion_count - 1)
         if s8(work.motion_count) >= 0:
             _step_motion(ctx)
-            ctx.yielded = True
-            ctx.events.append(FrameCompleteEvent(job_id=job.job_id, next_pc=job.pc))
-            return
+            _emit_frame_complete(ctx)
+            return True
     work.motion_active = False
 
     if work.call_armed:
         work.call_armed = False
         job.pc = _validate_target(ctx.script, work.call_pc)
-        ctx.yielded = True
-        ctx.events.append(FrameCompleteEvent(job_id=job.job_id, next_pc=job.pc))
+        _emit_frame_complete(ctx)
+        return True
+
+    return False
+
+
+def _handle_end_frame(ctx: _StepContext) -> None:
+    if _try_end_frame_loop_or_motion(ctx):
         return
 
+    job = ctx.job
+    pc = job.pc
     next_byte = ctx.script[pc + 1] if pc + 1 < len(ctx.script) else 0x00
     if next_byte == 0xFF:
         if _step_loop2_on_marker(ctx):
-            ctx.yielded = True
-            ctx.events.append(FrameCompleteEvent(job_id=job.job_id, next_pc=job.pc))
+            _emit_frame_complete(ctx)
             return
         job.running = False
         job.pc = min(pc + 2, len(ctx.script))
@@ -534,13 +543,11 @@ def _handle_end_frame(ctx: _StepContext) -> None:
         return
 
     if next_byte == 0xFE and _step_loop2_on_marker(ctx):
-        ctx.yielded = True
-        ctx.events.append(FrameCompleteEvent(job_id=job.job_id, next_pc=job.pc))
+        _emit_frame_complete(ctx)
         return
 
     job.pc = min(pc + 2, len(ctx.script))
-    ctx.yielded = True
-    ctx.events.append(FrameCompleteEvent(job_id=job.job_id, next_pc=job.pc))
+    _emit_frame_complete(ctx)
 
 
 def _handle_set_facing(ctx: _StepContext) -> None:
