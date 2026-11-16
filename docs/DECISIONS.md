@@ -77,3 +77,21 @@ tasks to the Phase 5 to 8 module list.
 **Alternative considered:** keep the graph overworld and text shops and repair only the fight
 rendering. Cheaper, but the result is a different game with Moonstone's art, and the fight
 defects come from the same split between an invented state machine and replayed scripts.
+
+## ADR-010: Fight definitions are read by executing bounded store runs of `mog` code
+**Status:** ACCEPTED (2026-11-16)
+**Context:** The creature, arena and knight values (§10.15) are immediates inside the routines of
+`mog` hunk 0 that fill the script tables and initialise records. One checked operand read per
+value would need several hundred hard-coded positions.
+**Decision:** `assets/mog_code.py` gives two readers: single operands at known positions with the
+instruction word checked, and `StoreRun`, a minimal interpreter for the dozen store instructions
+the table-filling routines use. `assets/fight_defs.py` holds only routine entry and exit offsets
+for the supported CRC, runs each routine and reads the stored tables and record fields. An
+unknown instruction or terminator raises `MogVersionError`. The module is `fight_defs.py`, not
+`tables.py` as the plan suggested, because `tables.py` is already the generic `mog` / `program`
+table loader. `MogCode` accepts a `supported` CRC tuple so unit tests can feed it synthetic code.
+**Consequences:** A new `mog` version needs only new entry offsets. Table extents come from the
+`LEA` targets the runs see (§10.15). The decoder imports nothing from `sim/` or `app/`.
+**Alternative considered:** a pattern scan for `MOVE.L #imm,d16(A1)` runs. Rejected by §10.15 (no
+unchecked scans), and it cannot tell one routine's writes from another's.
+

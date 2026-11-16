@@ -1138,6 +1138,63 @@ positions:
 
 An unknown CRC is an error with a message that names the supported versions.
 
+**Two ways of reading code (T11.7).** `assets/mog_code.py` provides both: a single operand at a
+known position with its instruction word compared, and a **store run**, which executes a bounded
+range of a table-filling routine. A store run understands only `LEA abs.l,A0/A1/A4`,
+`MOVE.L #imm,d16(A0/A1/A4)`, `MOVE.W` / `MOVE.B #imm,d16(A1)`, `MOVE.L #imm,(A0)+` and `(A0)`,
+`ADDA.L #imm,A0`, `MOVEQ` into D0 / D7 with `DBRA` on the same register, and
+`MOVE.L (A1)+,(A0)+`. Any other instruction is an error. The word at the end of the range must be
+the expected terminator. A creature initialiser runs with A1 pointing at an empty record, and
+its writes are the record fields of §10.4.
+
+**Table extents.** The original fills every BSS table through its own `LEA table,A0`, and some
+tables are shorter than their nominal size: the Mudmen's and the Troll's walk tables have one
+block of four phases, not three. A table therefore ends at the nominal count (9 for the action,
+hurt, damage and defence tables, 24 for walk tables) or at the next `LEA` target, whichever comes
+first. A walk table is three blocks of eight longs: four phase scripts, a zero, and three unused
+longs.
+
+**What the decoder found** (`assets/fight_defs.py`, version `$FA43E5B2`):
+
+| Arena | Creature list slots 0..4 (`*` = with hit set) | Knight slot 4 | Sound bank |
+|---|---|---|---|
+| Flyer | `be1.c`*, `be2.c` | | `Be.a` |
+| Mudmen | `Mudmen1.cel`*, `Mudmen2.cel` | | `Mu.a` |
+| Trogg, axe (both kinds) | `TroggAxe1.cel`, `TroggAxe2.cel`* | | `Tr.a` |
+| Trogg, spear | `TroggSpear1.cel`, `TroggSpear2.cel`* in slots 1..4 | | `Tr.a` |
+| Ratmen | `Ratmen1.cel`*, `Ratmen2.cel` | | `Ra.a` |
+| Balok | `Balok1.cel`*, `Balok3.cel`, `Balok2.cel` | `Kn5.ob` | `Ba.a` |
+| Troll | `Troll1.cel`*, `Troll2.cel`* | `Kn5.ob` | `To.a` |
+| Guardian | `Demon2.cel`*, (unchanged), `Demon3.cel`*, `Demon4.cel`, `Demon1.cel` | | `Gu.a` |
+| Dragon | `Dragon1.cel`*, `Dragon2.cel`*, (unchanged), (unchanged), `Dragon5.cel`* | `Kn5.ob` | `Dr.a` |
+| Duel (type tag `$0C`) | `He1.ob`, `He2.ob`, `He3.ob`, `kn4.ob`* | | |
+
+The knight loader fills the knight list with `kn1.ob`..`kn4.ob` (`kn4.ob` with its hit set), all
+five effect slots with `blo.cel`, and loads `kn.a`. Handler offsets 12, 16 and 56 of the arena
+table lead to the duel. The frame-set lists of `$C0` are, in order, the knight, creature, map and
+effect lists.
+
+Quirks of the original that are decoded as they are:
+
+- The Troll's hurt table is filled with eight copies of the table's own address, not with
+  scripts. The decoder reports these entries as "not a script" (−1). The Troll's handler
+  (T11.10e) must not start them.
+- Balok's initialiser writes `facing = 1` and no `input_port`, no script tables and no walk
+  table. The Guardian's writes `hp` but not `hp_max`. Both handlers play fixed scripts.
+- The dragon arena pokes the knight's hurt entries 4, 8, 20 and 32. Its two extra actors are
+  dragon-initialised records of type `$2C` at (5, 0, 80) and (5, 0, 120).
+- The Ratmen's idle object takes the creature list through `LEA list,A2` in front of the spawn
+  call.
+- `$AC` with a zero "armed" byte disarms the second script, and its address field is zero and
+  not relocated. A script walker must not follow it.
+- The Balok arena's whole-list first wave can only reach its single entry, because Balok always
+  spawns one at a time. The entries after it in `mog` are other data.
+
+Acceptance check: `tests/adf/test_fight_defs_adf.py` walks every script reachable from each
+creature, arena object, knight table and poke, following every branch of §7.2, and asserts that
+every draw names a loaded slot and a frame inside that cel. On the supported version none fails,
+so no slot or frame needs remapping.
+
 ### 10.16 Per-handler specifications
 
 The knight's hurt-rule rows and each creature handler are specified in this subsection by the
