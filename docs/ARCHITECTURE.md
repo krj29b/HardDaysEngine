@@ -876,7 +876,8 @@ Every creature arena starts the same way, in this order:
    wasteland; §4.3 composes it, where the arena file prefixes `gl`, `fo`, `sw`, `wa` are its
    region indices 1, 0, 2, 3) and its obstacle table. The **low edge** is the largest `y` of
    the obstacle records, starting from 30.
-3. Free all 20 fight-pool actors, all jobs and all dagger trajectories.
+3. Free all 20 fight-pool actors, all jobs and all dagger trajectories, and clear the brawler's
+   gloat latch (§10.20).
 4. Place the attacker: the current knight becomes the first fighter at `x = 250`, `height = 0`,
    `y = 100`, facing left (3); its script tables are set to the knight tables (§10.9) and a job
    starts with the knight's **enter** script.
@@ -1202,7 +1203,7 @@ task that implements them (T11.9, T11.10a to T11.10i), before the code:
 | Handler | Types | One-line behaviour | Task |
 |---|---|---|---|
 | Knight hurt rules | victim `$0C` | One row per attacker type (§10.11) | T11.9 |
-| Brawler | `$18`, `$1C`, `$20` | Walks up to the target and picks one of three attacks by distance; the spear type thrusts | T11.10a |
+| Brawler | `$18`, `$1C`, `$20` | Walks up to the target and picks one of three attacks by distance; the spear type thrusts (§10.20) | T11.10a |
 | Caster | `$24` | Keeps its distance, throws daggers, grabs the first fighter and drops or slams it | T11.10b |
 | Snatcher | `$04` | Appears beside the first fighter, walks up, grabs and carries it off | T11.10c |
 | Flyer | `$00` | Crosses the arena between `x = -50` and `380` at the target's depth | T11.10d |
@@ -1214,7 +1215,8 @@ task that implements them (T11.9, T11.10a to T11.10i), before the code:
 | Dagger | `$34` | Runs its script along a trajectory until it leaves the screen or hits | T11.9 |
 | Idle object | `$28` | Clears its links and keeps its script | T11.8 |
 
-The knight's rows, the knight handler in exact form, the dagger and the hop are §10.19.
+The knight's rows, the knight handler in exact form, the dagger and the hop are §10.19; the
+brawler and the approach helpers are §10.20.
 
 ### 10.17 The script engine (`T11.8`)
 
@@ -1411,8 +1413,11 @@ and `running = 1`. The work block is **not** reset on a restart.
 **Idle object** (`$28`): clear both links of the owner and keep.
 
 **Engine routines.** A `$B0` operand is the address of a routine in `mog` code. The scripts of the
-supported version call seventeen; the decoder identifies them by hunk and offset and checks the
-instruction word at each entry. T11.8 executes the four fight-level ones (§10.12):
+supported version call at least nineteen; the decoder identifies them by hunk and offset and checks
+the instruction word at each entry. T11.8 executes the four fight-level ones (§10.12), and T11.10a
+adds the gloat latch. The scripts also hold `$B0` calls to about twenty more routines (sound
+pickers among them) that the walker of T11.7 does not reach. Each creature task adds those its
+scripts actually call; an unlisted routine stops the engine with an error:
 
 | Routine | Effect |
 |---|---|
@@ -1420,6 +1425,7 @@ instruction word at each entry. T11.8 executes the four fight-level ones (§10.1
 | End the fight | §10.12 |
 | Mark the first fighter dead | `hp = $FFFF` of the actor in the active-fight block +0 |
 | Pause all | Toggle the pause word of the job of every pool record except the "kept" record (the one whose job keeps running during a grab), then of the dragon record |
+| Set the gloat latch | The brawler's gloat latch becomes 1 (§10.20). The knight's "down hard" script calls it, so a knight that goes down hard is never gloated over. Added by T11.10a: the walker of T11.7 does not reach that fixed script |
 
 The others belong to the tasks that own their subject: the seven sound pickers (T11.23), the
 dagger throw, the hop and its step (T11.9, §10.19), the counter (T11.10f / h), and three guardian
@@ -1572,7 +1578,8 @@ hurt rule with the target as the attacker.
 against `sword`: `$17` +2, `$18` +3, `$19` +5); doubled for action `$20`; doubled once more for
 the first moonstone pair that matches: bit 0 with frame 46, bit 3 with 46, bit 1 with 45, bit 2
 with 49, against the attacker's inventory slot `$16` and the moon frame. A record without an
-inventory (a dagger) has no moonstones. **Protection**: the amount shifted right by the knight's
+inventory (a dagger) has no moonstones; a record without a damage table (the spear Trogg) counts
+its entry as 0 (§10.20). **Protection**: the amount shifted right by the knight's
 count in inventory slot `$08` taken modulo 64; 16 or more gives 0.
 
 **Dagger throw** (`dagger_throw`, called from a knight's action-`$0C` script): the thrower's
@@ -1601,6 +1608,146 @@ type bytes are §9.7 / §9.8 constants.
 
 Deliberate differences: the address errors and table overruns above raise; a missing rule
 raises; an empty wall table tests nothing.
+
+### 10.20 The brawler: Troggs (`T11.10a`)
+
+This subsection is the exact model of the handler for types `$18`, `$1C` (axe Troggs) and `$20`
+(spear Trogg), and of the **approach helpers** it shares with the dragon (T11.10h). Words are
+16-bit and wrap. "Signed" compares read them as two's complement. `|v|` is the 68000 absolute
+value of a word (negate when bit 15 is set, so `|$8000| = $8000`, which is negative). Numbers in
+the text are the supported version's. All of them are read from `mog` (end of this subsection).
+Action codes and type bytes are §9.7 / §9.8 constants.
+
+**Fight cells used here.** The **target** is the first fighter (§10.12). The **gloat latch**
+(a word) is cleared by the common set-up (§10.2). This handler sets it, and so does the engine
+routine "set the gloat latch" (§10.18), which the knight's "down hard" script calls. The **approach cells**
+are scratch words the helpers pass between each other: `dx`, `dy`, `dy_override`, `near`,
+`block` and `vertical`. The **random generator** is the one of §11.2, shared with the map. The
+**cool-down** is the high byte of the record's word at +106. Only that byte is read or written.
+
+**Handler result.** The handler builds a **next script**, which starts as `idle_script`. Its exit
+turns the value into the job-pass result of §10.18: `$FFFFFFFF` is **keep**, 0 is **end**, and any
+other value is that script at the record's `x`, `height`, `y` and `facing`.
+
+**Handler.** In order:
+
+1. `attacker` set: the **hurt branch**.
+2. `hit_target` set: the **hit branch**.
+3. Otherwise **think**, clearing the brawler's own `input` and `action`.
+
+**Hurt branch.** The cool-down becomes 0. The attacker's type picks the amount:
+- `$0C` or `$20`: the attacker's contact damage (§10.19), with no protection.
+- `$34`: 3.
+- Any other type: nothing happens and the result is the idle script.
+
+The amount is subtracted from `hp`. The next script is `hurt_scripts[attacker's action]`, where a
+zero entry ends the job (§10.11). The handler never tests `hp`: death comes from the hurt
+script's "jump if owner dead" branch.
+
+**Hit branch.** The next script is `after_hit_script` and the cool-down becomes 10. Then the
+target's type decides:
+- **Not `$0C`:** think, clearing the **target's** `input` and `action`. This is a quirk of the
+  original, which leaves the brawler's own `input` and `action` as they were. The next script
+  stays `after_hit_script` unless think changes it.
+- **`$0C`, with no `hit_target` of its own and `hp <= 0` (signed):** the next script becomes
+  `$FFFFFFFF`. A spear Trogg while the demo flag is off then kills the target's job (§10.18) and
+  plays the spear-finish script. Nothing further applies.
+- **Then, for a spear Trogg:** the next script becomes `idle_script`. An axe Trogg keeps the
+  next script as it stands, so it repeats `after_hit_script` while the knight stands, and keeps
+  its job (`$FFFFFFFF`) once the knight is down.
+
+**Think.** The chosen record's `input` and `action` become 0. Then:
+1. Call **approach**, which returns a flag and a distance `d`.
+2. Flag set: if `near` is 0, **walk**. Otherwise `d = |x - target.x|` and **decide**.
+3. Flag clear: decide with the returned `d`.
+
+**Decide** (`d` and the record's numbers are compared signed). In order:
+1. `d <= too_close_x`: walk.
+2. Target `hp <= 0`. With the demo flag on, the next script stands (no change). Then
+   `d > 100`: walk. The gloat latch is set: stand. The cool-down is not 0: subtract 1 from it
+   and stand. Otherwise set the gloat latch and **strike**.
+3. The cool-down is not 0: subtract 1 from it and stand.
+4. Spear Trogg: `d > reach_x` walks. Otherwise the cool-down becomes 20, `action` becomes 4,
+   and the next script is the **thrust** script (a fixed script; the spear Trogg has no action
+   table).
+5. Axe Trogg with `d <= 100`: one percent draw (§11.2). A draw above 30 strikes. Otherwise the
+   first fighter's `action` decides: `$10` (defend) goes to the heavy test, anything else
+   strikes.
+6. **Heavy test**: `d > 120` walks. Otherwise the cool-down becomes 10, `action` becomes `$20`,
+   and the next script is `action_scripts[$20]`.
+
+**Strike** sets the cool-down to 10 and `action` to 8, and the next script is
+`action_scripts[8]`. "Stand" leaves the next script as it is.
+
+**Approach** (also used by the dragon). It works on the record and the target:
+1. `dx`, `dy`, `near` and `dy_override` become 0.
+2. `facing` becomes 1 when `x < target.x` (signed), else 3.
+3. `vertical` becomes 0.
+4. `|target.y - y| <= depth_reach` (signed) sets `near = 1`. Otherwise one input bit corrects
+   the depth and sets `vertical = 1`: down (bit 2) when `y <= target.y` (signed), up (bit 3)
+   when the record is further down.
+5. With `e = target.x - x` and `a = |e|`:
+   - `a <= too_close_x` (signed): left (bit 1) when `e >= 0` (signed), else right (bit 0). The
+     record backs away. Return flag 1 (the distance returned is `e`, which think never reads).
+   - Otherwise `a <= reach_x`: return flag `vertical` with distance `a`.
+   - Otherwise right when `x < target.x` (signed), else left. Return flag 1 with distance
+     `reach_x`.
+
+The input bits are ORed into the record's `input`. Think cleared it first, except in the hit
+branch's quirk, where stale bits of the last move stay set.
+
+**Walk.** If the low byte of `input` is 0, the next script stands. Otherwise the **step
+helpers** run for the bits that are set, in the order up (bit 3), down (bit 2), right (bit 0),
+left (bit 1). Each helper reads the walk phase `p` and the entry of its step table at byte offset
+`p * 4`, an `{x, y}` word pair. The tables are three 16-byte runs of `{x, y}` pairs in `mog`'s code
+hunk: side, up, down. They lie back to back, so an entry past a table's end reads the next table,
+or the code after the last one. Each helper sets a **block** (0, 32 or 64) and a phase step `s`:
+
+| Helper | `dx`, `dy` | Also | Block | `s` |
+|---|---|---|---|---|
+| Up | up table `x`, minus up table `y` | `dy_override = -5` | 32 | +1 |
+| Down | down table `x`, down table `y` | `dy_override = 5` | 64 | +1 |
+| Right | side table `x`, side table `y` | `dy = dy_override` when that is not 0 | 0 | see below |
+| Left | minus side table `x`, side table `y` | `dy = dy_override` when that is not 0 | 0 | see below |
+
+For the two side helpers, `s` is +1 when the bit of the facing direction is set (right for
+facing 1, left otherwise), so the record walks forwards. It is −1 otherwise: the record backs
+away and the walk cycle runs backwards. A later helper replaces the block and `s` of an
+earlier one. Then the **step** runs:
+
+1. Phase advance: `p = (p + s) & 7`, repeated until `walk_scripts[block + p * 4]` is not 0. The
+   axe Troggs' sideways block has three phase scripts, so phase 3 is skipped. The original loops
+   for ever on a block with no script. The implementation raises after eight tries.
+2. The block is stored. `input` is masked by the movement probe of §10.19, using `dx` and the
+   record's facing. No arena clip and no obstacle probe run.
+3. Nothing left in `input`: the phase becomes 0 and the next script is `idle_script`.
+4. Otherwise `dx` becomes 0 when neither side bit survived, and `dy` becomes 0 when neither
+   vertical bit survived. The next script is `walk_scripts[block + p * 4]`. Then `x += dx` and
+   `y += dy`.
+
+**What a Trogg fight looks like.** A Trogg turns to face the knight. It walks along the depth
+axis until it is within `depth_reach` of the knight, and sideways until it is within
+`reach_x`. It backs away when the knight is closer than `too_close_x`. Within reach, it either
+waits out its cool-down on the idle script or attacks. An axe Trogg mostly strikes (action 8);
+it swings the heavy blow (`$20`) only when the knight defends or the knight is out of strike
+range but within 120. A spear Trogg always thrusts. After a knight is down, an axe Trogg strikes
+it once (the gloat) and then stands. A spear Trogg whose blow lands on a downed knight kills the
+knight's job and plays its finishing script.
+
+**Read from `mog`** (`assets/creature_rules.py`, version `$FA43E5B2`):
+- The handler's entry, by the handler-table entries of the three types (all three must name it).
+- Every number above, as operands with their instruction words checked: the two 100s, the 120,
+  the 30, the four cool-downs, the three action codes, the defend action and the 3.
+- The thrust and spear-finish scripts, as relocated operands.
+- The step tables, through their relocated `LEA`s (the two side `LEA`s must agree).
+- From the helper hunk (40): the helper entries, checked by their first instruction word, and
+  the two `dy_override` operands.
+
+**Deliberate differences.**
+- A phase advance that finds no script raises instead of looping for ever.
+- A record without a damage table counts its table entry as 0 in contact damage. The spear Trogg
+  has no damage table, so its thrust on another Trogg made the original read the 68000 vector
+  table.
 
 ---
 

@@ -65,8 +65,14 @@ class Blow:
 
 
 def contact_damage(fight: Fight, rules: KnightRules, attacker: Actor) -> int:
-    """The attacker's contact damage for its current action (§10.19), a 16-bit word."""
-    amount = fight.table_long(attacker.damage_table, attacker.action) + attacker.strength
+    """The attacker's contact damage for its current action (§10.19), a 16-bit word.
+
+    A record without a damage table (the spear Trogg) counts its entry as 0 (§10.20).
+    """
+    entry = 0
+    if attacker.damage_table != 0:
+        entry = fight.table_long(attacker.damage_table, attacker.action)
+    amount = entry + attacker.strength
     for sword, bonus in rules.damage.sword_bonus:
         if attacker.sword == sword:
             amount += bonus

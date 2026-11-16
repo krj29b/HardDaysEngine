@@ -9,7 +9,6 @@ offset of its code, whose first instruction word is compared too.
 
 from __future__ import annotations
 
-import struct
 from typing import TYPE_CHECKING
 
 from pymoonstone.assets.fight_palette import MogVersionError
@@ -153,20 +152,13 @@ _HIT_ENTRIES: dict[int, tuple[int, HitRule]] = {
 
 
 def _hunk_word(mog: MogCode, hunk: int, pos: int) -> int:
-    value: int = struct.unpack_from(">H", mog.hunk_data(hunk), pos)[0]
-    return value
+    return mog.hunk_word(hunk, pos)
 
 
 def _operand(mog: MogCode, operand: Operand, what: str, hunk: int = CODE_HUNK) -> int:
     """The immediate word after a checked instruction word (and displacement, if any)."""
     pos, opcode, displacement = operand
-    found = _hunk_word(mog, hunk, pos)
-    if found != opcode:
-        msg = f"mog: {what}: expected ${opcode:04X} at hunk {hunk} offset {pos}, found ${found:04X}"
-        raise MogVersionError(msg)
-    if displacement is not None and _hunk_word(mog, hunk, pos + 4) != displacement:
-        raise MogVersionError(f"mog: {what}: unexpected displacement at code offset {pos + 4}")
-    return _hunk_word(mog, hunk, pos + 2)
+    return mog.operand(pos, opcode, what, displacement=displacement, hunk=hunk)
 
 
 def _signed(word: int) -> int:
@@ -175,11 +167,7 @@ def _signed(word: int) -> int:
 
 def _relocated(mog: MogCode, pos: int, opcode: int, hunk: int, what: str) -> int:
     """The relocated long operand of the instruction at ``pos``; it must point into ``hunk``."""
-    mog.expect(pos, (opcode,), what)
-    pointer = mog.pointer(pos + 2, what)
-    if pointer.hunk != hunk:
-        raise MogVersionError(f"mog: {what}: the operand at {pos} does not point into hunk {hunk}")
-    return pointer.offset
+    return mog.relocated(pos, opcode, hunk, what)
 
 
 def _words(mog: MogCode, lea_pos: int, count: int, what: str) -> tuple[int, ...]:

@@ -28,6 +28,7 @@ from pymoonstone.sim.fight_script import (
     TickOutput,
 )
 from pymoonstone.sim.m68k import s16, u16, u32
+from pymoonstone.sim.rng import Rng
 
 if TYPE_CHECKING:
     from pymoonstone.sim.inventory import Inventory
@@ -43,6 +44,7 @@ FIGHTER_DIED = "fighter_died"
 END_FIGHT = "end_fight"
 MARK_FIRST_DEAD = "mark_first_dead"
 PAUSE_ALL = "pause_all"
+SET_GLOAT = "set_gloat_latch"
 
 
 class FightError(RuntimeError):
@@ -129,6 +131,18 @@ class TableKeys:
 
 
 @dataclass(slots=True)
+class ApproachCells:
+    """The scratch words the approach and step helpers pass between each other (§10.20)."""
+
+    dx: int = 0
+    dy: int = 0
+    dy_override: int = 0
+    near: int = 0
+    block: int = 0
+    vertical: int = 0
+
+
+@dataclass(slots=True)
 class FrameOutput:
     """What one :meth:`Fight.step` produced.
 
@@ -166,6 +180,10 @@ class Fight:
     ``Actor.inventory``; ``ports`` the joystick words of port 0 and 1; ``walls`` the arena's
     obstacle table; ``demo``, ``confused`` / ``confused_on`` and ``moon_frame`` as named there;
     ``hop_facing``, ``hop_table`` and ``hop_counter`` the hop cells.
+
+    The cells of §10.20: ``rng`` is the generator of §11.2, which the map hands to the fight (the
+    default seed only serves fights built on their own); ``gloated`` the brawler's gloat latch;
+    ``approach`` the scratch words of the approach helpers.
     """
 
     image: ScriptImage
@@ -199,6 +217,9 @@ class Fight:
     hop_facing: int = 0
     hop_table: int = 0
     hop_counter: int = 0
+    rng: Rng = field(default_factory=lambda: Rng(1))
+    gloated: bool = False
+    approach: ApproachCells = field(default_factory=ApproachCells)
 
     def __post_init__(self) -> None:
         if len(self.knights) != KNIGHT_COUNT:
@@ -218,6 +239,7 @@ class Fight:
             END_FIGHT: end_fight,
             MARK_FIRST_DEAD: mark_first_dead,
             PAUSE_ALL: pause_all,
+            SET_GLOAT: set_gloat_latch,
         }
 
     # ---- records and jobs (§10.18) ---------------------------------------------------------
@@ -419,6 +441,11 @@ def fighter_died(fight: Fight, _call: RoutineCall | None = None) -> None:
 def mark_first_dead(fight: Fight, _call: RoutineCall | None = None) -> None:
     """The first fighter's hit points become the dead marker."""
     fight.actor(fight.first).hp = fight.constants.dead_hp
+
+
+def set_gloat_latch(fight: Fight, _call: RoutineCall | None = None) -> None:
+    """Set the brawler's gloat latch (§10.20); the knight's "down hard" script calls it."""
+    fight.gloated = True
 
 
 def pause_all(fight: Fight, _call: RoutineCall | None = None) -> None:

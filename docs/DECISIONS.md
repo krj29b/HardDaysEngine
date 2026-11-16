@@ -146,3 +146,27 @@ change for one fight.
 same table store and rule record pattern.
 **Alternative considered:** constants for the amounts (5, 3, 10, ...) in `sim/`. Rejected:
 AGENTS.md §3 requires original tables and tunables to be read at runtime.
+
+## ADR-013: Creature handlers live in `sim/fight_ai/`; the fight owns the original generator
+**Status:** ACCEPTED (2026-11-16, T11.10a)
+**Context:** The brawler is the first creature handler (§10.20). It draws from the original
+random generator (§11.2), shares its approach and step helpers with the dragon (T11.10h), and
+needs a fight-level latch that a knight script also sets.
+**Decision:**
+1. One module per handler under `sim/fight_ai/` (`brawler.py`), plus `approach.py` for the
+   shared helpers. Each handler takes a frozen rules record (`BrawlerRules`) that
+   `assets/creature_rules.py` reads from `mog` (operands with instruction words checked,
+   relocated scripts, step tables via their `LEA`s, the handler entry via the handler table's
+   fill routine run as a store run, the helpers by call site and first instruction word).
+   `install_<handler>` registers it per type byte.
+2. `sim/rng.py` implements the generator of §11.2 now. `Fight.rng` holds it; the map will hand
+   its own instance to the fight (T11.11 / T11.12). `sim/prng.py` stays until T11.12 removes it.
+3. The helpers' scratch words (`ApproachCells`) and the gloat latch are `Fight` cells, as in the
+   original, not handler state.
+4. `MogCode` gains public `hunk_word`, `operand` and `relocated`; `assets/fighter_rules.py` uses
+   them instead of private copies.
+**Consequences:** The remaining handlers follow the same pattern. A routine that a fixed
+script calls but the T11.7 walker never reached is added to the routine table by the task that
+meets it (here: "set the gloat latch", `$71C8`).
+**Alternative considered:** draw from the existing `SimPrng` for now. Rejected: it is invented
+(§11.2), so the brawler's choices would differ from the original's.

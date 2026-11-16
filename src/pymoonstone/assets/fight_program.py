@@ -20,6 +20,7 @@ from pymoonstone.sim.fight import (
     FIGHTER_DIED,
     MARK_FIRST_DEAD,
     PAUSE_ALL,
+    SET_GLOAT,
     FightConstants,
     ScriptTables,
 )
@@ -44,6 +45,7 @@ _ROUTINES: tuple[tuple[int, int, int, str], ...] = (
     (CODE_HUNK, 0x58B8, 0x33FC, "hop"),
     (CODE_HUNK, 0x58C2, 0x0679, "hop_step"),
     (CODE_HUNK, 0x6FFC, 0x207C, "dagger_throw"),
+    (CODE_HUNK, 0x71C8, 0x33FC, SET_GLOAT),
     (CODE_HUNK, 0x71D2, 0x4EB9, "sound_pick_1"),
     (CODE_HUNK, 0x721C, 0x4EB9, "sound_pick_2"),
     (CODE_HUNK, 0x7264, 0x4EB9, "sound_pick_3"),

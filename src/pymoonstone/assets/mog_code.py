@@ -158,6 +158,45 @@ class MogCode:
             raise MogVersionError(f"mog: {what}: the routine at {pos} is not in hunk 0")
         return routine.offset
 
+    def hunk_word(self, hunk: int, pos: int) -> int:
+        """The word at ``pos`` of any hunk."""
+        value: int = struct.unpack_from(">H", self.hunk_data(hunk), pos)[0]
+        return value
+
+    def operand(
+        self,
+        pos: int,
+        opcode: int,
+        what: str,
+        *,
+        displacement: int | None = None,
+        hunk: int = CODE_HUNK,
+    ) -> int:
+        """The immediate word after a checked instruction word (and displacement, if given)."""
+        found = self.hunk_word(hunk, pos)
+        if found != opcode:
+            msg = (
+                f"mog: {what}: expected ${opcode:04X} at hunk {hunk} offset {pos}, "
+                f"found ${found:04X}"
+            )
+            raise MogVersionError(msg)
+        if displacement is not None and self.hunk_word(hunk, pos + 4) != displacement:
+            raise MogVersionError(
+                f"mog: {what}: unexpected displacement at hunk {hunk} offset {pos + 4}"
+            )
+        return self.hunk_word(hunk, pos + 2)
+
+    def relocated(self, pos: int, opcode: int, target: int, what: str) -> int:
+        """The relocated long operand of the code instruction at ``pos``; it must point into
+        ``target``. Returns its offset there."""
+        self.expect(pos, (opcode,), what)
+        pointer = self.pointer(pos + 2, what)
+        if pointer.hunk != target:
+            raise MogVersionError(
+                f"mog: {what}: the operand at {pos} does not point into hunk {target}"
+            )
+        return pointer.offset
+
     def cstring(self, pointer: Pointer, what: str) -> str:
         """NUL-terminated ASCII string at ``pointer``."""
         data = self.hunk_data(pointer.hunk)
