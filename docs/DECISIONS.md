@@ -95,3 +95,31 @@ table loader. `MogCode` accepts a `supported` CRC tuple so unit tests can feed i
 **Alternative considered:** a pattern scan for `MOVE.L #imm,d16(A1)` runs. Rejected by §10.15 (no
 unchecked scans), and it cannot tell one routine's writes from another's.
 
+## ADR-011: The fight engine is built in `sim/` first; `app/` moves to it in a second step
+**Status:** ACCEPTED (2026-11-16)
+**Context:** T11.8 asks for the engine and for `app/` to render its draw lists. The old
+interpreter `sim/combat_vm.py` is still imported by `sim/knight_combat.py` and `sim/monster_ai.py`,
+which T11.9 and T11.10 replace, and a fight in `app/` cannot run on the new engine before a knight
+handler and one creature handler exist.
+**Decision:**
+1. T11.8 is split. T11.8a builds the engine (§10.17, §10.18) in `sim/fight_script.py`,
+   `sim/fight_contact.py`, `sim/fight.py` and the 132-byte record in `sim/actor.py`, with the
+   asset builder `assets/fight_program.py`. T11.8b, after T11.9 and T11.10a, moves `app/` onto it
+   and deletes `sim/combat_vm.py`. Until then the two interpreters coexist; nothing new imports
+   the old one. This is the one sanctioned exception to "no parallel models" (ADR-009), and it ends
+   with T11.8b.
+2. Actors are referred to by handles (1..4 knights, 5 dragon, 6..25 pool, 26 the spare record the
+   link clear touches; 0 none), script fields by positions in the script hunk, frame lists by their
+   number 1..4. Record fields hold raw unsigned values so byte-addressed pokes work unchanged.
+3. Handlers are registered per type byte in `Fight.handlers`, engine routines per name in
+   `Fight.routines`. The `$B0` operands are named by the asset builder (hunk, offset, entry word
+   checked). A routine that has no implementation yet is reported in
+   `FrameOutput.skipped_calls`; a type without a handler raises.
+4. Where the original hangs or corrupts memory (pool full, list overflow, a script without a
+   marker, a next-creature routine that spawns nothing, the contact test's plane-count overflow),
+   the engine raises or uses the obvious reading, and §10.17 / §10.18 say so.
+**Consequences:** The engine is tested on its own (synthetic scripts, and the real knight scripts
+against an independent walker). The fight on screen does not change until T11.8b.
+**Alternative considered:** rewire `app/` in T11.8 with temporary handlers that only replay idle
+scripts. Rejected: a placeholder handler is exactly the rigour theatre AGENTS.md §3 forbids, and
+the screen would show standing fighters only.

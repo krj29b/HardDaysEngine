@@ -102,6 +102,10 @@ class MogCode:
         """Hunk that the relocated long at ``pos`` of ``hunk`` points into, or ``None``."""
         return self._relocs[hunk].get(pos)
 
+    def relocations(self, hunk: int) -> dict[int, int]:
+        """Every relocated long of ``hunk``: position to the hunk it points into."""
+        return dict(self._relocs[hunk])
+
     def hunk_data(self, hunk: int) -> bytes:
         return self.executable.sections[hunk].data
 

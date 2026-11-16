@@ -1042,7 +1042,7 @@ directions allowed. For every other active job's owner with a non-zero `box_min_
 - If the depth difference is at most 20 and both the unshifted x-boxes and the y-boxes overlap:
   down is blocked when the mover is behind (smaller depth), up when it is in front.
 
-Interval overlap is closed (touching counts).
+Interval overlap is the original's interval test (§10.17, contact test step 2).
 
 **Arena clip.** Left is cleared when `x + 25` (facing right) or `x - 25` (facing left) is below
 10, right when it is above 320, down when `y + 9 > 155`, up when `y < 30`.
@@ -1214,6 +1214,220 @@ task that implements them (T11.9, T11.10a to T11.10i), before the code:
 | Computer knight | `$10` | Chooses between guarding and attacking by distance, last action and odds | T11.10i |
 | Dagger | `$34` | Runs its script along a trajectory until it leaves the screen or hits | T11.9 |
 | Idle object | `$28` | Clears its links and keeps its script | T11.8 |
+
+### 10.17 The script engine (`T11.8`)
+
+This subsection is the exact model `sim/` implements. Where it differs from §7.2, this text wins
+(the differences are listed at the end). Every number is 16-bit and wraps unless stated.
+
+**Coordinates.** A job keeps three words: `x`, `height` and `depth`. They mirror the owner's `x`
+(+4), `height` (+6) and `y` (+8, the depth). `height` is 0 on the ground and **negative in the
+air**. A draw lands on screen row `depth + height + dy`. The sort key is `depth`.
+
+**Job.** Besides the §9.6 fields, a job carries its own work block, its attack list and its hurt
+list. These belong to the job record and move with it when the table is sorted. The ten job
+records stay in a fixed table whose order is the order of every pass and of every owner lookup.
+
+**Work block.** Loop 1 (count, active, return position), loop 2 (count, active, return position),
+a deferred jump (target, armed), the second script (armed, script), the motion block (flags,
+active, steps left, vertical speed and limit, horizontal speed and limit, return position), and
+an unused parameter byte. Resetting it clears everything except the second script's armed flag
+and script.
+
+**One engine tick**, in this order:
+
+1. **Sort**: bubble the ten records by `depth`, an unsigned compare; two neighbours swap while the
+   later one is smaller; repeat until a sweep swaps nothing. Inactive records take part.
+2. **Second-script pass**: for each record in table order that is active, not paused and has its
+   second script armed, run a *copy* of the job whose `height` is 0, whose script is the second
+   script and whose work block is the single scratch work block shared by all jobs. The scratch
+   block is never cleared, between jobs or between ticks. Changes to the copy are thrown away;
+   writes to the owner (pokes, kill, write-back) are real. The list cursors and the bounding box
+   cells are **not** reset for this pass: the copy appends to wherever the cursors stand and grows
+   whatever box the cells hold (normally the state left by the last job of the previous main
+   pass).
+3. **Main pass**: for each record in table order that is active and not paused (a job whose
+   script has ended still runs), point the two list cursors at the job's own lists, clear the box
+   cells (armed flag and the four edges to 0) and run the job.
+
+**Running a job** executes instructions from the job's script position until a frame marker. A
+script position of 0 means "nothing": the run stops at once without a write-back. Instructions:
+
+- **Draw** (`$00`..`$7F`, 6 bytes). The cel is entry `(op & $1F) / 4` of the job's frame list
+  (entries are longs, so `op & $1F` is a byte offset; `op` bits 5 and 6 are ignored). The frame's
+  width `w` and height `h` come from its directory entry. The frame's current state stands for
+  the number 1 when it is in its stored orientation (flag byte 1, §3.2) and 3 when mirrored; if
+  that number differs from the job's facing byte, the frame is mirrored in memory first (the
+  state toggles; it is per frame and shared by every job that draws it). A facing other than 1
+  or 3 therefore toggles the frame at every draw. Screen
+  `x = job.x + dx` when facing bit 1 is clear, otherwise `job.x - dx - w`; screen
+  `y = dy + height + depth`. The job remembers `x`, `y`, `w`, `h` and the frame. Unless flag bit 6
+  is set the box grows (below). If flag bit 7 is set and the gore-off flag is on, nothing else
+  happens. Otherwise: the text flag takes flag bit 5; with bit 4 the cel is stamped into the
+  background picture, without it the draw is entered in the restore list; with bit 1 an attack
+  entry `{cel, frame, x, y}` is written at the attack cursor, with bit 0 a hurt entry at the hurt
+  cursor; and the cel is drawn on the screen. The run continues with the next instruction.
+- **Box growth.** If the box is not armed, all four edges take `x` / `y` and it becomes armed.
+  Then, with signed compares: `min_x = x` unless `x > min_x`; `max_x = x + w` unless that is
+  smaller than `max_x`; the same for `y` with `h`.
+- **`$FF` frame marker** (2 bytes `$FF next`), checked in this order, the first that applies ends
+  the run:
+  1. Loop 1 active: count down; if not zero, go to the loop-1 position. If zero, loop 1 is cleared.
+  2. Motion active: count down the steps (byte); if the result is not negative (signed byte),
+     take one motion step. Otherwise fall through *without* clearing the active flag.
+  3. Deferred jump armed: disarm it and go to its target.
+  4. `next = $FF`: if loop 2 is active, count down; if not zero, go to the loop-2 position.
+     Otherwise loop 2 is cleared and the script has **ended** (`running = 0`). The script position
+     stays on the marker, so a job that is run again meets the same marker.
+  5. `next = $FE`: as in 4, but if loop 2 does not repeat the script moves on by 2.
+  6. Anything else: the script moves on by 2.
+
+  Every case ends with the **write-back**: owner `x`, `height`, `y`, `facing` take the job's
+  values and owner +58 / +60 / +112 / +114 take the box cells.
+- **`$FD`** goes to the motion return position, **`$FE`** to the loop-2 position, and the run
+  continues there (both 1 byte). A return position of 0 stops the run without a write-back.
+- **`$80 f`**: facing becomes `f`, or facing bit 1 toggles when `f = $FF`. The owner's facing is
+  written at once.
+- **`$84 m target`**: `m = 3` jumps now; any other `m` arms the deferred jump.
+- **`$88 n`**: loop 1 starts after this instruction with count `n`. With `n = 0` the count is the
+  low five bits of the free-running VBL counter, and 1 if those are 0. (Not the random number
+  generator.)
+- **`$8C p n f vy vyl vx vxl`**: motion active with `n` steps, flags `f` and the speeds and
+  limits; its return position is the next instruction, where the run continues.
+- **`$94 n`**: loop 2 starts after this instruction with count `n`.
+- **`$98 _ target`**: jump if the gore-off flag is on.
+- **`$A0 f dx dh dd`**: with `f` bit 6, `x`, `height`, `depth` are set to the three words.
+  Otherwise `x` moves by `dx`: added when (`f` bit 0 set and facing is not 3) or (`f` bit 0 clear
+  and facing is 3), subtracted otherwise; `height` moves by `dh`, subtracted with `f` bit 3;
+  `depth` by `dd`, subtracted with `f` bit 5. No clipping.
+- **`$A4 id`**: sound effect `id` (§6.2).
+- **`$A8 s off value`**: write the low byte (`s` bit 0), the low word (`s` bit 1) or the long of
+  `value` into the owner at signed offset `off`. Offsets address the §9.2 bytes, so byte 63 is the
+  low byte of the word at +62. A long written at a script field holds a script address.
+- **`$AC a target`**: the second script becomes `target`, armed when `a` is not 0.
+- **`$B0 _ routine`**: call an engine routine (§10.18) with the owner, the job's frame list and
+  its position and facing; the script moves on by 6 *after* the call returns (as for `$B8`).
+- **`$B4 _ target`**: if the owner's `hp` (signed) is 0 or less, jump and reset the work block.
+- **`$B8 _ target`**: spawn an object running `target` (§10.18).
+- **`$BC`**: clear the owner's `active` long, clear the job's `active` and `running`, move on by
+  2 and continue (the run goes on until a marker).
+- **`$C0 n`**: the job's frame list becomes frame-set list `n - 1` (§10.15, 1 = knight, 2 =
+  creature, 3 = map, 4 = effect); the owner's `frame_list` (+38) too.
+- **`$C4 _ target`**: find the first record in the table, active or not, whose owner is the
+  acting knight (active-fight block +0); jump if there is one and its facing equals this job's.
+- **`$C8 s off target`** / **`$CC s off target`**: read a byte, word or long of the owner as for
+  `$A8`; jump if it is zero / non-zero.
+- **`$D0`**: reset the work block.
+- **`$90`, `$9C` and `$D4`..`$FC`**: the original has no handler (it hangs). The run stops without
+  a write-back. No shipped script contains them.
+
+**Motion step.** `v` starts as the vertical speed (zero-extended to 16 bits).
+
+- Flag bit 1 (fall): `height += v`. If `height` is now 0 or more (signed), it becomes 0 and bit 1
+  is cleared. Otherwise `v` takes the new `height` as a word, and unless flag bit 5 is set, if the
+  low byte of `v` is below the limit (signed bytes) it is doubled (low byte only) and stored as
+  the new vertical speed.
+- Otherwise flag bit 0 (rise): `height -= v`; unless bit 5, if the low byte of `v` is above the
+  limit (signed bytes) it is halved (unsigned shift of the low byte) and stored.
+- The low byte of `v` is replaced by the horizontal speed; the high byte stays (so after a fall
+  that did not land it is `$FF`, and a horizontal move adds `$FFxx`). Flag bit 4 moves `x` by `v`
+  in the facing direction (subtract when facing bit 1 is set), flag bit 2 opposite to it; after
+  each move, unless bit 7, if the low byte of `v` is above the limit (signed) it is halved and
+  stored as the new horizontal speed.
+- Unless flag bit 6, the script goes to the motion return position.
+- If none of the moves happened, motion is no longer active.
+
+**Contact pass** (§10.10, exact form). Clear the links (§10.18). For each active job in table
+order, for each entry of its attack list until an empty entry: for each *other* active job whose
+`depth` is within 10 (`|a - b|` as a 16-bit difference, then a signed compare with 10) and each of
+its hurt entries until an empty entry: if the attacking cel has a hit set (§4.2), run the contact
+test; on a hit write the links and contact point and continue with the next attacking job. Then
+every list is emptied. The **contact test** of attacking cel `A`, frame `fa` at `(xa, ya)` against
+hurt cel `D`, frame `fd` at `(xd, yd)`:
+
+1. `m` is `A`'s width for `fa` if that frame is currently mirrored, else 0. The hit record of
+   `fa` (§4.2) has `count`, `max_dx`, `max_dy` and the points. A count of 0 never hits.
+2. Coarse x: the interval `[xd, xd + width_d]` against `[x0, x0 + max_dx]`, where `x0 = xa`, or
+   `xa + m - max_dx` when `m` is not 0. Coarse y: `[yd, yd + height_d]` against
+   `[ya, ya + max_dy]`, 16-bit values compared as unsigned. The interval test of `[a0, a1]`
+   (defender) and `[b0, b1]` is the original's: if `b0 < a0` it passes when `b1 >= a0`; else if
+   `b0 < a1` it passes; else if `b1 < a0` it fails; else it passes when `b1 < a1`. So `b` ending
+   on `a0` counts and `b` starting on `a1` does not. Either failing: no hit.
+3. For each point `(px, py)`: the gate x is `xa + px`, or `xa + m - px` when `m` is not 0; the
+   point is skipped unless `xd <= gate x < xd + width_d` and `yd <= ya + py < yd + height_d`
+   (signed). Then the **raw** position `cx = xa + px`, `cy = ya + py` is used (mirror ignored, a
+   quirk of the original). With `xw = cx - xd`, `yw = cy - yd` the word at byte offset
+   `(xw >> 4) * 2 + yw * row_bytes` (a signed word) of each stored plane of `D`'s frame, as it is
+   stored now (mirrored or not, §3.2), is read and bit `15 - (xw & 15)` tested; any set bit is a
+   hit with contact point `(cx, cy)`. A column past the row therefore reads the next row.
+
+   Deliberate differences: the original counts planes through a 16-entry table indexed by the
+   whole plane mask, so a 5-plane frame (mask `$10` or more) reads past the table and tests a
+   meaningless number of planes; the implementation tests every stored plane. A word outside the
+   frame's plane reads nothing (the original reads neighbouring memory).
+
+**Lists.** The attack lists of all ten jobs are one buffer of 80 entries, eight per job, and so
+are the hurt lists. A job's list starts at its own eight entries and ends at the first empty
+entry; the cursor of a pass can run on into the next job's entries, and the contact pass reads
+through them the same way. Writing past the 80th entry is outside the buffer; the
+implementation raises an error there (no shipped script does it).
+
+**Corrections to §4.1 and §7.2.** Screen y is `depth + height + dy` with `height` negative in the
+air (§4.1 had `depth - height`). The `$88` random count comes from the VBL counter, not the PRNG.
+Motion flag bit 0 lowers `height` (rises) and bit 1 raises it to 0 (falls); §7.2 had them
+swapped and clamped the rise. A jump-if-dead reset and the `$D0` reset keep the second script.
+`$C0` also writes the owner's frame list. A draw's flag bit 2 is not a mirror bit: mirroring
+follows the job's facing alone. The motion count is not reset when it runs out.
+
+### 10.18 Job plumbing and engine routines (`T11.8`)
+
+**Record pool.** Allocating a fight actor takes the first of the 20 pool records whose `active`
+long is 0 and sets it to 1. When all 20 are taken the original returns the address after the last
+record without marking it; the implementation raises an error.
+
+**Starting a job.** The first record in table order whose `active` byte is 0 gets: a cleared work
+block, the script, the owner, the frame list, `x`, `height`, `depth`, facing and type;
+`active = running = 1`. With no free record nothing happens (the original prints a debug message
+through a routine that does nothing).
+
+**Spawning an actor** (used by `$B8` with type `$28`, and by the arena set-ups): allocate a record;
+its `x`, `height`, `y`, `facing` and `frame_list` take the given values, both links are cleared,
+`active = 1`, `type` is set; then start a job for it.
+
+**Owner lookup.** The first record in table order whose owner is the actor, active or not. The
+pause toggle flips the found job's `paused` word; the kill clears its `active` and `running` and
+the owner's `active` long; the restart clears its work block and sets script and `running`.
+
+**Clearing links.** Both links of the dragon record, of 21 pool records (one more than the pool;
+the implementation's pool has a spare 21st record for this) and of the four knights are cleared.
+
+**Job pass** (§10.8, exact form). For each active job in table order: skip it if its owner has
+neither link and its script is still running. Otherwise call the handler for the job's type
+byte. *Keep* leaves the job alone; *end* clears the job's `active` and `running` and the owner's
+`active` long; a script restarts the job on it with the returned `x`, `height`, `depth` and facing
+and `running = 1`. The work block is **not** reset on a restart.
+
+**Idle object** (`$28`): clear both links of the owner and keep.
+
+**Engine routines.** A `$B0` operand is the address of a routine in `mog` code. The scripts of the
+supported version call seventeen; the decoder identifies them by hunk and offset and checks the
+instruction word at each entry. T11.8 executes the four fight-level ones (§10.12):
+
+| Routine | Effect |
+|---|---|
+| A fighter died | §10.12 |
+| End the fight | §10.12 |
+| Mark the first fighter dead | `hp = $FFFF` of the actor in the active-fight block +0 |
+| Pause all | Toggle the pause word of the job of every pool record except the "kept" record (the one whose job keeps running during a grab), then of the dragon record |
+
+The others belong to the tasks that own their subject: the seven sound pickers (T11.23), the
+dagger throw (T11.9), the hop and its step, the counter (T11.10f / h), and three guardian routines
+(T11.10g). Until a routine has an implementation the engine reports each call with its name,
+owner and arguments and carries on, so the caller can see it was skipped.
+
+"A fighter died" calls the arena's next-creature routine while `alive_now != max_alive` and
+`total > 0`. A routine that does not raise `alive_now` would make the original loop for ever; the
+implementation raises an error instead.
 
 ---
 

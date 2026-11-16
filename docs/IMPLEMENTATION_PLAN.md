@@ -217,9 +217,14 @@ Rules for the whole phase:
 - **T11.8 Fight engine (`sim/fight.py`, replaces the replay in `app/combat_bridge.py`):** ten jobs
   with persistent script state, the frame-set lists selected by `$C0`, second scripts, spawned
   objects, owner pokes, motion blocks, engine routines, depth sort, attack and hurt lists, contact
-  pass, background stamps. `app/` renders the jobs' draw lists. *Accept:* a recorded trace of a
-  knight idle, walk and each attack matches the draw lists computed by a second, independent
-  script walker in the test; a job's script position survives across ticks (no restart per frame).
+  pass, background stamps. `app/` renders the jobs' draw lists. Split (ADR-011): **T11.8a** the
+  engine in `sim/` (`sim/actor.py`, `sim/fight_script.py`, `sim/fight_contact.py`, `sim/fight.py`,
+  `assets/fight_program.py`). *Accept:* a recorded trace of a knight idle, walk and each attack
+  matches the draw lists computed by a second, independent script walker in the test; a job's
+  script position survives across ticks (no restart per frame). **T11.8b** (after T11.9 and
+  T11.10a) `app/` draws the jobs' draw lists and `sim/combat_vm.py` is deleted with its tests.
+  *Accept:* reviewed contact sheet of a Trogg fight from the real disks; no import of
+  `combat_vm` remains.
 - **T11.9 Knight control (`sim/fighters.py`, replaces `sim/knight_combat.py`):** joystick to action
   through the two action tables, walk scripts by phase and direction block, hurt scripts by the
   attacker's action, damage and defence tables, daggers, blocking, arena obstacles. Stamina and
