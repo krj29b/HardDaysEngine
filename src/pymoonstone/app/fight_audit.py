@@ -7,7 +7,7 @@ All scripts, creature values, control rules and palette rows come from the user'
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from pymoonstone.app.fight_scene import FightScene
@@ -32,6 +32,7 @@ from pymoonstone.render.scene import palette_fx_to_rgb
 from pymoonstone.sim.actor import Actor
 from pymoonstone.sim.fight import Fight
 from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
+from pymoonstone.sim.fight_ai.caster import CASTER_TYPE
 from pymoonstone.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
 from pymoonstone.sim.fight_routines import DAGGER_TYPE
 from pymoonstone.sim.fighters import KNIGHT_TYPE, install_knight_control
@@ -78,6 +79,8 @@ class FightAudit:
         """Audit-only joystick bot: align, face, strike or throw one dagger at a time."""
         fight = self.scene.fight
         knight, trogg = fight.actor(self.first), fight.actor(self.opponent)
+        if trogg.type == CASTER_TYPE:
+            return _caster_input(self)
         dy = s16(trogg.y) - s16(knight.y)
         if abs(dy) > 3:
             return DOWN if dy > 0 else UP
@@ -85,6 +88,22 @@ class FightAudit:
         if (knight.facing == 1) != (dx > 0):
             return RIGHT if dx > 0 else LEFT
         return _attack_word(fight, self.rules, abs(dx), self.first)
+
+
+def _caster_input(audit: FightAudit) -> int:
+    """Audit melee bot; Ratmen reject ordinary dagger damage (§10.23)."""
+    fight = audit.scene.fight
+    knight, target = fight.actor(audit.first), fight.actor(audit.opponent)
+    dx, dy = s16(target.x) - s16(knight.x), s16(target.y) - s16(knight.y)
+    if abs(dy) > 3:
+        return DOWN if dy > 0 else UP
+    if (knight.facing == 1) != (dx > 0):
+        return RIGHT if dx > 0 else LEFT
+    if abs(dx) > 50:
+        return RIGHT if dx > 0 else LEFT
+    table = audit.rules.actions_right if knight.facing == 1 else audit.rules.actions_left
+    action = 0x08
+    return FIRE | table.index(action)
 
 
 def _attack_word(fight: Fight, rules: KnightRules, distance: int, first: int) -> int:
@@ -175,6 +194,61 @@ def build_fight_audit(bundle: GameAssetBundle, name: str) -> FightAudit:
     return FightAudit(scene, rules, opponent)
 
 
+def build_caster_audit(bundle: GameAssetBundle, moon_frame: int = 0) -> FightAudit:
+    """One Ratman with its original flight anchor; campaign waves belong to T11.11."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "ratmen")
+    arena = replace(arena, total=1, max_alive=1, first_wave=arena.first_wave[:1])
+    knights = [Actor() for _ in range(4)]
+    knight = knights[0]
+    knight.hp = knight.hp_max = 200
+    knight.strength, knight.sword, knight.inventory = 3, 0x19, 1
+    runtime = loader.creature(
+        arena, "fo1.t", knights, Actor(), {1: Inventory()}, Rng(0x2468ACE1), 1, moon_frame
+    )
+    opponent = next(j.owner for j in runtime.fight.engine.jobs if j.type == CASTER_TYPE)
+    return FightAudit(runtime.scene, loader.knight_rules, opponent)
+
+
+def caster_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightScene]]:
+    """Decoded script previews for visual review, separate from the seeded outcome trace."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "ratmen")
+    scripts = loader.caster_rules.scripts
+    poses = (
+        ("idle", arena.creature.idle_script),
+        ("walk", next(s for s in arena.creature.walk_scripts if s)),
+        ("attack", scripts.strike8),
+        ("hurt", arena.creature.hurt_scripts[8 // 4]),
+        ("death", scripts.death),
+    )
+    for name, script in poses:
+        yield from _pose_frames(build_caster_audit(bundle), name, script)
+
+
+def _pose_frames(audit: FightAudit, name: str, script: int) -> Iterator[tuple[str, FightScene]]:
+    fight = audit.scene.fight
+    me = fight.actor(audit.opponent)
+    me.hp = 0xFFFF if name == "death" else me.hp
+    job = fight.find_job(audit.opponent)
+    if job is None:
+        raise ValueError("Ratmen pose preview has no creature job")
+    job.x, job.height, job.depth = 150, 0, 120
+    me.x, me.height, me.y = 150, 0, 120
+    fight.restart_job(audit.opponent, script)
+    # Step the script engine directly to retain the selected pose through its end.
+    for frame in range(12):
+        fight.engine.vbl = frame * 6
+        output = fight.engine.tick()
+        audit.scene.canvas.accept(output.draws)
+        if frame in (0, 3, 7) and any(d.cel.startswith("Ratmen") for d in output.draws):
+            yield f"{name}_frame{frame + 1}", audit.scene
+
+
 def fight_audit_frames(audit: FightAudit) -> Iterator[tuple[str, FightScene]]:
     """Sample a real-handler fight through its death branch, retaining the last frame."""
     fight = audit.scene.fight
@@ -198,7 +272,9 @@ def fight_host_input(session: GameSession) -> InputFrame:
     targets = [
         j.owner
         for j in runtime.fight.engine.jobs
-        if j.active and j.type in BRAWLER_TYPES and s16(runtime.fight.actor(j.owner).hp) > 0
+        if j.active
+        and j.type in (*BRAWLER_TYPES, CASTER_TYPE)
+        and s16(runtime.fight.actor(j.owner).hp) > 0
     ]
     word = 0
     if targets:

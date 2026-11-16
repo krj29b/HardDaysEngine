@@ -16,7 +16,9 @@ from PIL import Image, ImageDraw
 
 from pymoonstone.app.fight_audit import (
     TROGG_ARENAS,
+    build_caster_audit,
     build_fight_audit,
+    caster_pose_frames,
     fight_audit_frames,
     fight_host_input,
 )
@@ -232,6 +234,14 @@ def _engine_fight_shots(rig: AuditRig) -> Iterator[AuditShot]:
             yield rig.capture_fight(scene, f"engine_{name}_{label}")
 
 
+def _caster_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    bundle = rig.fight_assets()
+    for label, scene in caster_pose_frames(bundle):
+        yield rig.capture_fight(scene, f"ratmen_pose_{label}")
+    for label, scene in fight_audit_frames(build_caster_audit(bundle)):
+        yield rig.capture_fight(scene, f"ratmen_seeded_{label}")
+
+
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
     "intro": _intro_shots,
     "menu_map": _menu_and_map_shots,
@@ -239,6 +249,7 @@ AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
     "fights": _fight_shots,
     "regions": _region_shots,
     "engine_fights": _engine_fight_shots,
+    "ratmen": _caster_shots,
 }
 
 

@@ -212,3 +212,24 @@ including win/loss, practice returning to title for either loser, and input repl
 duel knights use the same rules and scripts, with separate frame lists and joystick ports.
 Replay recordings keep the initial roster so a menu-driven roster change replays correctly;
 the headless CLI uses its resolved disk directory for the same runtime assets as the window.
+
+## ADR-016: Ratmen reuse fight-owned caster cells and trajectory slots
+**Status:** ACCEPTED (2026-11-17, T11.10b; follows ADR-013)
+**Context:** Ratmen share grab/slam/initial-throw flags, an attack wait and six keyed flight
+slots. Their aerial movement uses these slots rather than knight dagger objects. The arena
+also owns an idle object used as the first flight's destination.
+**Decision:** `sim/fight_ai/caster.py` follows the existing handler/rules registration pattern.
+`assets/caster_rules.py` reads tunables and relocated scripts from checked executable operands,
+validating handler-table identity and helper calls. `sim/trajectory.py` implements the shared
+word-wrapping fixed-point helper; mutable request, slots and caster cells belong to `Fight`
+and are included in runtime snapshots. `FightLoader` creates the decoded Ratmen anchor before
+spawning creatures and applies decoded HP/damage variants for a caller-supplied moon frame.
+**Consequences:** Ratmen become available in the host. Calendar-to-original-moon-frame wiring
+remains T11.12/13, and complete campaign waves/entry/settlement remain T11.11. Handler acceptance
+uses a seeded single-opponent fixture with the original anchor; win, loss and full mutable-state
+replay are checked independently of unfinished campaign wave logic. Script-pose previews are
+labelled separately from natural fight frames in the `ratmen` contact sheet. The two newly
+encountered sound-picker entry points join the existing deferred sound calls (T11.23), without
+pretending those calls already implement their random draws or audio. Flight pool exhaustion,
+division by zero and quotient overflow raise; meaningless low-memory coordinate writes are
+omitted, as documented in §10.23.

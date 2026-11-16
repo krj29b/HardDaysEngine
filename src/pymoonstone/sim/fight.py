@@ -29,6 +29,7 @@ from pymoonstone.sim.fight_script import (
 )
 from pymoonstone.sim.m68k import s16, u16, u32
 from pymoonstone.sim.rng import Rng
+from pymoonstone.sim.trajectory import FlightState
 
 if TYPE_CHECKING:
     from pymoonstone.sim.inventory import Inventory
@@ -143,6 +144,17 @@ class ApproachCells:
 
 
 @dataclass(slots=True)
+class CasterCells:
+    """Shared Ratmen flags, wait and aim results (ARCHITECTURE.md §10.23)."""
+
+    flags: int = 0
+    wait: int = 0
+    aim_distance: int = 0
+    aim_steps: int = 0
+    aim_arc: int = 0
+
+
+@dataclass(slots=True)
 class FrameOutput:
     """What one :meth:`Fight.step` produced.
 
@@ -197,6 +209,7 @@ class Fight:
     handlers: dict[int, Handler] = field(default_factory=lambda: {IDLE_OBJECT_TYPE: idle_object})
     routines: dict[str, Routine] = field(init=False)
     first: int = 0
+    second: int = 0
     kept: int = 0
     fight_active: bool = False
     end_timer: int = 0
@@ -220,6 +233,8 @@ class Fight:
     rng: Rng = field(default_factory=lambda: Rng(1))
     gloated: bool = False
     approach: ApproachCells = field(default_factory=ApproachCells)
+    caster: CasterCells = field(default_factory=CasterCells)
+    flights: FlightState = field(default_factory=FlightState)
 
     def __post_init__(self) -> None:
         if len(self.knights) != KNIGHT_COUNT:

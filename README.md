@@ -46,7 +46,7 @@ Useful CLI flags:
 - **Pause**: `P`
 
 Practice uses two human knights; player 2 moves with `WASD` and fires with `F`.
-Combat currently supports the three Trogg variants and human knight duels. Other creature
+Combat currently supports the three Trogg variants, Ratmen and human knight duels. Other creature
 handlers, complete campaign fight setup and loot screens are still being migrated; see
 [docs/PROGRESS.md](docs/PROGRESS.md). Combat requires the original disks.
 

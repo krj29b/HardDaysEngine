@@ -1427,7 +1427,7 @@ scripts actually call; an unlisted routine stops the engine with an error:
 | Pause all | Toggle the pause word of the job of every pool record except the "kept" record (the one whose job keeps running during a grab), then of the dragon record |
 | Set the gloat latch | The brawler's gloat latch becomes 1 (§10.20). The knight's "down hard" script calls it, so a knight that goes down hard is never gloated over. Added by T11.10a: the walker of T11.7 does not reach that fixed script |
 
-The others belong to the tasks that own their subject: the seven sound pickers (T11.23), the
+The others belong to the tasks that own their subject: the nine known sound pickers (T11.23), the
 dagger throw, the hop and its step (T11.9, §10.19), the counter (T11.10f / h), and three guardian
 routines (T11.10g). Until a routine has an implementation the engine reports each call with its name,
 owner and arguments and carries on, so the caller can see it was skipped.
@@ -1824,6 +1824,126 @@ start of recording; menu changes to the roster are reproduced by replaying input
 headless CLI loads the resolved disk directory, so disk-backed gameplay can be replayed
 without a window. Omitting the optional disk directory from the Python helper retains the
 asset-free menu/map test mode, with fights explicitly unavailable.
+
+### 10.23 Ratmen caster and shared flight slots (`T11.10b`)
+
+This specifies the original, single-target handler of type $24. Source: the Amiga reference's
+behaviour descriptions, checked against the user's CRC-identified `mog` code at $5EC2..$6574,
+and its flight helpers $70E6..$71C4 / $7388..$74D6. No co-op extensions from the reference are
+adopted. All amounts, distances, waits and fixed scripts below are decoded at runtime with
+instruction words and relocation targets checked. Action/type codes and flag meanings are
+structural constants. Arithmetic wraps at the record width unless a comparison says otherwise.
+
+**Shared state.** The fight owns a caster flag byte (bits 2 = initial throw underway, 3 = slam,
+5 = victim held), a word wait between attacks, aim distance/steps/arc, a reusable flight request
+and six trajectory slots. The active-fight second record is needed for the initial throw.
+These are shared across Ratmen, never private per-handler state, and are cleared on fight
+construction. A slot is keyed by actor handle; the request has owner, start and destination
+`x/depth/height`, steps and arc. Ratmen move their own actor along these trajectories; these
+are separate from the knight's type-$34 dagger objects.
+
+**Handler priority.** Start with the actor's idle script. An attacker link takes precedence
+over a hit link; otherwise think. Think clears the selected record's action (normally self;
+an unrecognized attacker or another Ratman hit by self is the selected record instead, a
+preserved quirk). State flags are tested in this order: self +104 bit 7 or bit 0 => flight;
+bit 5 => grabbed; +105 bit 0 => release; +104 bit 4 => throw victim; bit 3 => hold;
++105 bit 2 => slam; otherwise choose a new action.
+
+**Choosing an action.** Face the first fighter. Within the actor's depth reach, stand while
+shared bit 5 or 3 is set or the first fighter has non-positive HP; otherwise a nonzero shared
+wait is decremented and self stands. With horizontal distance at most 40 choose action 8 and
+its fixed strike script; at most 50 choose action 4 and its strike script. Otherwise, or
+outside depth reach, begin a throw. There are no PRNG draws in the caster handler.
+
+**Starting and aiming.** Clear self's action and phase. If shared bit 2 is already set, aim at
+the first fighter. Otherwise set shared bit 2 and self bit 2, set the whole cooldown word to
+30, and request a flight from self at height -20 to the second record's job's x, depth + 3
+and height, for 14 steps with arc 0. Missing job coordinates are treated as zero. Start the
+flight, set self bit 0 and choose the flight script.
+
+Aim chooses destination x as target.x minus reach when the wrapped x difference is nonnegative,
+otherwise target.x plus reach; other destination coordinates are the target's. It writes
+self.map_x to destination x and the chosen stray record's map_y to target depth. Distance is
+the signed maximum of the word absolute x/depth differences. Aim arc is distance >> 1 (minimum
+3 when not above 2), steps distance >> 3 (at most 4 forces steps 4 and arc 10), and self's
+whole cooldown becomes the aimed step count. For the flight request only, halve steps with a
+minimum of 8. At aimed distance <= 40 set self bit 7, replace arc by 2, start the flight and
+advance the upward walk block's phase; otherwise start it and select the flight script.
+
+**Flight and hold.** One trajectory step writes self's position. A missing slot returns the
+old coordinates and counts as completed. On completion, if self bit 2 is clear, zero height
+and the first flags byte and return idle. If bit 2 is set, replace that byte with bit 3 and
+immediately run hold. In flight advance the upward walk block when height <= -10, the sideways
+block otherwise. Hold decrements the whole cooldown word. At zero clear self's first flags
+byte and shared bit 2 and aim again; otherwise use the near hold script below distance 60,
+the far hold script at 60 or more. Phase advance uses §10.20 without movement probes.
+
+**Hurt.** Only an attacker of type $0C directly wounds self; other types enter think and clear
+the attacker's action. Without self bit 0, attacker action $10 or $1C clears self's first flags
+byte and height, sets HP to -1 and selects the first death script. Any other action subtracts
+the **first fighter's**, not the attacker's, computed contact damage and selects the hurt
+table entry indexed by that first fighter's action. With bit 0 set, attacker action $18 causes
+the second death script and the same resets; other actions subtract the first fighter's
+damage, clear first flags/height and choose the airborne hurt script. Death accounting is
+performed by the script, never directly by the handler.
+
+**Hit.** Another Ratman enters think, clearing the victim's action. With self bit 0, shared
+bit 5 means continue flight; otherwise replace self's first flags byte with bit 5, set shared
+bit 5, set cooldown to sign-extended byte(victim.endurance + 6), zero height, pause the
+victim's job and select the grab script. With self bit 3, clear both self flag bytes, set
+second-byte bit 2 and shared bit 3, pause the victim and choose the slam-start script.
+Otherwise keep the current job by default, clear both self flag bytes and set shared wait 15.
+When facings match flip the **first fighter's** record and job. Action 8 or 4 replaces keep
+with its matching counter script. The Ratman-type check precedes flight/grab checks.
+
+**Grab/release/throw/slam.** The escape/counter input is always joystick port 1's fire + down,
+independent of the first fighter's input-port byte. In grab, that input clears the first
+flags byte, sets second-byte bit 0 and chooses escape; otherwise decrement cooldown, choosing
+grab while nonzero and replacing the first flags byte by bit 4 with the wind-up script at 0.
+Release toggles the first fighter's pause, clears its links, restarts its after-hit script,
+clears shared bit 5 and ends self's job. Throw clears shared bit 5 and sets cooldown 17;
+request a flight from self.height - 90 to x + 150, same depth and original height, 17 steps,
+arc 120. Clear both flag bytes, set bit 0, phase 0 and displayed height -70. Set the first
+fighter's job facing to self's, clear that fighter's links, subtract 5 HP and restart its
+idle script if the true signed subtraction is positive, its fall script otherwise; toggle
+its pause and use the thrown script. The job facing write does not immediately change its
+record. In slam, port 1 fire + down subtracts the first fighter's contact damage from self
+and uses the struggle script while the true signed difference is positive. Otherwise unpause
+the first fighter, clear its links, restart its released script, clear shared bit 3 and use
+the drop script. Without that input squeeze takes 1 HP from the first fighter per handler
+call and chooses the finishing script when the true signed subtraction is non-positive.
+
+**Trajectory arithmetic.** Slots hold owner, remaining steps, vertical speed and acceleration,
+x/depth deltas and x/depth/height positions. All stored words wrap. x/depth use 10.6 and
+height 8.8 fixed point. Choose the first slot whose owner is the requested owner **or zero**
+(a free slot preceding a matching one wins). Let N be steps, D the signed word difference
+start height minus destination height. If |D| <= 5, let H = (N+1)>>1, V = word(2*DIVU(
+word(arc<<8), H)); acceleration = low word DIVU(sign-extended V, H-1). Otherwise if D >= 0,
+V = word(2*DIVS(D<<8,N)), acceleration = word(DIVS(sign-extended V,N-1)); for D < 0,
+V=0 and acceleration is minus DIVS(sign-extended word(2*DIVS(D<<8,N)),N-1).
+x/depth deltas divide sign-extended word((destination-start)<<6) by N with DIVS.
+Initialize positions to word(x<<6), word(depth<<6), word(height<<8). Each step subtracts
+acceleration from velocity, subtracts the **old** velocity from height and adds horizontal
+deltas. Return arithmetic shifts of the stored words (6/6/8), then decrement remaining steps;
+zero frees the slot and signals completion. This intentionally preserves word-overflow quirks.
+
+**Arena wiring and limits.** Ratmen's decoded idle object is created before the creatures,
+on its decoded frame set and script, at x 160, height E-200, depth E, facing 1, with E the
+largest wall depth (at least the knight clip's top edge). It becomes the fight's second
+record. Both x and the height offset are checked operand reads. Moon-frame variants of
+§10.4 replace the spawn HP and shared damage table; the caller supplies the original moon
+frame, with calendar wiring still assigned to T11.12/13. Existing base waves remain until
+T11.11 adds full scaling/lanes. Snapshots include caster cells, second handle, flight request
+and slots. A full slot pool, division by zero or quotient overflow raises instead of using
+undefined machine state. Trajectory setup's writes of arbitrary low-memory words to map
+coordinates are omitted; no meaningful game values live there. A walk block without a
+usable phase raises (§10.20). These are bounded-failure differences, not alternate AI.
+
+The Ratmen scripts additionally call two sound-picker entries at code $7234 and $724C.
+They select from a two-sound and four-sound group respectively using the original generator.
+Their checked entry identities are registered now; their draws and playback remain deferred
+with the other sound pickers to T11.23. Thus the handler itself makes no PRNG draws, but a
+fully wired original script's sound selection will do so when that task is implemented.
 
 ## 11. Overworld and Turns (`T11.4`)
 

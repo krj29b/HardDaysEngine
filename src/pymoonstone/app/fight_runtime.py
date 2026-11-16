@@ -6,10 +6,11 @@ combat model. T11.11 completes campaign scaling, entry lanes and settlement.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 
 from pymoonstone.app.fight_scene import FightScene
+from pymoonstone.assets.caster_rules import parse_caster_rules
 from pymoonstone.assets.creature_rules import parse_brawler_rules
 from pymoonstone.assets.fight_defs import ActorInit, ArenaDef, SpawnEntry, parse_fight_defs
 from pymoonstone.assets.fight_palette import assemble_fight_palette
@@ -29,6 +30,7 @@ from pymoonstone.assets.mog_code import MogCode
 from pymoonstone.render.scene import palette_fx_to_rgb
 from pymoonstone.sim.fight import Fight, TableKeys, Wall
 from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
+from pymoonstone.sim.fight_ai.caster import CASTER_TYPE, install_caster
 from pymoonstone.sim.fighters import KNIGHT_TYPE, install_knight_control
 from pymoonstone.sim.m68k import u8, u16
 from pymoonstone.sim.palette_fx import pack_rgb12
@@ -46,6 +48,7 @@ if TYPE_CHECKING:
 
 FIGHT_VBLS = 6
 _REGIONS = (4, 0, 8, 12)
+_SUPPORTED_TYPES = (*BRAWLER_TYPES, CASTER_TYPE)
 
 
 class FightUnavailableError(ValueError):
@@ -150,8 +153,11 @@ class FightRuntime:
             "ports": f.ports[:],
             "rng": f.rng.state,
             "approach": asdict(f.approach),
+            "caster": asdict(f.caster),
+            "flights": asdict(f.flights),
             "cells": [
                 f.first,
+                f.second,
                 f.kept,
                 f.fight_active,
                 f.end_timer,
@@ -181,13 +187,14 @@ class FightLoader:
         self.defs = parse_fight_defs(executable)
         self.knight_rules = parse_knight_rules(executable)
         self.brawler_rules = parse_brawler_rules(executable)
+        self.caster_rules = parse_caster_rules(executable)
 
     def arena_for(self, handler_offset: int) -> ArenaDef:
         """Resolve the lair's original arena-table byte offset without guessing a type."""
         arena = self.defs.arena_by_handler.get(handler_offset)
         if arena is None:
             raise FightUnavailableError(f"unknown arena handler ${handler_offset:02X}")
-        if arena.creature.actor_type not in BRAWLER_TYPES:
+        if arena.creature.actor_type not in _SUPPORTED_TYPES:
             raise FightUnavailableError(f"{arena.name} fights are not available yet")
         return arena
 
@@ -230,8 +237,10 @@ class FightLoader:
         f.inventories = dict(inventories)
         f.walls = tuple(Wall(w.x1, w.x2, w.y) for w in loaded[0].obstacles)
         f.first, f.fight_active = first, True
+        f.second = second
         install_knight_control(f, self.knight_rules)
         install_brawler(f, self.brawler_rules, self.knight_rules)
+        install_caster(f, self.caster_rules, self.knight_rules)
         keys = f.register_tables(script_tables(self.defs.knight))
         for actor in knights:
             keys.assign(actor)
@@ -256,24 +265,45 @@ class FightLoader:
         inventories: Mapping[int, Inventory],
         rng: Rng,
         first: int,
+        moon_frame: int = 0,
     ) -> FightRuntime:
-        if arena.creature.actor_type not in BRAWLER_TYPES:
+        if arena.creature.actor_type not in _SUPPORTED_TYPES:
             raise FightUnavailableError(f"{arena.name} fights are not available yet")
         scene = self._scene(
             arena.cels, background, arena.scene, knights, dragon, inventories, rng, first
         )
         f = scene.fight
+        f.moon_frame = moon_frame
+        arena = _moon_arena(arena, moon_frame)
         knight = f.actor(first)
         for poke in arena.knight_pokes:
             key = knight.action_scripts if poke.table == "action" else knight.hurt_scripts
             f.tables[key][poke.offset // 4] = poke.script
         _start_knight(f, first, (250, 0, 100), 3, 1)
+        if arena.creature.actor_type == CASTER_TYPE:
+            self._caster_object(f, arena)
         waves = CreatureWaves(arena, f.register_tables(script_tables(arena.creature)))
         f.max_alive, f.total = arena.max_alive, arena.total
         f.next_creature = waves.next
         for entry in arena.first_wave[: f.max_alive]:
             waves.spawn(f, entry)
         return FightRuntime(scene, first, waves=waves)
+
+    def _caster_object(self, fight: Fight, arena: ArenaDef) -> None:
+        """Create Ratmen's flight anchor before the wave records (§10.23)."""
+        rules = self.caster_rules
+        edge = max((wall.y for wall in fight.walls), default=self.knight_rules.clip.top)
+        edge = max(edge, self.knight_rules.clip.top)
+        for obj in arena.objects:
+            if obj.actor_type is None or obj.frame_set is None:
+                raise FightUnavailableError("Ratmen flight anchor lacks type or frame set")
+            fight.second = fight.spawn_actor(
+                obj.idle_script,
+                obj.frame_set,
+                (rules.object_x, u16(edge - rules.object_height), edge),
+                rules.object_facing,
+                obj.actor_type,
+            )
 
     def duel(
         self,
@@ -299,6 +329,14 @@ class FightLoader:
         _start_knight(scene.fight, first, (250, 0, 100), 3, 2)
         _start_knight(scene.fight, second, (80, 0, 100), 1, 1, CREATURE_LIST)
         return FightRuntime(scene, first, second)
+
+
+def _moon_arena(arena: ArenaDef, moon_frame: int) -> ArenaDef:
+    for variant in arena.moon_variants:
+        if variant.moon_frame == moon_frame:
+            creature = replace(arena.creature, hp=variant.hp, damage_table=variant.damage_table)
+            return replace(arena, creature=creature)
+    return arena
 
 
 def _start_knight(
