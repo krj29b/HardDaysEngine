@@ -326,9 +326,8 @@ for normal sites; `fol1..6.t`, `gll1..6.t`, `swl1..6.t`, `wal1..6.t` for Lair si
        - `+2`: `BE16` `x2` (right $X$ boundary of horizontal wall segment).
        - `+4`: `BE16` `y` (depth $Z$ line of the obstacle).
        - `+6`: `BE16` `unused` (padding / reserved word).
-     - Used by `arenaObstacles` (`LAB_0A71`): blocks vertical movement across `y` when the actor's
-       $X$ lies in `[x1, x2]`, and blocks horizontal movement into `[x1, x2]` when the actor's depth
-       is within `|depth - y| <= 6`.
+     - Used by the obstacle probe of a walking fighter; the exact test is §10.19 (the earlier
+       "`|depth - y| <= 6`" reading was wrong).
   2. **Arena Background Tile Compositor Script (`2,400` bytes / `0x960` bytes following the obstacle table):**
      - Initial canvas: copied from the region's base backdrop in `B/test` (`test[4]` for region 0 Forest,
        `test[7]` for region 1 Glen, `test[6]` for region 2 Swamp, `test[5]` for region 3 Wasteland).
@@ -1048,7 +1047,7 @@ Interval overlap is the original's interval test (§10.17, contact test step 2).
 10, right when it is above 320, down when `y + 9 > 155`, up when `y < 30`.
 
 **Obstacle probe.** Every wall segment (§4.3) the mover would touch clears the matching
-direction bit, as described there.
+direction bit; the exact test is §10.19.
 
 ### 10.11 Damage and blocking
 
@@ -1214,6 +1213,8 @@ task that implements them (T11.9, T11.10a to T11.10i), before the code:
 | Computer knight | `$10` | Chooses between guarding and attacking by distance, last action and odds | T11.10i |
 | Dagger | `$34` | Runs its script along a trajectory until it leaves the screen or hits | T11.9 |
 | Idle object | `$28` | Clears its links and keeps its script | T11.8 |
+
+The knight's rows, the knight handler in exact form, the dagger and the hop are §10.19.
 
 ### 10.17 The script engine (`T11.8`)
 
@@ -1421,13 +1422,185 @@ instruction word at each entry. T11.8 executes the four fight-level ones (§10.1
 | Pause all | Toggle the pause word of the job of every pool record except the "kept" record (the one whose job keeps running during a grab), then of the dragon record |
 
 The others belong to the tasks that own their subject: the seven sound pickers (T11.23), the
-dagger throw (T11.9), the hop and its step, the counter (T11.10f / h), and three guardian routines
-(T11.10g). Until a routine has an implementation the engine reports each call with its name,
+dagger throw, the hop and its step (T11.9, §10.19), the counter (T11.10f / h), and three guardian
+routines (T11.10g). Until a routine has an implementation the engine reports each call with its name,
 owner and arguments and carries on, so the caller can see it was skipped.
 
 "A fighter died" calls the arena's next-creature routine while `alive_now != max_alive` and
 `total > 0`. A routine that does not raise `alive_now` would make the original loop for ever; the
 implementation raises an error instead.
+
+### 10.19 Knight control, daggers and the hop (`T11.9`)
+
+This subsection is the exact model of the knight handler (type `$0C`), the knight's reactions to
+being hit and to hitting, the thrown dagger (type `$34`), and the engine routines `dagger_throw`,
+`hop` and `hop_step`. It refines §10.9 to §10.11; where they differ, this text wins. Words are
+16-bit and wrap; "signed" compares read them as two's complement.
+
+**Fight cells used here** (besides §10.12 / §10.18): the joystick word of each port; the demo
+flag (nothing in the original's attract mode dies by these rules); the confused knight and its
+on-flag (§11, a failed scroll gamble); the moon frame (§9.6); the arena's wall table (§4.3); the
+hop facing byte, the hop table and the hop counter.
+
+**Tables.** A record's script and number tables (`hurt_scripts`, `action_scripts`, `walk_scripts`,
+`damage_table`, `defence_table`) are tables of longs addressed by a byte offset: an action is its
+own offset (§9.7), a walk entry is `block + phase * 4`. The knights share one set of tables, so a
+poke (§10.3) reaches both knights of a duel. An offset that is not a multiple of 4 or lies past
+the table is an address error or a read of other memory in the original; the implementation
+raises.
+
+**Knight handler.** The next script starts as `idle_script`; the exit hands the job the record's
+`x`, `height`, `y` and `facing`. In order:
+
+1. `attacker` set: the **hurt rule** of the attacker's type (below).
+2. `hit_target` set: the **hit rule** of the target's type (below).
+3. `action = 0`; `input` takes the joystick word of the record's port (port 0 when `input_port`
+   is 1, port 1 otherwise). A zero word: idle.
+4. The confused knight, while the on-flag is set: if either vertical bit is set both vertical bits
+   are flipped, then the same for the two horizontal bits.
+5. Fire (bit 4): the index `input` without bit 4 picks a word from the action table of the
+   facing (the left table when `facing` is 3, else the right table; 16 words each, and the right
+   table's words 11..15 are the left table's first five, as they lie in memory). That word is the
+   new `action` and the next script is `action_scripts[action]`.
+6. Otherwise walk. The phase is saved, then `phase = (phase + 1) & 3`. With the step tables of
+   §10.9 indexed by the new phase: up gives `dy = -up[phase]`, else down gives `dy = down[phase]`;
+   right sets `facing = 1` and `dx = side[phase]`, else left sets `facing = 3` and
+   `dx = -side[phase]`. The input is masked by the movement probe (with `dx` and the new facing),
+   then cleared further by the arena clip and the obstacle probe. Then each remaining bit is applied
+   in the order up, down, left, right: up and down add `dy` to `y` and set the block to 32 / 64,
+   left and right add `dx` to `x` and set the block to 0. If no bit remained, the saved phase is
+   restored and the script is idle. Otherwise bit 7 of `behaviour_flags` is cleared and the next
+   script is `walk_scripts[block + phase * 4]`.
+
+A joystick cannot press left and right together; the action tables give `$16` and `$40` for such
+words, which the original cannot use (above).
+
+**Movement probe** (exact form of §10.10). The mask starts as `$1F`; `f = facing & 3`. For each
+active job in table order whose owner is not the mover, has a non-zero `box_min_x` and `hp > 0`
+(signed): if the depths are close (§10.17), the side test runs: with `f = 1` it applies only when
+the mover's `x` is not greater than the other's (signed) and clears bit 0; otherwise only when it is
+not smaller, clearing bit 1; it clears the bit when the interval test (§10.17) passes for
+`[box_min_x + dx, box_max_x + dx]` against the other's x box and for the two y boxes (+112 /
++114). Then the vertical test: `d = y - other.y`; when `d >= 0` (signed) the bit is 3 (up), else
+bit 2 (down) and `d = -d`; when `d` is not above the probe distance (20, signed) and the two
+unshifted x boxes and the two y boxes pass the interval test, the bit is cleared.
+
+**Arena clip.** `e = x + 25`, or `x - 25` when facing bit 1 is set; `f = y + 9` (signed words).
+`e < 10` clears left, `e > 320` clears right, `f > 155` clears down, `f < 30` clears up.
+
+**Obstacle probe.** `lo = box_min_x + dx`, `hi = box_max_x + dx`, `limit = y + dy + 47`. For each
+wall `{x1, x2, y_w}` of the arena table: if `[x1, x2]` against `[lo, hi]` passes the interval
+test, and `[30, y_w]` against `[box_max_y, box_max_y + 1]` passes too, the facing direction is
+cleared (left when facing bit 1 is set, unless `hi < box_min_x`; right otherwise, unless
+`lo > box_max_x`; signed compares). Independently of the second test, but only for walls that
+passed the first, `y_w >= limit` (signed) clears up. A table with no walls tests nothing (the
+original's loop counter would run 65536 times over memory).
+
+**Rule dispatch.** Two tables in `mog`, both indexed by a type byte and filled by one routine at
+start-up, name the rule of each type: one for the type of the attacker, one for the type of the
+target. A type with no entry makes the original jump to address 0; the implementation raises. The
+supported version fills them like this:
+
+| Types (hurt table) | Rule | Types (hit table) | Rule |
+|---|---|---|---|
+| `$00` | flyer | all listed hurt types except `$28` | carry on |
+| `$04`, `$34` | contact | `$28` | hurt by the target as by a dragon in flight |
+| `$08` | guardian | | |
+| `$0C`, `$10` | knight | | |
+| `$14` | dragon | | |
+| `$18`, `$1C` | axe | | |
+| `$20` | spear | | |
+| `$24` | Ratmen | | |
+| `$28` | dragon in flight | | |
+| `$2C` | dragon object | | |
+| `$30` | drake | | |
+| `$40` | stalker | | |
+
+**The common ending** of a rule ("hurt script"): the next script is `hurt_scripts[attacker's
+action]`. **Taking hit points** subtracts a word from `hp`. "Face away" sets `facing` to the
+attacker's facing with bit 1 flipped. "Restart the attacker on S" gives the attacker's job a
+cleared work block, script `S` and `running = 1` (§10.18); the knight's own result is then 0
+(**end**: the knight's job is freed, §10.8).
+
+**Block check** (returns blocked or not). `need = defence_table[attacker's action]` (low word).
+If `need` differs from the knight's `action`: not blocked. If the knight's `action` is `$1C`: blocked
+only when bit 7 of `behaviour_flags` is clear, and then that bit is set. Otherwise: not blocked
+when both face the same way; else blocked, with the clang sound (`$11`).
+
+**Hurt rules** (amounts are the supported version's; all are read from `mog`):
+
+- **Contact.** `hp > 0`: take the attacker's contact damage (below), then the hurt script.
+  Otherwise the next script is the "down" script, or the "down hard" script when the attacker's
+  action is 8.
+- **Knight.** `hp <= 0`: the "down hard" script. Otherwise the block check; blocked:
+  `action_scripts[own action]`; else as contact.
+- **Axe.** `hp > 0`: the block check; blocked: `action_scripts[own action]`; else take the raw
+  `damage_table[attacker's action]` of the attacker (no strength, no sword, no moonstone), then the
+  hurt script. `hp <= 0`: "down hard" when the attacker's type is `$18`, else "down" (the axe
+  rule's own pair of script operands).
+- **Spear.** The block check always runs; blocked: the spear-parry script. Else take 3. If the
+  knight has no `hit_target`, `hp <= 0` afterwards and the demo flag is off, restart the attacker
+  on the spear-kill script. Otherwise the hurt script.
+- **Ratmen.** Attacker action 4: take the low word of the attacker's `damage_table` entry 1, set
+  `life_loss = 1`, next the curse script. Action 8: take entry 2, next the Ratmen-strike script.
+  Any other action: as contact.
+- **Flyer.** Take 5. If the knight has no `hit_target`, `hp <= 0` afterwards and the demo flag is
+  off: restart the attacker on its kill script (one for facing the same way as the knight, one for
+  facing it). Otherwise the next script is the flyer-hurt script of the same pair of cases.
+- **Guardian.** Attacker action `$20`: take 10 and face away. Action 4: take 8 and face away.
+  Otherwise take 10. Then the hurt script.
+- **Stalker.** Take 7. If the attacker's action is `$20` and `hp <= 0` afterwards: the flung
+  script. Otherwise the hurt script.
+- **Drake.** Attacker action 8: face away. Take 5, then the hurt script.
+- **Dragon.** `y` becomes the attacker's `y` minus 1. Attacker action 4: the amount is 20.
+  Otherwise the amount is 30 and the **attacker's** `action` becomes `$20`. Take the amount after
+  protection, then the hurt script (so a flight blow plays the heavy-blow reaction).
+- **Dragon in flight.** As the dragon's second case, without the depth change.
+- **Dragon object.** The amount is the attacker's type byte minus 10 (34 for type `$2C`; the
+  original subtracts from the register that still holds the type). Take it after protection; the
+  hop facing becomes 1 and the hop table the dragon object's; `facing = 3`; next the object-hop
+  script.
+
+**Hit rules.** *Carry on*: if the target's type is `$0C` or `$10`: with the target's `hp > 0`, a
+target in action `$1C` gives **keep**; with `hp <= 0`, the knight's own action 8 gives keep unless
+the demo flag is on. Then, for every type: a target in action `$18` gives keep; otherwise the next
+script is `after_hit_script`. *Hurt by the target as by a dragon in flight*: the dragon-in-flight
+hurt rule with the target as the attacker.
+
+**Contact damage** (exact form of §10.11): the low word of `damage_table[action]`, plus
+`strength`, plus the sword bonus (each `(code, bonus)` pair of the original is tested in turn
+against `sword`: `$17` +2, `$18` +3, `$19` +5); doubled for action `$20`; doubled once more for
+the first moonstone pair that matches: bit 0 with frame 46, bit 3 with 46, bit 1 with 45, bit 2
+with 49, against the attacker's inventory slot `$16` and the moon frame. A record without an
+inventory (a dagger) has no moonstones. **Protection**: the amount shifted right by the knight's
+count in inventory slot `$08` taken modulo 64; 16 or more gives 0.
+
+**Dagger throw** (`dagger_throw`, called from a knight's action-`$0C` script): the thrower's
+`daggers` byte drops by 1 (wrapping); a record of type `$34` is spawned (§10.18) at the calling
+job's position and facing with its frame list, running the dagger script; it gets the dagger
+damage table (in `mog` code; 3 per entry) and `action = $0C`.
+
+**Dagger handler** (type `$34`). With a `hit_target`: **end**. Facing 1: while `x < 330` (signed)
+the next script is the dagger flight script, else end. Other facings: while `x > 0` the flight
+script; at `-10 <= x <= 0` end; below `-10` the flight script again (a quirk: a dagger that steps
+past the margin keeps flying).
+
+**Hop.** `hop` sets the hop counter to `$FFFF`. `hop_step`, called by the owner's script each
+frame of a throw: the counter goes up by 1; the owner's `input` becomes 0 and its `facing` the hop
+facing. With hop facing 1, bit 1 (left) is set, the arena clip runs, and if bit 1 survived the
+owner's job `x` drops by the word at `counter * 2` of the hop table; with any other hop facing,
+bit 0 and `x` rises by that word. The hop table lies in the script hunk.
+
+**Read from `mog`** (`assets/fighter_rules.py`, version `$FA43E5B2`): the step tables and action
+tables through their relocated `LEA`s; the clip, probe and obstacle numbers, every amount, the
+clang sound, the sword pairs, the moonstone bit / frame pairs and the dagger bounds as operands
+with their instruction words checked; every fixed script, the hop table and the dagger damage
+table as relocated operands; the rule tables by running their fill routine (§10.15 store run) and
+naming each rule by its entry offset, checked by its first instruction word. Action codes and
+type bytes are §9.7 / §9.8 constants.
+
+Deliberate differences: the address errors and table overruns above raise; a missing rule
+raises; an empty wall table tests nothing.
 
 ---
 

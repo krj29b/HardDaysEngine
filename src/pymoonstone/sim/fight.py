@@ -1,6 +1,7 @@
 """One fight: actor pools, job plumbing, the job pass and the fight-level routines.
 
-Implements ARCHITECTURE.md §10.18 on top of the script engine of §10.17
+Implements ARCHITECTURE.md §10.18 (and the fight cells of §10.19) on
+top of the script engine of §10.17
 (:mod:`pymoonstone.sim.fight_script`) and the contact pass (:mod:`pymoonstone.sim.fight_contact`).
 Handlers (§10.16) are registered per type byte by the tasks that write them; engine routines
 (``$B0``) per name. A routine without an implementation is reported in
@@ -14,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from pymoonstone.sim.actor import Actor
 from pymoonstone.sim.fight_contact import contact_scan
@@ -26,7 +27,10 @@ from pymoonstone.sim.fight_script import (
     ScriptImage,
     TickOutput,
 )
-from pymoonstone.sim.m68k import s16, u16
+from pymoonstone.sim.m68k import s16, u16, u32
+
+if TYPE_CHECKING:
+    from pymoonstone.sim.inventory import Inventory
 
 KNIGHT_COUNT = 4
 DRAGON = KNIGHT_COUNT + 1
@@ -82,12 +86,59 @@ class FightConstants:
     dead_hp: int
 
 
+@dataclass(slots=True, frozen=True)
+class Wall:
+    """One wall segment of the arena's obstacle table (§4.3): x range and depth line."""
+
+    x1: int
+    x2: int
+    y: int
+
+
+@dataclass(slots=True, frozen=True)
+class ScriptTables:
+    """The scripts and tables an initialiser gives a record (§10.4), as values."""
+
+    idle_script: int
+    after_hit_script: int
+    hurt_scripts: tuple[int, ...]
+    action_scripts: tuple[int, ...]
+    walk_scripts: tuple[int, ...]
+    damage_table: tuple[int, ...]
+    defence_table: tuple[int, ...]
+
+
+@dataclass(slots=True, frozen=True)
+class TableKeys:
+    """:class:`ScriptTables` stored in a fight: the scripts and the keys of the five tables."""
+
+    idle_script: int
+    after_hit_script: int
+    hurt_scripts: int
+    action_scripts: int
+    walk_scripts: int
+    damage_table: int
+    defence_table: int
+
+    def assign(self, actor: Actor) -> None:
+        """Point the record's script fields and table fields at these (§10.4)."""
+        actor.idle_script, actor.after_hit_script = self.idle_script, self.after_hit_script
+        actor.hurt_scripts, actor.action_scripts = self.hurt_scripts, self.action_scripts
+        actor.walk_scripts, actor.damage_table = self.walk_scripts, self.damage_table
+        actor.defence_table = self.defence_table
+
+
 @dataclass(slots=True)
 class FrameOutput:
-    """What one :meth:`Fight.step` produced: the engine tick and the skipped routine calls."""
+    """What one :meth:`Fight.step` produced.
+
+    The engine tick, the skipped routine calls and the sounds the handlers asked for in the job
+    pass (the script sounds are in ``tick.sounds``).
+    """
 
     tick: TickOutput
     skipped_calls: list[RoutineCall]
+    sounds: list[int]
 
 
 def restart_from(actor: Actor, script: int) -> Restart:
@@ -109,6 +160,12 @@ class Fight:
     ``knights`` (four) and ``dragon`` are the persistent records; the fight writes into them.
     ``first`` is the active-fight block's first fighter, ``kept`` the record whose job the pause
     routine skips. ``next_creature`` is the arena's spawn routine.
+
+    The cells of §10.19: ``tables`` holds every script and number table by key (record fields
+    such as ``damage_table`` hold the key); ``inventories`` the inventories by the handle in
+    ``Actor.inventory``; ``ports`` the joystick words of port 0 and 1; ``walls`` the arena's
+    obstacle table; ``demo``, ``confused`` / ``confused_on`` and ``moon_frame`` as named there;
+    ``hop_facing``, ``hop_table`` and ``hop_counter`` the hop cells.
     """
 
     image: ScriptImage
@@ -130,6 +187,18 @@ class Fight:
     total: int = 0
     next_creature: Callable[[Fight], None] | None = None
     skipped: list[RoutineCall] = field(default_factory=list)
+    tables: dict[int, list[int]] = field(default_factory=dict)
+    inventories: dict[int, Inventory] = field(default_factory=dict)
+    ports: list[int] = field(default_factory=lambda: [0, 0])
+    walls: tuple[Wall, ...] = ()
+    demo: bool = False
+    confused: int = 0
+    confused_on: bool = False
+    moon_frame: int = 0
+    sounds: list[int] = field(default_factory=list)
+    hop_facing: int = 0
+    hop_table: int = 0
+    hop_counter: int = 0
 
     def __post_init__(self) -> None:
         if len(self.knights) != KNIGHT_COUNT:
@@ -225,6 +294,43 @@ class Fight:
             job.work.clear()
             job.script, job.running = script, True
 
+    def add_table(self, entries: Sequence[int]) -> int:
+        """Store a table of longs and return its key (never 0, which means "no table")."""
+        key = len(self.tables) + 1
+        self.tables[key] = [u32(entry) for entry in entries]
+        return key
+
+    def register_tables(self, tables: ScriptTables) -> TableKeys:
+        """Store the five tables of ``tables``; records sharing the keys share the tables."""
+        return TableKeys(
+            idle_script=tables.idle_script,
+            after_hit_script=tables.after_hit_script,
+            hurt_scripts=self.add_table(tables.hurt_scripts),
+            action_scripts=self.add_table(tables.action_scripts),
+            walk_scripts=self.add_table(tables.walk_scripts),
+            damage_table=self.add_table(tables.damage_table),
+            defence_table=self.add_table(tables.defence_table),
+        )
+
+    def table_long(self, key: int, offset: int) -> int:
+        """The long at byte offset ``offset`` (a signed word) of table ``key`` (§10.19)."""
+        table = self.tables.get(key)
+        if table is None:
+            raise FightError(f"no table with key {key}")
+        index, rest = divmod(s16(offset), 4)
+        if rest or not 0 <= index < len(table):
+            raise FightError(f"table {key} read at byte offset {s16(offset)}: outside the table")
+        return table[index]
+
+    def inventory_byte(self, actor: Actor, slot: int) -> int:
+        """The actor's inventory count at ``slot``; 0 for a record without an inventory."""
+        if actor.inventory == 0:
+            return 0
+        inventory = self.inventories.get(actor.inventory)
+        if inventory is None:
+            raise FightError(f"no inventory with handle {actor.inventory}")
+        return inventory.byte(slot)
+
     def clear_links(self) -> None:
         """Clear both links of the dragon, 21 pool records and the four knights (§10.18)."""
         for handle in (DRAGON, *range(POOL_FIRST, POOL_SPARE + 1), *range(1, KNIGHT_COUNT + 1)):
@@ -249,12 +355,13 @@ class Fight:
     def step(self, vbl: int) -> FrameOutput:
         """Job pass, engine tick and contact pass of one fight frame (§10.7, items 1, 2, 4)."""
         self.skipped = []
+        self.sounds = []
         self.job_pass()
         self.engine.vbl = vbl
         self.engine.current_knight = self.first
         tick = self.engine.tick()
         contact_scan(self.engine, self.clear_links)
-        return FrameOutput(tick, self.skipped)
+        return FrameOutput(tick, self.skipped, self.sounds)
 
     def _apply(self, job: Job, owner: Actor, result: HandlerResult) -> None:
         if isinstance(result, Keep):

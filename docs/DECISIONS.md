@@ -123,3 +123,26 @@ against an independent walker). The fight on screen does not change until T11.8b
 **Alternative considered:** rewire `app/` in T11.8 with temporary handlers that only replay idle
 scripts. Rejected: a placeholder handler is exactly the rigour theatre AGENTS.md §3 forbids, and
 the screen would show standing fighters only.
+
+## ADR-012: Knight rules are read from `mog` code; record tables live in the fight by key
+**Status:** ACCEPTED (2026-11-16)
+**Context:** The knight's reactions (§10.19) are 68k code: flat amounts, fixed scripts, sword and
+moonstone pairs, step and action tables, and two jump tables indexed by type byte. Record fields
+such as `damage_table` are addresses of BSS tables that both knights share and that arena pokes
+change for one fight.
+**Decision:**
+1. `assets/fighter_rules.py` reads every number, script, table and the hop table at positions of
+   the supported version, each after its instruction word is compared, and fills `KnightRules`
+   (`sim/fighter_rules.py`). The two rule tables are read by running their fill routine (§10.15
+   store run); each entry names a rule by the entry offset of its code, whose first instruction
+   word is compared. Action codes (§9.7) and type bytes (§9.8) stay named constants in `sim/`.
+2. `Fight.tables` holds tables of longs by key; record fields hold the key. `register_tables`
+   stores one `ScriptTables` and `TableKeys.assign` points any number of records at it, so both
+   knights share one set as in the original. A read outside a table or at an offset that is not a
+   multiple of 4 raises (the original takes an address error or reads other memory).
+3. Handlers and routines get their rules through `functools.partial`; `install_knight_control`
+   registers them.
+**Consequences:** A new `mog` version needs only new positions. Creature handlers (T11.10) use the
+same table store and rule record pattern.
+**Alternative considered:** constants for the amounts (5, 3, 10, ...) in `sim/`. Rejected:
+AGENTS.md §3 requires original tables and tunables to be read at runtime.

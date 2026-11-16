@@ -21,6 +21,7 @@ from pymoonstone.sim.fight import (
     MARK_FIRST_DEAD,
     PAUSE_ALL,
     FightConstants,
+    ScriptTables,
 )
 from pymoonstone.sim.fight_script import CelShape, FrameShape, HitShape, ScriptImage
 
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from pymoonstone.assets.cel import CelFrame, DecodedCel
-    from pymoonstone.assets.fight_defs import CelFile, CelSet
+    from pymoonstone.assets.fight_defs import ActorInit, CelFile, CelSet
     from pymoonstone.assets.hit import HitSet
 
 GUARDIAN_HUNK = 40
@@ -108,6 +109,19 @@ def fight_constants(mog: MogCode) -> FightConstants:
     return FightConstants(
         end_delay=_operand(mog, _END_DELAY, "end-of-fight delay") & 0xFF,
         dead_hp=_operand(mog, _DEAD_HP, "dead marker"),
+    )
+
+
+def script_tables(init: ActorInit) -> ScriptTables:
+    """The scripts and tables an initialiser writes, ready for :meth:`Fight.register_tables`."""
+    return ScriptTables(
+        idle_script=init.idle_script,
+        after_hit_script=init.after_hit_script,
+        hurt_scripts=init.hurt_scripts,
+        action_scripts=init.action_scripts,
+        walk_scripts=init.walk_scripts,
+        damage_table=init.damage_table,
+        defence_table=init.defence_table,
     )
 
 
