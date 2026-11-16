@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import TYPE_CHECKING
 
-from pymoonstone.sim.knight_combat import KnightState, SecondaryWeapon
+from pymoonstone.sim.location_state import KnightState, SecondaryWeapon
 from pymoonstone.sim.overworld import (
     MOONSTONE_COUNT,
     MoonPhase,

@@ -6,7 +6,7 @@ A clean-room Python 3.12+ reimplementation of the 1991 Amiga game *Moonstone: A 
 
 The codebase is organized into strict unidirectional layers (`cli -> app -> render -> assets -> sim`):
 
-- **Simulation (`src/pymoonstone/sim/`)**: deterministic 50 Hz integer/fixed-point kernel (combat bytecode VM, knight/monster state machines, overworld, locations, palette FX, PRNG). No floats, no wall clock, no `random`, no I/O.
+- **Simulation (`src/pymoonstone/sim/`)**: deterministic 50 Hz integer/fixed-point kernel (persistent combat jobs and handlers, overworld, locations, palette FX, PRNG). No floats, no wall clock, no `random`, no I/O.
 - **Assets (`src/pymoonstone/assets/`)**: reads original Amiga `.adf` disk images (OFS) at runtime, unpacks RNC1/LZSS streams, and decodes pictures, cels, `collide.hit` attack sets, `.t` arena layouts, `program`/`mog` hunk tables, and audio banks.
 - **Render (`src/pymoonstone/render/`)**: ModernGL (OpenGL 3.3 core) `320x256` virtual canvas, indexed palette textures, optional CRT post-process, and debug hitbox overlay.
 - **App & CLI (`src/pymoonstone/app/`, `src/pymoonstone/cli/`)**: `pygame-ce` window host, 50 Hz fixed-timestep loop, keyboard/gamepad input, audio mixer, and CLI entry points.
@@ -39,12 +39,16 @@ Useful CLI flags:
 ### Default Player 1 Controls
 
 - **Move / Navigate**: Arrow keys (`Left` / `Right` / `Up` / `Down`)
-- **Attack / Fire**: `Space`
+- **Attack / Fire**: `Space`; combine with a direction for strikes, blocks and dagger throws
 - **Confirm / Select**: `Enter`
-- **Secondary / Throw Dagger**: `Left Ctrl`
-- **Run / Sprint**: `Left Shift`
-- **Switch Weapon**: `Tab`
+- **Status on the map**: `Left Ctrl`
+- **End turn on the map**: `Tab`
 - **Pause**: `P`
+
+Practice uses two human knights; player 2 moves with `WASD` and fires with `F`.
+Combat currently supports the three Trogg variants and human knight duels. Other creature
+handlers, complete campaign fight setup and loot screens are still being migrated; see
+[docs/PROGRESS.md](docs/PROGRESS.md). Combat requires the original disks.
 
 ## Development & Verification
 

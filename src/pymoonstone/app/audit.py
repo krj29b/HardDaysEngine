@@ -14,7 +14,13 @@ import moderngl
 import numpy as np
 from PIL import Image, ImageDraw
 
-from pymoonstone.app.fight_audit import TROGG_ARENAS, build_fight_audit, fight_audit_frames
+from pymoonstone.app.fight_audit import (
+    TROGG_ARENAS,
+    build_fight_audit,
+    fight_audit_frames,
+    fight_host_input,
+)
+from pymoonstone.app.fight_runtime import FightLoader
 from pymoonstone.app.game import GameScene, GameSession
 from pymoonstone.app.input import InputFrame, PlayerInput
 from pymoonstone.app.location_screens import LocationKind
@@ -38,7 +44,6 @@ _PRIMARY = KnightId.RED
 _LABEL_HEIGHT = 12
 _SHEET_COLUMNS = 4
 _INTRO_SAMPLE_TICKS: tuple[int, ...] = (50, 400, 900, 1500, 2500)
-_CREATURE_TYPE_COUNT = 4
 _TOWN_BUTTON_COUNTS: tuple[tuple[LocationKind, int], ...] = (
     (LocationKind.HIGHWOOD, 4),
     (LocationKind.WATERDEEP, 5),
@@ -171,47 +176,51 @@ def _place_shots(rig: AuditRig) -> Iterator[AuditShot]:
             yield rig.capture(session, f"{town.name.lower()}_button{button}")
 
 
+def _host_fight_session(rig: AuditRig, name: str, lair_index: int = -1) -> GameSession:
+    """Equipped audit knight on the real campaign host; these are not campaign defaults."""
+    session = rig.new_session()
+    session.scene = GameScene.OVERWORLD
+    if session.asset_bundle is None:
+        raise ValueError("fight audit requires the original assets")
+    session.fight_loader = FightLoader(session.asset_bundle)
+    arena = next(a for a in session.fight_loader.defs.arenas if a.name == name)
+    knight = session.knight_combat[_PRIMARY]
+    knight.hp = knight.max_hp = 200
+    knight.strength, knight.sword_tier, knight.daggers = 3, 4, 99
+    session._start_combat(
+        EncounterTrigger(
+            kind=TriggerKind.LAIR_BOSS if lair_index >= 0 else TriggerKind.WANDERING_MONSTER,
+            knight_id=_PRIMARY,
+            node_id=_NO_NODE,
+            day=1,
+            moon_phase=session.overworld.moon_phase,
+            lair_index=lair_index,
+            creature_type=arena.handler_offsets[0],
+        ),
+        _PRIMARY,
+    )
+    if session.active_encounter is None:
+        raise RuntimeError(session.last_status)
+    return session
+
+
 def _fight_shots(rig: AuditRig) -> Iterator[AuditShot]:
-    for creature in range(_CREATURE_TYPE_COUNT):
-        session = rig.new_session()
-        session._start_combat(
-            EncounterTrigger(
-                kind=TriggerKind.WANDERING_MONSTER,
-                knight_id=_PRIMARY,
-                node_id=0,
-                day=1,
-                moon_phase=session.overworld.moon_phase,
-                creature_type=creature,
-                encounter_kind=creature,
-            ),
-            _PRIMARY,
-        )
-        _step(session, 60)
-        yield rig.capture(session, f"fight{creature}_idle")
-        _step(session, 30, PlayerInput(dx=1))
-        yield rig.capture(session, f"fight{creature}_walk")
-        _step(session, 4, PlayerInput(dx=1, fire=True))
-        yield rig.capture(session, f"fight{creature}_attack")
-        _step(session, 8, PlayerInput(dx=1, fire=True))
-        yield rig.capture(session, f"fight{creature}_attack_late")
+    for name in TROGG_ARENAS:
+        session = _host_fight_session(rig, name)
+        for tick in (6, 120, 240, 480, 960):
+            while session.tick_count < tick and session.active_encounter is not None:
+                session.step_tick(fight_host_input(session))
+            if session.active_encounter is None:
+                break
+            yield rig.capture(session, f"host_{name}_vbl{tick}")
 
 
 def _region_shots(rig: AuditRig) -> Iterator[AuditShot]:
-    """One lair arena per region, to review the fight palette (ARCHITECTURE.md §10.13)."""
+    """One supported Trogg fight per region, through the real campaign host (§10.13)."""
     for lair_index, region in enumerate(_REGION_NAMES):
-        session = rig.new_session()
-        session._start_combat(
-            EncounterTrigger(
-                kind=TriggerKind.LAIR_BOSS,
-                knight_id=_PRIMARY,
-                node_id=_NO_NODE,
-                day=1,
-                moon_phase=session.overworld.moon_phase,
-                lair_index=lair_index,
-            ),
-            _PRIMARY,
-        )
-        _step(session, 60)
+        session = _host_fight_session(rig, TROGG_ARENAS[0], lair_index)
+        for _ in range(60):
+            session.step_tick(fight_host_input(session))
         yield rig.capture(session, f"region_{region}")
 
 

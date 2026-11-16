@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from pymoonstone.app.input import PlayerInput
     from pymoonstone.assets.picture import DecodedPicture
     from pymoonstone.render.scene import SceneSprite
-    from pymoonstone.sim.knight_combat import KnightState
+    from pymoonstone.sim.location_state import KnightState
     from pymoonstone.sim.overworld import OverworldState
 
 _WAGER_STEP = 10

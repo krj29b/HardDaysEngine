@@ -122,7 +122,7 @@ def test_replay_serialization_roundtrip(tmp_path: Path) -> None:
 
 
 def _build_scripted_campaign_frames() -> list[InputFrame]:
-    """Script Title -> Knight Select -> Overworld -> Wilderness Combat -> Overworld."""
+    """Script title, menu and map navigation without original disk assets."""
     frames: list[InputFrame] = []
     # Tick 0: Title -> Knight Select
     frames.append(_frame_p1(confirm=True))
@@ -134,7 +134,7 @@ def _build_scripted_campaign_frames() -> list[InputFrame]:
     frames.append(_frame_p1())
     frames.append(_frame_p1(dx=1))
     frames.append(_frame_p1(confirm=True))
-    # Walk right in combat and slash repeatedly to defeat the monster.
+    # Continue the input stream; real-disk combat has separate host replay tests.
     for tick in range(180):
         if tick < 70:
             frames.append(_frame_p1(dx=1, run=True))
@@ -145,11 +145,11 @@ def _build_scripted_campaign_frames() -> list[InputFrame]:
     return frames
 
 
-def test_end_to_end_session_and_replay_determinism(tmp_path: Path) -> None:
+def test_campaign_navigation_and_replay_determinism_without_disks(tmp_path: Path) -> None:
     # Seed chosen so wilderness arrival triggers a wandering monster encounter.
     chosen_seed = 7
     probe = GameSession(seed=chosen_seed, start_scene=GameScene.OVERWORLD)
-    # Verify our seed triggers combat when moving RED from 10 -> 11 -> 21 if needed.
+    # Probe the same navigation; encounters require original assets to start.
     probe.step_tick(_frame_p1(dx=1))
     probe.step_tick(_frame_p1())
     probe.step_tick(_frame_p1(dx=1))
@@ -175,7 +175,7 @@ def test_end_to_end_session_and_replay_determinism(tmp_path: Path) -> None:
     assert run1.scene in (GameScene.OVERWORLD, GameScene.COMBAT, GameScene.VICTORY)
 
 
-def test_combat_encounter_victory_and_pause_determinism() -> None:
+def test_menu_roster_and_overworld_pause() -> None:
     session = GameSession(seed=101, start_scene=GameScene.TITLE)
     session.step_tick(_frame_p1(confirm=True))
     assert session.scene == GameScene.KNIGHT_SELECT
@@ -266,37 +266,6 @@ def test_knight_pick_routes_p1_input_and_edge_triggers_fire() -> None:
     assert session2.overworld.total_turns == 1
 
 
-def test_practice_mode_returns_to_knight_select() -> None:
-    session = GameSession(seed=11, start_scene=GameScene.KNIGHT_SELECT)
-    session.step_tick(_frame_p1(dy=1))
-    session.step_tick(_frame_p1())
-    session.step_tick(_frame_p1(dy=1))
-    assert session.menu_cursor == 2
-
-    session.step_tick(_frame_p1(confirm=True))
-    assert session.scene == GameScene.COMBAT
-    assert session.practice_mode is True
-    assert session.active_encounter is not None
-
-    session.active_encounter.encounter.completed = True
-    session.step_tick(_frame_p1())
-    assert session.scene == GameScene.KNIGHT_SELECT
-    assert session.practice_mode is False
-    assert session.active_encounter is None
-
-    # Practice defeat also returns to KNIGHT_SELECT without game over.
-    session.step_tick(_frame_p1(confirm=True))
-    assert session.scene == GameScene.COMBAT
-    assert session.practice_mode is True
-    kstate = session.knight_combat[KnightId.RED]
-    kstate.lives = 1
-    kstate.hp = 0
-    session.step_tick(_frame_p1())
-    assert session.scene == GameScene.KNIGHT_SELECT
-    assert session.practice_mode is False
-    assert session.overworld.game_over is False
-
-
 def test_status_new_day_and_location_transitions() -> None:
     session = GameSession(seed=1, start_scene=GameScene.OVERWORLD)
     session.step_tick(_frame_p1(secondary=True))
@@ -364,23 +333,6 @@ def test_victory_and_game_over_reset_to_menu_and_music() -> None:
         session.step_tick(_frame_p1(fire=True))
         assert session.scene == GameScene.KNIGHT_SELECT
         assert calls.count("title") == 2
-
-
-def test_combat_dagger_throw_and_palette_fx_step() -> None:
-    session = GameSession(seed=7, start_scene=GameScene.KNIGHT_SELECT)
-    session.step_tick(_frame_p1(dy=1))
-    session.step_tick(_frame_p1())
-    session.step_tick(_frame_p1(dy=1))
-    session.step_tick(_frame_p1(confirm=True))
-    assert session.scene == GameScene.COMBAT
-    assert session.active_encounter is not None
-
-    start_daggers = session.knight_combat[KnightId.RED].daggers
-    start_vbl = session.palette_fx.vbl_count
-    session.step_tick(_frame_p1(secondary=True))
-    assert session.knight_combat[KnightId.RED].daggers == start_daggers - 1
-    assert len(session.active_encounter.knight_projectiles) == 1
-    assert session.palette_fx.vbl_count == start_vbl + 1
 
 
 def test_intro_skip_input() -> None:
@@ -520,117 +472,3 @@ def test_overworld_home_castle_valley_and_maths_tower_triggers() -> None:
     assert kstate.xp > prev_xp
     assert kstate.gold > 0
     assert "MATHS TOWER" in session.last_status
-
-
-def test_combat_sfx_keys_and_region_arena_selection() -> None:
-    from pymoonstone.assets.arena import DecodedArena
-    from pymoonstone.assets.palette import default_combat_palette
-    from pymoonstone.assets.picture import DecodedPicture
-    from pymoonstone.sim.knight_combat import KnightAction
-    from pymoonstone.sim.overworld import EncounterTrigger, MoonPhase, TriggerKind
-    from pymoonstone.sim.types import EntityId, Pos25D
-
-    requested_arenas: list[str] = []
-    played_sfx: list[str] = []
-
-    class _FakeBundle:
-        def build_overworld_graph(self) -> None:
-            return None
-
-        def get_mog_tables(self) -> None:
-            return None
-
-        def get_fight_palette_tables(self) -> None:
-            return None
-
-        def get_arena(self, name: str) -> tuple[DecodedArena, DecodedPicture]:
-            requested_arenas.append(name)
-            arena = DecodedArena(name=name, region=0, is_lair=False, obstacles=(), tiles=())
-            pic = DecodedPicture(
-                width=320,
-                height=200,
-                planes=5,
-                packed_size=0,
-                raw_palette=b"",
-                raw_planes=b"",
-                palette=default_combat_palette(),
-                pixels=np.zeros((200, 320), dtype=np.uint8),
-            )
-            return arena, pic
-
-    session = GameSession(seed=7, start_scene=GameScene.OVERWORLD)
-    with (
-        patch.object(session, "asset_bundle", _FakeBundle()),
-        patch.object(
-            session, "_try_play_sample", side_effect=lambda *names: played_sfx.extend(names)
-        ),
-    ):
-        # Wandering monsters across the 4 regions pick fo1.t, gl1.t, sw1.t, wa1.t.
-        for node_id in (11, 21, 31, 41):
-            session._select_combat_arena(
-                EncounterTrigger(
-                    kind=TriggerKind.WANDERING_MONSTER,
-                    knight_id=KnightId.RED,
-                    node_id=node_id,
-                    day=1,
-                    moon_phase=MoonPhase.NEW_MOON,
-                )
-            )
-        # Lairs across the 4 regions pick fol1.t, gll1.t, swl1.t, wal1.t.
-        for lair_idx, node_id in enumerate((12, 22, 32, 42)):
-            session._select_combat_arena(
-                EncounterTrigger(
-                    kind=TriggerKind.LAIR_BOSS,
-                    knight_id=KnightId.RED,
-                    node_id=node_id,
-                    day=1,
-                    moon_phase=MoonPhase.NEW_MOON,
-                    lair_index=lair_idx,
-                )
-            )
-        assert requested_arenas == [
-            "fo1.t",
-            "gl1.t",
-            "sw1.t",
-            "wa1.t",
-            "fol1.t",
-            "gll1.t",
-            "swl1.t",
-            "wal1.t",
-        ]
-
-        # Start combat and verify COMBAT_SFX_KEYS are used.
-        session._start_combat(
-            EncounterTrigger(
-                kind=TriggerKind.WANDERING_MONSTER,
-                knight_id=KnightId.RED,
-                node_id=11,
-                day=1,
-                moon_phase=MoonPhase.NEW_MOON,
-            ),
-            KnightId.RED,
-        )
-        assert session.active_encounter is not None
-        kstate = session.knight_combat[KnightId.RED]
-        session._spawn_knight_dagger(kstate, session.active_encounter)
-        assert "throw" in played_sfx
-
-        # Block and hurt/death SFX.
-        kstate.action = KnightAction.BLOCK
-        session._damage_knight_with_fx(
-            kstate,
-            session.active_encounter,
-            10,
-            EntityId(100),
-            Pos25D(x=kstate.x + 10, y=kstate.y, z=0),
-        )
-        assert "block" in played_sfx
-        kstate.action = KnightAction.IDLE
-        session._damage_knight_with_fx(
-            kstate,
-            session.active_encounter,
-            10,
-            EntityId(100),
-            Pos25D(x=kstate.x + 10, y=kstate.y, z=0),
-        )
-        assert "hurt" in played_sfx

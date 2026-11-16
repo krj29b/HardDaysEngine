@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pygame
 
-from pymoonstone.sim.knight_combat import KnightInput
+from pymoonstone.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
 from pymoonstone.sim.types import KnightId
 
 if TYPE_CHECKING:
@@ -50,40 +50,11 @@ class PlayerInput:
             skip_intro=self.skip_intro,
         )
 
-    def to_knight_input(self) -> KnightInput:
-        """Convert this player sample into a simulation :class:`KnightInput`."""
-        norm = self.normalized()
-        return KnightInput(
-            dx=norm.dx,
-            dy=norm.dy,
-            fire=norm.fire,
-            secondary=norm.secondary,
-            weapon_switch=norm.weapon_switch,
-            run=norm.run,
-        )
-
-    @classmethod
-    def from_knight_input(
-        cls,
-        inp: KnightInput,
-        *,
-        confirm: bool = False,
-        pause: bool = False,
-        skip_intro: bool = False,
-    ) -> PlayerInput:
-        """Wrap a :class:`KnightInput` with optional menu ``confirm``/``pause`` flags."""
-        norm = inp.normalized()
-        return cls(
-            dx=norm.dx,
-            dy=norm.dy,
-            fire=norm.fire,
-            secondary=norm.secondary,
-            weapon_switch=norm.weapon_switch,
-            run=norm.run,
-            confirm=confirm,
-            pause=pause,
-            skip_intro=skip_intro,
-        )
+    def to_joystick_word(self) -> int:
+        """Original joystick word, with opposite directions excluded (ARCHITECTURE.md §10.19)."""
+        horizontal = RIGHT if self.dx > 0 else (LEFT if self.dx < 0 else 0)
+        vertical = DOWN if self.dy > 0 else (UP if self.dy < 0 else 0)
+        return horizontal | vertical | (FIRE if self.fire else 0)
 
     def to_dict(self) -> dict[str, int | bool]:
         """Serialize to a JSON-safe dictionary."""

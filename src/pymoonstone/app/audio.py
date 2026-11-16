@@ -17,7 +17,6 @@ from pymoonstone.assets.audio import (
     decode_iff_8svx,
     paula_period_to_hz,
 )
-from pymoonstone.sim.combat_vm import SoundEvent
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -27,7 +26,6 @@ if TYPE_CHECKING:
     from pymoonstone.assets.audio import DecodedModule, DecodedSampleBank
     from pymoonstone.assets.hunk import SynthInstrumentRecord
     from pymoonstone.assets.tables import SynthSequenceEntry, SynthSequenceTables
-    from pymoonstone.sim.combat_vm import CombatEvent
 
 PAL_VBL_HZ = 50
 DEFAULT_MIX_RATE = 22050
@@ -407,12 +405,12 @@ class PaulaSynthMixer:
         voice.loop_start = loop_start
         voice.loop_length = loop_length
 
-    def handle_combat_events(self, events: Sequence[CombatEvent]) -> list[int]:
-        """Trigger synth sound effects for all `SoundEvent` items in `events`."""
+    def handle_fight_sounds(self, sounds: Sequence[int]) -> list[int]:
+        """Trigger sound IDs emitted by persistent fight jobs (ARCHITECTURE.md §10.17)."""
         triggered: list[int] = []
-        for event in events:
-            if isinstance(event, SoundEvent) and self.play_sfx(event.sound_id):
-                triggered.append(event.sound_id)
+        for sound_id in sounds:
+            if self.play_sfx(sound_id):
+                triggered.append(sound_id)
         return triggered
 
     def _advance_voice_stream(self, voice: VoiceState) -> None:
@@ -664,9 +662,9 @@ class AudioEngine:
             length=length,
         )
 
-    def handle_combat_events(self, events: Sequence[CombatEvent]) -> list[int]:
-        """Dispatch `SoundEvent` triggers from simulation combat events."""
-        return self._mixer.handle_combat_events(events)
+    def handle_fight_sounds(self, sounds: Sequence[int]) -> list[int]:
+        """Dispatch the supplied engine and handler sound IDs in order."""
+        return self._mixer.handle_fight_sounds(sounds)
 
     def step_vbl(self) -> NDArray[np.int16]:
         """Advance 1 PAL VBL tick, returning stereo int16 PCM and queuing audio if active."""

@@ -111,21 +111,25 @@ def test_fight_palette_keeps_the_picture_colour_5(adf_dir: Path, arena_file: str
     assert session.asset_bundle is not None
     loaded = session.asset_bundle.get_arena(arena_file)
     assert loaded is not None
-    arena, picture = loaded
-    session._start_combat(
-        EncounterTrigger(
-            kind=TriggerKind.WANDERING_MONSTER,
-            knight_id=KnightId.BLUE,
-            node_id=0,
-            day=1,
-            moon_phase=session.overworld.moon_phase,
-        ),
-        KnightId.BLUE,
-    )
-    assert session.active_encounter is not None
-    session.active_encounter.arena = arena
+    _arena, picture = loaded
+    from unittest.mock import patch
 
-    palette = session._combat_palette(picture.palette, session.active_encounter)
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    session.fight_loader = FightLoader(session.asset_bundle)
+    trogg = next(a for a in session.fight_loader.defs.arenas if a.name == "trogg_axe")
+    trigger = EncounterTrigger(
+        kind=TriggerKind.WANDERING_MONSTER,
+        knight_id=KnightId.BLUE,
+        node_id=0,
+        day=1,
+        moon_phase=session.overworld.moon_phase,
+        creature_type=trogg.handler_offsets[0],
+    )
+    with patch.object(session, "_arena_name_for_trigger", return_value=arena_file):
+        session._start_combat(trigger, KnightId.BLUE)
+    assert session.active_encounter is not None
+    palette = session.active_encounter.runtime.scene.palette
 
     assert palette[5] == picture.palette[5]
     assert palette[0] == (0, 0, 0)

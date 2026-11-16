@@ -23,7 +23,7 @@ from pymoonstone.assets.palette import RGBColor, default_combat_palette
 from pymoonstone.assets.picture import DecodedPicture
 from pymoonstone.render.renderer import CANVAS_HEIGHT, CANVAS_WIDTH, PLAYFIELD_HEIGHT
 from pymoonstone.render.scene import BitmapFont, default_bitmap_font
-from pymoonstone.sim.knight_combat import KnightState
+from pymoonstone.sim.location_state import KnightState
 from pymoonstone.sim.locations import MerchantItemKind
 from pymoonstone.sim.overworld import (
     ALL_MOONSTONES_MASK,
@@ -31,7 +31,7 @@ from pymoonstone.sim.overworld import (
     OverworldState,
     create_campaign,
 )
-from pymoonstone.sim.types import EntityId, KnightId
+from pymoonstone.sim.types import KnightId
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -124,9 +124,6 @@ def _make_pic(fill: int = 3) -> DecodedPicture:
 def _make_knight(gold: int = 500, hp: int = 60) -> KnightState:
     return KnightState(
         knight_id=KnightId.RED,
-        entity_id=EntityId(1),
-        x=80,
-        y=95,
         hp=hp,
         max_hp=100,
         stamina=70,

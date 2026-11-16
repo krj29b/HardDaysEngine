@@ -6,7 +6,6 @@ import struct
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
-import numpy as np
 import pygame
 
 if TYPE_CHECKING:
@@ -14,9 +13,8 @@ if TYPE_CHECKING:
 
 from pymoonstone.app.audio import AudioEngine
 from pymoonstone.app.input import InputRouter, PlayerInput
-from pymoonstone.app.scene_assets import COMBAT_SFX_KEYS, GameAssetBundle, select_knight_frame
+from pymoonstone.app.scene_assets import COMBAT_SFX_KEYS, GameAssetBundle
 from pymoonstone.assets.adf import OFSFileEntry
-from pymoonstone.assets.cel import CelFrame, CelFrameMeta, DecodedCel
 from pymoonstone.assets.tables import (
     BuiltinFontTable,
     CombatActionTables,
@@ -27,8 +25,6 @@ from pymoonstone.assets.tables import (
     MogRuntimeTables,
     SynthSequenceTables,
 )
-from pymoonstone.sim.knight_combat import KnightAction
-from pymoonstone.sim.monster_ai import MonsterArchetype
 from pymoonstone.sim.overworld import NodeKind
 from pymoonstone.sim.types import KnightId
 
@@ -187,72 +183,3 @@ def test_build_overworld_graph_maps_sites_and_all_nodes() -> None:
     assert 28 in graph.nodes
     assert 30 in graph.nodes
     assert len(graph.dragon_patrol_route) == 4
-
-
-def test_compose_knight_sprites_and_select_knight_frame() -> None:
-    frames = tuple(
-        CelFrame(
-            meta=CelFrameMeta(
-                index=i,
-                data_offset=0,
-                width=7 if i % 2 == 1 else 54,
-                height=33 if i % 2 == 1 else 23,
-                hot_and_flags=0x20,
-                plane_bits=0x1F,
-            ),
-            pixels=np.ones((33 if i % 2 == 1 else 23, 7 if i % 2 == 1 else 54), dtype=np.uint8),
-            mask=np.ones((33 if i % 2 == 1 else 23, 7 if i % 2 == 1 else 54), dtype=bool),
-        )
-        for i in range(60)
-    )
-    kcel = DecodedCel(frame_count=60, packed_size=0, unpacked_bits=0, frames=frames, raw_planes=b"")
-    fidx = select_knight_frame(kcel, KnightAction.OVERHEAD_SLASH, 6)
-    assert 0 <= fidx < 26
-    assert kcel.frames[fidx].meta.width == 54
-
-    bundle = GameAssetBundle(disk_set=cast("DiskSet", _StubDiskSet()))
-    bundle.cels["kn1.ob"] = kcel
-    sprites = bundle.compose_knight_sprites(0, KnightAction.OVERHEAD_SLASH, 6, x=120, y=95, z=0)
-    assert len(sprites) == 1
-    assert sprites[0].frame.meta.width == 54
-
-
-def test_get_monster_cels_and_compose_monster_sprites_loads_all_slots() -> None:
-    def _make_cel(width: int, height: int) -> DecodedCel:
-        frame = CelFrame(
-            meta=CelFrameMeta(
-                index=0,
-                data_offset=0,
-                width=width,
-                height=height,
-                hot_and_flags=0x01,
-                plane_bits=0x1F,
-            ),
-            pixels=np.ones((height, width), dtype=np.uint8),
-            mask=np.ones((height, width), dtype=bool),
-        )
-        return DecodedCel(
-            frame_count=1, packed_size=0, unpacked_bits=0, frames=(frame,), raw_planes=b""
-        )
-
-    bundle = GameAssetBundle(disk_set=cast("DiskSet", _StubDiskSet()))
-    bundle.cels["troggspear1.cel"] = _make_cel(20, 18)
-    bundle.cels["troggspear2.cel"] = _make_cel(24, 22)
-    bundle.cels["dragon1.cel"] = _make_cel(40, 30)
-    bundle.cels["dragon2.cel"] = _make_cel(42, 32)
-    bundle.cels["dragon5.cel"] = _make_cel(16, 16)
-
-    trogg_cels = bundle.get_monster_cels(MonsterArchetype.TROGG_SPEAR)
-    assert len(trogg_cels) == 2
-    trogg_sprites = bundle.compose_monster_sprites(
-        MonsterArchetype.TROGG_SPEAR, 12, attacking=True, x=200, y=95, order=10
-    )
-    assert [sp.frame.meta.width for sp in trogg_sprites] == [20, 24]
-    assert [sp.order for sp in trogg_sprites] == [10, 11]
-
-    dragon_cels = bundle.get_monster_cels(MonsterArchetype.DRAGON)
-    assert len(dragon_cels) == 3
-    dragon_sprites = bundle.compose_monster_sprites(
-        MonsterArchetype.DRAGON, 0, attacking=False, x=220, y=90
-    )
-    assert [sp.frame.meta.width for sp in dragon_sprites] == [40, 42, 16]

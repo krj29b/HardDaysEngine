@@ -188,3 +188,27 @@ real-disk `engine_fights` audit scenario runs single-Trogg fixtures through this
 the GL renderer. T11.8b is split into T11.8b1 (presentation) and T11.8b2 (campaign host and
 old-caller removal); ADR-011's temporary coexistence ends only with T11.8b2. T11.11 still owns
 campaign waves, pacing and settlement. No game data or generated contact sheets are committed.
+
+## ADR-015: Host cutover and the temporary legacy sheet boundary
+**Status:** ACCEPTED (2026-11-17, T11.8b2; user explicitly approved the host cutover and
+obsolete-file removals after automatic approval review requested confirmation)
+**Context:** ADR-011 requires the host to use persistent Fight jobs and remove the old VM.
+Legacy locations still require a knight-shaped data record until their scheduled sheet
+migration. Only the brawler creature handlers are implemented in the replacement engine.
+**Decision:** The session owns persistent Actor records, inventories and the original
+fight generator. `FightLoader` reads executable definitions and creates a FightScene around
+those records. `FightRuntime` samples normalized joystick words, advances frames every six
+VBLs, preserves the decoded base waves and counts down the decoded post-fight delay. Missing
+handlers are reported explicitly before activation. Audio accepts integer engine sound IDs.
+The legacy sheet data is isolated in `sim/location_state.py` with no combat behavior; the host
+translates values only on entry/return, not every tick. Old controller/VM/bridge modules and
+their model-specific tests are removed, with persistent-engine host tests replacing them.
+**Consequences:** The original fight generator persists across encounters; T11.12 joins the
+map to that same instance. T11.11 still owns full wave scaling, spawn lanes, enter scripts,
+low-health feedback and settlement/loot fidelity. Unsupported creature fights remain visibly
+unavailable until their handlers land. The eight obsolete controller/VM/bridge source and
+test files are removed. The host and independent runtime are both exercised on real disks,
+including win/loss, practice returning to title for either loser, and input replay. Both
+duel knights use the same rules and scripts, with separate frame lists and joystick ports.
+Replay recordings keep the initial roster so a menu-driven roster change replays correctly;
+the headless CLI uses its resolved disk directory for the same runtime assets as the window.

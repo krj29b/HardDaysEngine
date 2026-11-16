@@ -22,7 +22,6 @@ from pymoonstone.assets.tables import (
     SynthSequenceEntry,
     SynthSequenceTables,
 )
-from pymoonstone.sim.combat_vm import ScriptEndedEvent, SoundEvent
 
 
 def _build_synthetic_8svx(pcm8: bytes, sample_rate: int = 11025) -> bytes:
@@ -216,12 +215,7 @@ def test_looping_sample_persists_and_stop_channel_works() -> None:
 def test_combat_event_sound_dispatch() -> None:
     tables = _build_synthetic_synth_tables()
     engine = AudioEngine(sample_rate=DEFAULT_MIX_RATE, synth_tables=tables, headless=True)
-    events = (
-        ScriptEndedEvent(job_id=0, pc=10),
-        SoundEvent(job_id=0, sound_id=1),
-        SoundEvent(job_id=1, sound_id=2),  # empty stream -> not triggered
-    )
-    triggered = engine.handle_combat_events(events)
+    triggered = engine.handle_fight_sounds((1, 2))
     assert triggered == [1]
     assert engine.mixer.active_channels() == (0, 1)
     pcm = engine.step_vbl()

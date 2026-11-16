@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pymoonstone.sim.knight_combat import KnightState, SecondaryWeapon
+from pymoonstone.sim.location_state import KnightState, SecondaryWeapon
 from pymoonstone.sim.locations import (
     BLESSING_COST,
     DAGGER_UNIT_COST,

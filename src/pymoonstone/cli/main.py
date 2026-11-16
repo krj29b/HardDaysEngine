@@ -175,6 +175,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             seed=seed,
             record_path=record_path,
             replay_path=replay_path,
+            adf_dir=adf_dir,
         )
         print(f"ticks={result.ticks_executed} scene={result.scene.name} hash={result.final_hash}")
         return 0

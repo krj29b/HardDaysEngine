@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pymoonstone.app.fight_scene import FightScene
+from pymoonstone.app.input import InputFrame, PlayerInput
 from pymoonstone.assets.creature_rules import parse_brawler_rules
 from pymoonstone.assets.fight_defs import ArenaDef, parse_fight_defs
 from pymoonstone.assets.fight_palette import REGION_FOREST, assemble_fight_palette
@@ -30,7 +31,7 @@ from pymoonstone.assets.mog_code import MogCode
 from pymoonstone.render.scene import palette_fx_to_rgb
 from pymoonstone.sim.actor import Actor
 from pymoonstone.sim.fight import Fight
-from pymoonstone.sim.fight_ai.brawler import install_brawler
+from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
 from pymoonstone.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
 from pymoonstone.sim.fight_routines import DAGGER_TYPE
 from pymoonstone.sim.fighters import KNIGHT_TYPE, install_knight_control
@@ -42,6 +43,7 @@ from pymoonstone.sim.rng import Rng
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
+    from pymoonstone.app.game import GameSession
     from pymoonstone.app.scene_assets import GameAssetBundle
     from pymoonstone.assets.cel import DecodedCel
     from pymoonstone.assets.fight_defs import CelFile
@@ -70,22 +72,23 @@ class FightAudit:
     scene: FightScene
     rules: KnightRules
     opponent: int
+    first: int = 1
 
     def input_word(self) -> int:
         """Audit-only joystick bot: align, face, strike or throw one dagger at a time."""
         fight = self.scene.fight
-        knight, trogg = fight.actor(1), fight.actor(self.opponent)
+        knight, trogg = fight.actor(self.first), fight.actor(self.opponent)
         dy = s16(trogg.y) - s16(knight.y)
         if abs(dy) > 3:
             return DOWN if dy > 0 else UP
         dx = s16(trogg.x) - s16(knight.x)
         if (knight.facing == 1) != (dx > 0):
             return RIGHT if dx > 0 else LEFT
-        return _attack_word(fight, self.rules, abs(dx))
+        return _attack_word(fight, self.rules, abs(dx), self.first)
 
 
-def _attack_word(fight: Fight, rules: KnightRules, distance: int) -> int:
-    knight = fight.actor(1)
+def _attack_word(fight: Fight, rules: KnightRules, distance: int, first: int) -> int:
+    knight = fight.actor(first)
     table = rules.actions_right if knight.facing == 1 else rules.actions_left
     if distance <= 50:
         return FIRE | table.index(0x08)
@@ -184,3 +187,33 @@ def fight_audit_frames(audit: FightAudit) -> Iterator[tuple[str, FightScene]]:
             yield f"outcome_frame{frame + 1}", audit.scene
             return
     raise RuntimeError("fight audit did not reach an outcome")
+
+
+def fight_host_input(session: GameSession) -> InputFrame:
+    """Audit-only bot inputs for the campaign host, including replacement Trogg waves."""
+    active, loader = session.active_encounter, session.fight_loader
+    if active is None or loader is None:
+        raise ValueError("fight host audit requires an active, loaded fight")
+    runtime = active.runtime
+    targets = [
+        j.owner
+        for j in runtime.fight.engine.jobs
+        if j.active and j.type in BRAWLER_TYPES and s16(runtime.fight.actor(j.owner).hp) > 0
+    ]
+    word = 0
+    if targets:
+        first = runtime.fight.actor(runtime.first)
+        target = min(
+            targets, key=lambda handle: abs(s16(runtime.fight.actor(handle).x) - s16(first.x))
+        )
+        audit = FightAudit(runtime.scene, loader.knight_rules, target, runtime.first)
+        word = audit.input_word()
+    inp = PlayerInput(
+        dx=int(bool(word & RIGHT)) - int(bool(word & LEFT)),
+        dy=int(bool(word & DOWN)) - int(bool(word & UP)),
+        fire=bool(word & FIRE),
+    )
+    # The first keyboard/gamepad slot is RED in the input API, regardless of chosen class.
+    from pymoonstone.sim.types import KnightId
+
+    return InputFrame(players={KnightId.RED: inp})

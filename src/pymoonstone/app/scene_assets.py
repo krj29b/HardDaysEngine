@@ -7,7 +7,6 @@ import struct
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from pymoonstone.app.combat_bridge import compose_knight_pieces, select_knight_body_frame
 from pymoonstone.app.intro_player import IntroCinematicPlayer
 from pymoonstone.assets.arena import DecodedArena, composite_arena_background, decode_arena
 from pymoonstone.assets.audio import (
@@ -32,7 +31,6 @@ from pymoonstone.assets.tables import (
 )
 from pymoonstone.render.renderer import CANVAS_WIDTH, PLAYFIELD_HEIGHT
 from pymoonstone.render.scene import SceneSprite
-from pymoonstone.sim.monster_ai import MonsterArchetype
 from pymoonstone.sim.overworld import (
     EncounterBand,
     MapSiteInput,
@@ -47,20 +45,7 @@ if TYPE_CHECKING:
 
     from pymoonstone.app.audio import AudioEngine
     from pymoonstone.assets.adf import DiskSet
-    from pymoonstone.sim.knight_combat import KnightAction
 
-_ARCHETYPE_CELS: dict[MonsterArchetype, tuple[str, ...]] = {
-    MonsterArchetype.TROGG_SPEAR: ("TROGGSpear1.CEL", "TROGGSpear2.CEL"),
-    MonsterArchetype.TROGG_AXE: ("TROGGAxe1.CEL", "TROGGAxe2.CEL"),
-    MonsterArchetype.RATMAN: ("RATMEN1.CEL", "RATMEN2.CEL"),
-    MonsterArchetype.MUDMAN: ("Mudmen1.CEL", "Mudmen2.CEL"),
-    MonsterArchetype.BEASTMAN: ("be1.c", "be2.c"),
-    MonsterArchetype.DEMON: ("Demon1.CEL", "Demon2.CEL", "Demon3.CEL", "Demon4.CEL"),
-    MonsterArchetype.TROLL: ("TROLL1.CEL", "TROLL2.CEL"),
-    MonsterArchetype.BALOK: ("Balok1.CEL", "Balok2.CEL", "Balok3.CEL"),
-    MonsterArchetype.DRAGON: ("DRAGON1.CEL", "DRAGON2.CEL", "DRAGON5.CEL"),
-    MonsterArchetype.GUARDIAN: ("HE1.ob", "HE2.ob", "HE3.ob"),
-}
 
 _CANONICAL_ROAD_SITES: tuple[tuple[int, int, int], ...] = (
     # Forest (top-left quadrant)
@@ -307,28 +292,6 @@ class GameAssetBundle:
                 return arena, bg_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH], tuple(bg_pic.palette)
         return None
 
-    def get_knight_cel(self, knight_index: int) -> DecodedCel | None:
-        """Return the knight cel for player ``knight_index`` (0..3)."""
-        preferred = f"KN{(knight_index % 4) + 1}.ob"
-        return self.get_cel(preferred, "KN4.ob", "KN1.ob")
-
-    def get_monster_cels(self, archetype: MonsterArchetype) -> tuple[DecodedCel, ...]:
-        """Return all available cel slots for ``archetype`` in slot order."""
-        candidates = _ARCHETYPE_CELS.get(archetype, ("TROLL1.CEL", "TROLL2.CEL"))
-        loaded: list[DecodedCel] = []
-        for name in candidates:
-            cel = self.get_cel(name)
-            if cel is not None and cel.frames:
-                loaded.append(cel)
-        return tuple(loaded)
-
-    def get_monster_cel(self, archetype: MonsterArchetype) -> DecodedCel | None:
-        """Return the primary cel for ``archetype``."""
-        cels = self.get_monster_cels(archetype)
-        if cels:
-            return cels[0]
-        return self.get_cel("TROLL1.CEL")
-
     def preload_audio(self, audio: AudioEngine) -> None:
         """Load available ``.a`` sample banks and register addressable combat SFX keys."""
         bank_chunks: dict[str, list[tuple[bytes, int]]] = {}
@@ -474,113 +437,6 @@ class GameAssetBundle:
             encounter_bands=bands,
             moves_per_turn=3,
         )
-
-    def compose_knight_sprites(
-        self,
-        knight_index: int,
-        action: KnightAction,
-        tick_count: int,
-        *,
-        x: int,
-        y: int,
-        z: int = 0,
-        flipped: bool = False,
-        layer: int = 2,
-        order: int = 0,
-    ) -> list[SceneSprite]:
-        """Build multi-part knight :class:`SceneSprite`s using `mog` scripts and `collide.hit`."""
-        kcel = self.get_knight_cel(knight_index)
-        if kcel is None or not kcel.frames:
-            return []
-        mog_tables = self.get_mog_tables()
-        hit_sets = self.get_hit_sets()
-        preferred = f"kn{(knight_index % 4) + 1}"
-        hset = (
-            hit_sets.get(preferred) or hit_sets.get("kn4") or hit_sets.get("kn1")
-            if hit_sets
-            else None
-        )
-        pieces = compose_knight_pieces(
-            kcel,
-            action,
-            tick_count,
-            flipped=flipped,
-            mog_s4=self.get_mog_s4_bytes(),
-            combat_actions=mog_tables.combat_actions if mog_tables is not None else None,
-            hit_set=hset,
-        )
-        sprites: list[SceneSprite] = []
-        for idx, piece in enumerate(pieces):
-            sp = make_sprite(
-                kcel,
-                piece.frame_index,
-                x=x,
-                y=y,
-                z=z,
-                dx=piece.dx,
-                dy=piece.dy,
-                flipped=piece.flipped,
-                layer=layer,
-                order=order + idx,
-            )
-            if sp is not None:
-                sprites.append(sp)
-        return sprites
-
-    def compose_monster_sprites(
-        self,
-        archetype: MonsterArchetype,
-        tick_count: int,
-        *,
-        attacking: bool = False,
-        x: int,
-        y: int,
-        z: int = 0,
-        flipped: bool = False,
-        layer: int = 2,
-        order: int = 0,
-    ) -> list[SceneSprite]:
-        """Build multi-part monster :class:`SceneSprite`s across all cel slots."""
-        cels = self.get_monster_cels(archetype)
-        if not cels:
-            fallback = self.get_cel("TROLL1.CEL")
-            cels = (fallback,) if fallback is not None and fallback.frames else ()
-        sprites: list[SceneSprite] = []
-        for slot_idx, cel in enumerate(cels):
-            fidx = select_monster_frame(cel, tick_count, attacking)
-            sp = make_sprite(
-                cel,
-                fidx,
-                x=x,
-                y=y,
-                z=z,
-                flipped=flipped,
-                layer=layer,
-                order=order + slot_idx,
-            )
-            if sp is not None:
-                sprites.append(sp)
-        return sprites
-
-
-def select_knight_frame(
-    cel: DecodedCel,
-    action: KnightAction,
-    tick_count: int,
-    *,
-    hit_set: HitSet | None = None,
-) -> int:
-    """Pick a body-sized cel frame index within `collide.hit` bounds for ``action``."""
-    return select_knight_body_frame(cel, action, tick_count, hit_set=hit_set)
-
-
-def select_monster_frame(cel: DecodedCel, tick_count: int, attacking: bool) -> int:
-    """Pick a valid monster cel frame index."""
-    if not cel.frames:
-        return 0
-    step = (tick_count // 6) % min(len(cel.frames), 4)
-    offset = min(len(cel.frames) - 1, 2) if attacking else 0
-    return (offset + step) % len(cel.frames)
 
 
 def make_sprite(

@@ -1778,6 +1778,53 @@ T11.11. The audit's single-opponent fixtures exercise the real knight and brawle
 with a deterministic joystick bot; their positions, knight equipment and health are test
 setup, not campaign defaults or wave rules.
 
+### 10.22 Campaign host boundary (`T11.8b2`)
+
+The host loads a fight's immutable executable definitions once, resolves lair handler offsets
+through the decoded arena table, and passes the session's four persistent Actor records,
+dragon record, inventories and original-generator instance into each new Fight. Job and
+actor changes during combat belong only to that Fight. Input is the original five-bit
+right/left/down/up/fire word; a normalized horizontal or vertical axis cannot set both
+opposing direction bits. Scene rendering reads the retained frame of §10.21.
+
+During the remaining map/sheet migration the old location screens need a separate data-only
+record. It has no combat timers, controller, scripts or damage logic. At fight entry its
+health, equipment, stats, daggers, lives and inventory masks are translated to the Actor.
+At fight return the resulting health, daggers and lives are copied back for those screens.
+Legacy sword tiers 1..4 correspond to codes $16..$19 and armour levels 0..3 to $1B..$1E;
+the legacy screens' extra tier is clamped at the last supported code. Stamina, score and
+secondary-weapon selection from those screens never affect combat. This adapter is removed
+with T11.15 to T11.21, rather than retaining a second combat controller.
+
+The existing map still uses its earlier generator until T11.12; the original fight generator
+is session-owned, seeded once and reused across fights. No fight is reseeded on entry. T11.12
+joins the map to that instance. Unsupported arena handlers are rejected before any fight is
+activated, with an explicit unavailable status. They are not replaced with another creature.
+Without original assets there is no synthetic gameplay fallback; tests inject synthetic
+script engines and records explicitly.
+
+The minimal host bridge samples the two ports each PAL tick and consumes a fight frame every
+six ticks. After the engine clears fight_active it continues frames while the decoded end
+timer counts down as a byte. The bridge preserves the decoded spawn lists, initial base wave
+counts and alternating spawn cursor. T11.11 still completes the enter script, spawn lanes,
+wave scaling, negative-health end-test variant, low-health palette jobs, lair write-back and
+loot/temple screens. Migrating the host does not mark those rules implemented.
+
+Fight replay snapshots contain all actor records, job positions and work blocks, shared
+scratch/box/mirror state, list buffers and cursors, mutable tables, inventories, ports, PRNG,
+fight cells, spawn cursor and PAL-frame phase. Snapshots contain values rather than callbacks
+or asset bytes; static data compatibility and complete campaign snapshots remain campaign
+verification work (T11.24).
+
+Human duels start the first fighter on the knight frame list and the second on the decoded
+duel/creature frame list (`He1.ob`..`He3.ob` and shared `kn4.ob`, §10.15), with ports as in
+§10.1. Practice forces the blue and orange classes and returns to the title after either
+fighter's death script and the post-fight delay. Replay metadata stores the roster at the
+start of recording; menu changes to the roster are reproduced by replaying input. The
+headless CLI loads the resolved disk directory, so disk-backed gameplay can be replayed
+without a window. Omitting the optional disk directory from the Python helper retains the
+asset-free menu/map test mode, with fights explicitly unavailable.
+
 ## 11. Overworld and Turns (`T11.4`)
 
 The overworld is one screen: the map picture with small sprites on it. Knights take turns. The

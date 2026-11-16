@@ -367,26 +367,3 @@ def test_parse_knight_and_monster_script_tables_synthetic() -> None:
     assert ms[0].creature_type == 0x20
     assert ms[0].idle_script == 420
     assert ms[0].hurt_scripts[0] == 420
-
-
-@pytest.mark.adf
-def test_real_knight_scripts_emit_multipart_draws_in_vm(adf_dir: Path) -> None:
-    from pymoonstone.sim.combat_vm import CombatJob, DrawFrameEvent, step_frame
-
-    disks = DiskSet.from_directory(adf_dir)
-    mog = parse_hunk_executable("mog", disks.read_file("mog"))
-    s4_bytes = mog.sections[MOG_TABLES_SECTION].data
-    ks = parse_knight_script_tables(mog)
-
-    cases = {
-        "IDLE": ks.idle_script,
-        "WALK": ks.walk_scripts[0][0],
-        "THRUST": ks.action_scripts[1],
-        "LOW_SWEEP": ks.action_scripts[2],
-        "OVERHEAD_SLASH": ks.action_scripts[8],
-    }
-    for name, pc in cases.items():
-        job = CombatJob(pc=pc)
-        events = step_frame(job, s4_bytes)
-        draws = [e for e in events if isinstance(e, DrawFrameEvent)]
-        assert len(draws) >= 2, f"{name} at pc={pc} emitted {len(draws)} draws, expected >= 2"
