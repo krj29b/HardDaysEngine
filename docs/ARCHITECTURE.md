@@ -1751,6 +1751,33 @@ knight's job and plays its finishing script.
 
 ---
 
+### 10.21 Presenting the engine output (`T11.8b1`)
+
+The app consumes the `Fight.step` output once per fight frame. It sends the draws to the
+presenter in their emitted order: the second-script pass followed by the depth-sorted main
+pass (§10.17). Screen Y is already projected and is not a new sort key. Cel names and frame
+indices must resolve exactly; missing files and out-of-range frames are errors.
+
+The presenter retains two indexed 320 by 200 buffers: the background with permanent stamps,
+and the most recent displayed frame. At the start of a new frame it copies the background
+to the displayed frame. It draws each cel onto the displayed frame, and also onto the
+background when `stamp` is set. In particular, a later stamp must remain above an earlier
+ordinary draw on the current frame. Ordinary draws disappear on the next frame unless
+redrawn; stamps remain. Transparency is index 0 and drawing is clipped to the game viewport.
+
+Draw positions are unsigned 16-bit words; the presenter interprets them as signed coordinates
+for clipping. The `mirrored` flag is the orientation captured at that individual draw, not
+the frame's final shared orientation after the engine tick. Unmirrored decoded pixels use
+the disk header's horizontal shift (§3.2). Reversing the decoded visible pixel width gives
+the same mirrored visible position as reversing the aligned row and subtracting the
+mirrored header's padding shift. Decoded cels are never modified by presentation.
+
+Reading or displaying the retained frame does not advance jobs, handlers, PRNG, stamps or
+palette effects. The app owns frame pacing, entry and outcomes; those remain T11.8b2 /
+T11.11. The audit's single-opponent fixtures exercise the real knight and brawler handlers
+with a deterministic joystick bot; their positions, knight equipment and health are test
+setup, not campaign defaults or wave rules.
+
 ## 11. Overworld and Turns (`T11.4`)
 
 The overworld is one screen: the map picture with small sprites on it. Knights take turns. The

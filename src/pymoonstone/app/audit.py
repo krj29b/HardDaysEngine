@@ -14,6 +14,7 @@ import moderngl
 import numpy as np
 from PIL import Image, ImageDraw
 
+from pymoonstone.app.fight_audit import TROGG_ARENAS, build_fight_audit, fight_audit_frames
 from pymoonstone.app.game import GameScene, GameSession
 from pymoonstone.app.input import InputFrame, PlayerInput
 from pymoonstone.app.location_screens import LocationKind
@@ -25,10 +26,13 @@ from pymoonstone.sim.overworld import EncounterTrigger, TriggerKind
 from pymoonstone.sim.types import KnightId
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Sequence
     from pathlib import Path
 
     import numpy.typing as npt
+
+    from pymoonstone.app.fight_scene import FightScene
+    from pymoonstone.app.scene_assets import GameAssetBundle
 
 _PRIMARY = KnightId.RED
 _LABEL_HEIGHT = 12
@@ -95,6 +99,19 @@ class AuditRig:
         session.render_to_scene(self._scene, self._font)
         rgba = self._base.read_canvas_rgba()
         return AuditShot(name=name, rgb=np.ascontiguousarray(rgba[..., :3]))
+
+    def capture_fight(self, scene: FightScene, name: str) -> AuditShot:
+        """Capture the persistent engine's last output without stepping it (§10.17)."""
+        scene.render(self._scene)
+        self._scene.flush_to_fbo()
+        rgba = self._base.read_canvas_rgba()
+        return AuditShot(name=name, rgb=np.ascontiguousarray(rgba[..., :3]))
+
+    def fight_assets(self) -> GameAssetBundle:
+        """Return the real-disk bundle used for fight-engine audit fixtures."""
+        from pymoonstone.app.scene_assets import GameAssetBundle
+
+        return GameAssetBundle(DiskSet.from_directory(self._adf_dir))
 
     def release(self) -> None:
         """Free the GL resources."""
@@ -198,12 +215,21 @@ def _region_shots(rig: AuditRig) -> Iterator[AuditShot]:
         yield rig.capture(session, f"region_{region}")
 
 
+def _engine_fight_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    bundle = rig.fight_assets()
+    for name in TROGG_ARENAS:
+        audit = build_fight_audit(bundle, name)
+        for label, scene in fight_audit_frames(audit):
+            yield rig.capture_fight(scene, f"engine_{name}_{label}")
+
+
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
     "intro": _intro_shots,
     "menu_map": _menu_and_map_shots,
     "places": _place_shots,
     "fights": _fight_shots,
     "regions": _region_shots,
+    "engine_fights": _engine_fight_shots,
 }
 
 
@@ -224,13 +250,17 @@ def build_contact_sheet(shots: list[AuditShot], columns: int = _SHEET_COLUMNS) -
     return sheet
 
 
-def run_audit(adf_dir: Path, out_dir: Path) -> dict[str, Path]:
-    """Capture every audit scenario and write one contact sheet per scenario to ``out_dir``."""
+def run_audit(
+    adf_dir: Path, out_dir: Path, scenarios: Sequence[str] | None = None
+) -> dict[str, Path]:
+    """Capture selected scenarios (all by default), writing one contact sheet per scenario."""
     out_dir.mkdir(parents=True, exist_ok=True)
     rig = AuditRig(adf_dir)
     written: dict[str, Path] = {}
     try:
-        for name, scenario in AUDIT_SCENARIOS.items():
+        names = tuple(AUDIT_SCENARIOS) if scenarios is None else tuple(scenarios)
+        for name in names:
+            scenario = AUDIT_SCENARIOS[name]
             path = out_dir / f"{name}.png"
             build_contact_sheet(list(scenario(rig))).save(path)
             written[name] = path

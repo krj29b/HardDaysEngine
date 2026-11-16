@@ -225,6 +225,11 @@ Rules for the whole phase:
   T11.10a) `app/` draws the jobs' draw lists and `sim/combat_vm.py` is deleted with its tests.
   *Accept:* reviewed contact sheet of a Trogg fight from the real disks; no import of
   `combat_vm` remains.
+  T11.8b is split into **T11.8b1**, the ordered draw-list presenter and independent real-disk
+  audit path (§10.21), and **T11.8b2**, campaign host integration and old-caller/VM removal.
+  The split keeps presentation ordering and stamp correctness independently reviewable while
+  the host's campaign/location record boundary is replaced. T11.8b is complete only when both
+  subtasks are done; ADR-011's temporary coexistence remains until T11.8b2.
 - **T11.9 Knight control (`sim/fighters.py`, replaces `sim/knight_combat.py`):** joystick to action
   through the two action tables, walk scripts by phase and direction block, hurt scripts by the
   attacker's action, damage and defence tables, daggers, blocking, arena obstacles. Stamina and

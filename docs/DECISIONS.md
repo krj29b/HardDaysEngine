@@ -170,3 +170,21 @@ script calls but the T11.7 walker never reached is added to the routine table by
 meets it (here: "set the gloat latch", `$71C8`).
 **Alternative considered:** draw from the existing `SimPrng` for now. Rejected: it is invented
 (§11.2), so the brawler's choices would differ from the original's.
+
+## ADR-014: Consume fight draws once and retain the composed frame
+**Status:** ACCEPTED (2026-11-16, T11.8b1; implements ADR-009 / ADR-011)
+**Context:** The fight engine emits projected screen coordinates, per-draw mirror snapshots,
+second-script draws and background stamps. The general scene compositor sorts sprites by
+screen Y, which would change that order. Reapplying stamps during rendering would also make
+presentation depend on the number of host render calls.
+**Decision:** `render/fight.py` consumes the ordered draw list into a retained indexed frame
+and a separately stamped background. `app/fight_scene.py` owns the bridge: `advance(vbl)`
+runs one persistent `Fight.step` and accepts its draws once; `render` displays its retained
+frame with a palette and never steps simulation. Cel and frame lookup is exact. NumPy slicing
+performs transparency, clipping and mirroring without per-pixel Python loops. The existing
+scene compositor uploads the completed picture without sprites to sort.
+**Consequences:** Synthetic tests can verify the pixel contract without GL or disks. The
+real-disk `engine_fights` audit scenario runs single-Trogg fixtures through this bridge and
+the GL renderer. T11.8b is split into T11.8b1 (presentation) and T11.8b2 (campaign host and
+old-caller removal); ADR-011's temporary coexistence ends only with T11.8b2. T11.11 still owns
+campaign waves, pacing and settlement. No game data or generated contact sheets are committed.

@@ -10,7 +10,7 @@ import os
 import sys
 from pathlib import Path
 
-from pymoonstone.app.audit import run_audit
+from pymoonstone.app.audit import AUDIT_SCENARIOS, run_audit
 from pymoonstone.app.config import find_adf_images, resolve_adf_dir
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,6 +21,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--adf-dir", default=None, help="directory with the three .adf images")
     parser.add_argument("--out-dir", type=Path, default=ROOT / "build" / "audit")
+    parser.add_argument(
+        "--scenario",
+        action="append",
+        choices=sorted(AUDIT_SCENARIOS),
+        help="capture only this scenario (repeat to select several)",
+    )
     args = parser.parse_args()
 
     adf_dir = resolve_adf_dir(
@@ -32,7 +38,7 @@ def main() -> int:
     if len(find_adf_images(adf_dir)) < REQUIRED_DISK_COUNT:
         print(f"Moonstone ADF images not found in {adf_dir}")
         return 1
-    for name, path in run_audit(adf_dir, args.out_dir).items():
+    for name, path in run_audit(adf_dir, args.out_dir, args.scenario).items():
         print(f"{name}: {path}")
     return 0
 
