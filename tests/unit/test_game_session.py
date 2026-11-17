@@ -24,6 +24,7 @@ from pymoonstone.cli.main import main
 from pymoonstone.sim.overworld import scan
 from pymoonstone.sim.types import KnightId
 from tests.unit.map_setup import KINDS, RULES
+from tests.unit.turn_setup import TURN_RULES
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
     import pytest
 
     from pymoonstone.sim.map_rules import MapRules
+    from pymoonstone.sim.turn_rules import TurnRules
 
 
 def _frame_p1(
@@ -300,6 +302,9 @@ def test_victory_and_game_over_reset_to_menu_and_music() -> None:
         def get_map_rules(self) -> MapRules:
             return RULES
 
+        def get_turn_rules(self) -> TurnRules:
+            return TURN_RULES
+
         def get_test_picture(self, index: int) -> None:
             return None
 
@@ -328,6 +333,7 @@ def test_victory_and_game_over_reset_to_menu_and_music() -> None:
         assert session.overworld.game_over is False
         assert "title" in calls
 
+        session.overworld.turn_rules = None
         session.scene = GameScene.GAME_OVER
         session.step_tick(_frame_p1(fire=True))
         assert session.scene == GameScene.KNIGHT_SELECT

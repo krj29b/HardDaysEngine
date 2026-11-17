@@ -112,9 +112,9 @@ class AuditRig:
         self._scene.set_palette(default_combat_palette())
         self._font = default_bitmap_font()
 
-    def new_session(self) -> GameSession:
+    def new_session(self, players: tuple[KnightId, ...] = (_PRIMARY,)) -> GameSession:
         """Return a fresh single-player session on the real disks."""
-        return GameSession(disk_set=DiskSet.from_directory(self._adf_dir), players=(_PRIMARY,))
+        return GameSession(disk_set=DiskSet.from_directory(self._adf_dir), players=players)
 
     def capture(self, session: GameSession, name: str) -> AuditShot:
         """Render the session's current scene and return its canvas as RGB."""
@@ -233,6 +233,39 @@ def _pixel_map_shots(rig: AuditRig) -> Iterator[AuditShot]:
         tuple(range(43, 47)),
     ):
         yield rig.capture_map_frames(frames)
+
+
+def _turn_and_dragon_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    """Four-human round boundary, loaded moon previews and genuine flight jobs (§11.19)."""
+    session = rig.new_session(tuple(KnightId))
+    session.scene = GameScene.OVERWORLD
+    for turn in range(4):
+        _step(session, 20)
+        yield rig.capture(session, f"human_turn{turn}")
+        session.step_tick(InputFrame(key=ord("E")))
+        session.step_tick(InputFrame(key=ord("E")))
+    _step(session, 40)
+    yield rig.capture(session, "natural_round_end")
+    rules = session.overworld.turn_rules
+    if rules is None:
+        raise ValueError("calendar audit requires original rules")
+    for index, frame in enumerate(rules.moons):
+        session.overworld.moon_frame = frame
+        yield rig.capture(session, f"moon_preview{index}_frame{frame}")
+    session = rig.new_session(tuple(KnightId))
+    session.scene = GameScene.OVERWORLD
+    session.overworld.day = 2
+    session._reenter_map()
+    for tick in (2, 10, 40, 100, 160, 240, 320):
+        while session.tick_count < tick:
+            _step(session, 1)
+        yield rig.capture(session, f"dragon_flight_t{tick}")
+    session = rig.new_session()
+    session.scene = GameScene.OVERWORLD
+    session.step_tick(InputFrame(key=ord("Q")))
+    session.step_tick(InputFrame(key=ord("Q")))
+    _step(session, 30)
+    yield rig.capture(session, "farewell")
 
 
 def _place_shots(rig: AuditRig) -> Iterator[AuditShot]:
@@ -453,6 +486,7 @@ AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
     "intro": _intro_shots,
     "menu_map": _menu_and_map_shots,
     "pixel_map": _pixel_map_shots,
+    "turns_clock_dragon": _turn_and_dragon_shots,
     "places": _place_shots,
     "fights": _fight_shots,
     "regions": _region_shots,

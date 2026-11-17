@@ -63,6 +63,7 @@ def _session(*, audio: AudioEngine | None = None) -> GameSession:
         inventories: Mapping[int, Inventory],
         rng: Rng,
         first: int,
+        moon_frame: int = 0,
         *,
         lair_count: int | None = None,
         lanes: SpawnLanes | None = None,
@@ -84,6 +85,7 @@ def _session(*, audio: AudioEngine | None = None) -> GameSession:
             FightConstants(2, 0xFFFF),
             rng=rng,
         )
+        fight.moon_frame = moon_frame
         fight.first, fight.fight_active = first, True
         fight.flyer = loader.flyer
         fight.inventories = inventories

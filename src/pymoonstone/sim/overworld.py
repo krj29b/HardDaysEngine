@@ -9,7 +9,10 @@ from typing import TYPE_CHECKING
 from pymoonstone.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
 from pymoonstone.sim.inventory import Inventory
 from pymoonstone.sim.m68k import s8, s16, u8, u16
+from pymoonstone.sim.map_dragon import DragonFlight, attacks
 from pymoonstone.sim.map_rules import MapColors, MapRules
+from pymoonstone.sim.rewards import GiftState, recalc_endurance, recalc_hp
+from pymoonstone.sim.turns import TurnCells
 from pymoonstone.sim.types import KnightId
 
 if TYPE_CHECKING:
@@ -17,6 +20,7 @@ if TYPE_CHECKING:
 
     from pymoonstone.sim.actor import Actor
     from pymoonstone.sim.rng import Rng
+    from pymoonstone.sim.turn_rules import TurnRules
 
 MOONSTONE_COUNT = 4
 
@@ -179,6 +183,10 @@ class OverworldState:
     prng: Rng
     turn_order: tuple[KnightId, ...]
     rules: MapRules | None = None
+    turn_rules: TurnRules | None = None
+    human_order: tuple[KnightId, ...] = field(init=False)
+    turns: TurnCells = field(default_factory=TurnCells)
+    gifts: GiftState = field(default_factory=GiftState)
     knights: dict[KnightId, KnightView] = field(init=False)
     lairs: list[Lair] = field(default_factory=list)
     arrivals: list[Arrival] = field(default_factory=lambda: [Arrival() for _ in range(10)])
@@ -199,7 +207,9 @@ class OverworldState:
     phase: int = 0
     menu: bool = False
     turn_over: bool = False
+    dragon_encounter: bool = False
     dragon_active: bool = False
+    flight: DragonFlight = field(default_factory=DragonFlight)
     day: int = 0
     moon_index: int = 0
     moon_frame: int = 45
@@ -213,6 +223,11 @@ class OverworldState:
     def __post_init__(self) -> None:
         if len(self.actors) != 4:
             raise ValueError("the map requires four knight records")
+        self.human_order = self.turn_order
+        self.turn_order = (
+            *self.human_order,
+            *(kid for kid in KnightId if kid not in self.human_order),
+        )
         self.knights = {
             kid: KnightView(self.actors[int(kid)], self.inventories[int(kid) + 1])
             for kid in KnightId
@@ -237,6 +252,10 @@ class OverworldState:
     def is_full_moon(self) -> bool:
         return self.moon_phase == MoonPhase.FULL_MOON
 
+    def ordered_actors(self) -> tuple[Actor, ...]:
+        """Records in original selection/scheduler order (§11.19)."""
+        return tuple(self.actors[int(kid)] for kid in self.turn_order)
+
     def data(self) -> MapRules:
         """Require decoded data instead of inventing a map (§11.18)."""
         if self.rules is None:
@@ -257,19 +276,21 @@ class OverworldState:
             for offset, size, value in rules.defaults:
                 actor.write(offset, size, value)
             actor.inventory = int(kid) + 1
-            human = kid in self.turn_order
+            human = kid in self.human_order
             actor.kind = kinds[kid] if human else 4
             actor.type, actor.input_port = (12, 2) if human else (16, 4)
             actor.map_x, actor.map_y = (
-                rules.human_positions[actor.kind] if human else rules.computer_positions[int(kid)]
+                rules.human_positions[actor.kind]
+                if human
+                else rules.computer_positions[self.turn_order.index(kid)]
             )
             self.names.append(
-                rules.human_names[actor.kind] if human else rules.computer_names[int(kid)]
+                rules.human_names[actor.kind]
+                if human
+                else rules.computer_names[self.turn_order.index(kid)]
             )
-            actor.derived_endurance = u8(
-                actor.endurance * 2 + (2 if actor.armour in (28, 30) else 0) + 4
-            )
-            actor.hp_max = u16(actor.constitution * 10 + max(0, actor.armour - 27) * 10 + 10)
+            recalc_endurance(actor)
+            recalc_hp(actor, self.inventories[actor.inventory])
         self.enter()
 
     def tile(self) -> int:
@@ -287,14 +308,18 @@ class OverworldState:
             raise ValueError(f"map tile {index} outside loaded grid")
         return table[index]
 
-    def enter(self) -> None:
-        """Recompute budget/region and apply stale move without charging (§11.4)."""
+    def setup_turn(self) -> None:
+        """Recompute budget and region without moving (§11.11)."""
         actor = self.current_actor
         actor.input_port = 2
         if actor.kind != 4:
             actor.type = 12
         self.budget = u16(actor.derived_endurance << 4)
         self.region_code = self.grid_byte(self.data().regions)
+
+    def enter(self) -> None:
+        """Recompute turn cells and apply stale move without charging (§11.4)."""
+        self.setup_turn()
         self.menu = False
         self.colors.active = False
         self.move_step()
@@ -324,6 +349,7 @@ class OverworldState:
             return select_row(self, key)
         if self.turn_over:
             return None
+        self.dragon_encounter = False
         self.sample(word, key)
         if key in (ord(" "), ord("Q")):
             return None
@@ -331,6 +357,9 @@ class OverworldState:
             row = self.fire()
             if row is not None or self.menu:
                 return row
+        if attacks(self):
+            self.dragon_encounter = True
+            return None
         if s16(self.spent) >= s16(self.budget):
             self.turn_over = True
             return None
@@ -419,7 +448,8 @@ def _scan_places(world: OverworldState) -> list[Arrival]:
 def _scan_knights(world: OverworldState) -> list[Arrival]:
     rules, current = world.data(), world.current_actor
     rows = []
-    for index, actor in enumerate(world.actors):
+    for kid in world.turn_order:
+        index, actor = int(kid), world.actors[int(kid)]
         if actor is not current and boxes_touch(
             rules, 0, current.map_x, current.map_y, actor.map_x, actor.map_y
         ):
@@ -427,7 +457,8 @@ def _scan_knights(world: OverworldState) -> list[Arrival]:
             world.highlights.append(_highlight(actor))
     world.dragon_touch.clear()
     if world.dragon_active:
-        for index, actor in enumerate(world.actors):
+        for kid in world.turn_order:
+            index, actor = int(kid), world.actors[int(kid)]
             if boxes_touch(
                 rules, 20, u16(world.dragon.x - 10), world.dragon.y, actor.map_x, actor.map_y
             ):
@@ -495,7 +526,7 @@ def map_sprites(world: OverworldState) -> tuple[MapSprite, ...]:
     sprites = [
         MapSprite(20, lair.map_x, lair.map_y) for lair in world.lairs if s16(lair.map_x) >= 0
     ]
-    for actor in world.actors:
+    for actor in world.ordered_actors():
         if actor is world.current_actor:
             continue
         frame = 33 if s8(actor.lives) <= 0 else actor.kind + (43 if actor.frog_days else 0)

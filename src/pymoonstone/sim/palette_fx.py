@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 PALETTE_SIZE = 32
 NIBBLE_MAX = 0xF
@@ -163,6 +163,19 @@ class PaletteFxState:
         self._cycles: list[_ActiveCycle] = []
         self._flash: FlashOverride | None = None
         self._vbl_count: int = 0
+
+    def snapshot(self) -> dict[str, object]:
+        """Replay state of fades, cycles and flashes, including countdowns (§11.19)."""
+        return {
+            "base": self._base[:],
+            "target": self._fade_target[:],
+            "divisor": self._fade_divisor,
+            "tick": self._fade_tick,
+            "fading": self._fading,
+            "cycles": [asdict(cycle) for cycle in self._cycles],
+            "flash": None if self._flash is None else asdict(self._flash),
+            "vbl": self._vbl_count,
+        }
 
     @property
     def vbl_count(self) -> int:

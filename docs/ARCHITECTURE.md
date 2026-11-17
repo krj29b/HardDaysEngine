@@ -3051,6 +3051,76 @@ win alone. Original place/loot sheets and their effects remain T11.15..T11.21;
 this task dispatches existing callers and reports unavailable unscheduled ones.
 
 
+### 11.19 Scheduler, clock and map-dragon integration (T11.13)
+
+The scheduler cursor visits all four persistent records in record order, including
+computer knights; the human roster is only the controller/player-count mapping.
+Existing KnightId+1 handles stay stable; turn_order maps original record indices
+to human selection order followed by the remaining computers. Scans, gifts and
+dragon target draws use that same order. A scheduler invocation clears skipped
+once, then advances records until play,
+farewell, or a round boundary. At a round boundary it suspends before setting up
+record0, runs upkeep once, and resumes only after the Next Day press/release.
+Skipping continues with the same skipped count across that suspension. Setup
+recomputes tile/region/budget without moving; screen entry applies the stale move.
+The active record's engagement is cleared on turn changes. AI goal/walk/roam cells
+are reset by the same boundary when T11.14 installs them. Until that task, a
+computer turn is exposed as unavailable, without consuming invented moves/draws.
+All-human rule/host tests exercise complete rounds independently of map AI.
+
+**Overnight correction to §9.3:** recency subtraction is byte-wrapped; a negative
+byte result becomes zero. Recency FF skips both recency and frog decay. A nonzero
+frog byte decrements once. Regeneration always computes a wrapped word difference
+(max minus hp), logically shifts it right2 and ORs1 when nonzero, adds it to hp,
+then caps with a signed comparison. This also preserves above-maximum/overflow
+cases; it is not guarded by hp < hp_max. Day turnover runs before overnight.
+Computer gifts use the shared rules of §12.9/12, including the shared last-item
+memory and message cycles. Retries in random selection are bounded at4096 and
+raise when exhausted. Gold halves use logical word shifts: both winner's increment
+and loser's replacement are floor(gold/2), so odd gold loses one. Zero lives
+(exactly byte0) transfers all counts; other byte values transfer one owned slot.
+The all-transfer sword typo and the dragon-type14 gold-first double-halving path
+are retained. Recalculate the four knights after transfer, not the dragon.
+
+**Checked executable reads:** moon frames through hunk0 LEA $0664; Next Day text
+list through $2BA8. Its14-byte linked records hold text pointer, x/y, style word,
+next pointer; loops/out-of-bounds raise. The font is bold.f, selected by the
+original loader. It automatically adds narrow style8 (advance = glyph width-3);
+style1 centers within the loaded span (width minus margin, read through $91F0
+and $91F6). Moon x/y are operands $2BD0/$2BD4. No extra day/phase labels are drawn.
+Next Day waits for an initial release, a press, then release, so held fire from
+the map cannot dismiss it. The scheduler and palette fade clocks advance in host
+updates, never during rendering. Farewell uses the original message text, with
+its dedicated ending sequence still T11.22.
+
+Read dragon spawn threshold at hunk36 $0692; record stores $06EA..$0710;
+flight table through relocated store $0716 (16 pointers into hunk4); hover through
+$07DA. The handler identity stored at $06B8 points to $07B8. Timer, speed and edge
+operands are checked at $074A, $0752, $07C6, $07CE, $0820/$0828,
+$083A/$0842, $0854/$085C/$0868; y speed is the data word referenced by $07FE.
+Spawning clears map jobs and starts a real job in the existing Fight/ScriptEngine
+with all five frame-list slots naming mi.c. The original takes that job's initial
+x/height/depth from words at first-script+4/+6/+8, despite having just set the
+record to (10,0,100); preserve these initial job words and its first write-back.
+The subsequent type28 handler selects a flight/hover script and restarts at the
+record position/facing. Retain the actual script draw offsets and mirroring.
+A map entry runs existing jobs before trying to spawn, as §11.4 specifies.
+Rendering consumes retained draws, never runs a job or a flight step.
+
+The four candidates for dragon targeting are sampled by the original Rng until
+a living one is found. With no living knight, no target/job is retained; invalid
+endless selection is bounded as above. An attack tests the previous scan's touch
+list after menu/key processing and before budget/movement. Computer targets lose
+a life immediately; frogged or byte-zero-lives humans lose without an arena.
+Loss transfers loot to the persistent dragon; a fought win marks lives FF and
+awards the decoded progress operand. Spent becomes budget in all cases. The
+existing real Dragon fight is used for other humans. Arena/place entry clears
+map jobs/dragon_active; the next entry can spawn again unless lives is negative.
+Clock day and loaded moon frame are passed into duel/creature runtimes. Hoard
+sheet presentation remains T11.15/21; gift rolls at campaign initialization remain
+the initialization follow-up recorded by T11.12.
+
+
 ## 12. Places and Sheets (`T11.5`)
 
 Everything that is neither the map (§11) nor a fight (§10) is one of two kinds of screen:

@@ -30,6 +30,7 @@ from pymoonstone.assets.tables import (
     load_mog_tables,
     load_program_tables,
 )
+from pymoonstone.assets.turn_rules import parse_turn_rules
 from pymoonstone.render.renderer import CANVAS_WIDTH, PLAYFIELD_HEIGHT
 from pymoonstone.render.scene import SceneSprite
 
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from pymoonstone.app.audio import AudioEngine
     from pymoonstone.assets.adf import DiskSet
     from pymoonstone.sim.map_rules import MapRules
+    from pymoonstone.sim.turn_rules import TurnRules
 
 
 _LAIR_ARENAS = ("fol1.t", "gll1.t", "swl1.t", "wal1.t")
@@ -294,6 +296,10 @@ class GameAssetBundle:
     def get_blood_cel(self) -> DecodedCel | None:
         """Load and cache the ``blo.cel`` blood/gore sprite sheet if present."""
         return self.get_cel("blo.cel")
+
+    def get_turn_rules(self) -> TurnRules:
+        """Decode calendar, gift and flight tables from the original mog (§11.19)."""
+        return parse_turn_rules(parse_hunk_executable("mog", self.disk_set.read_file("mog")))
 
     def get_map_rules(self) -> MapRules:
         """Load original map records, grids and exact mi.c dimensions (§11.18)."""

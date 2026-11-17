@@ -14,7 +14,6 @@ from pymoonstone.app.location_screens import (
     location_backdrop_names,
     menu_options_for_location,
     render_location_menu,
-    render_new_day_screen,
     render_status_screen,
     step_location_menu,
     visit_shop,
@@ -318,7 +317,7 @@ def test_waterdeep_all_services_training_and_stonehenge_ritual() -> None:
     assert ow.game_over is True
 
 
-def test_render_location_status_and_new_day_screens() -> None:
+def test_render_location_and_status_screens() -> None:
     ow = _make_overworld()
     ow.knights[KnightId.RED].keys_mask = 0b0101
     ow.knights[KnightId.RED].moonstones_mask = 0b0011
@@ -365,14 +364,6 @@ def test_render_location_status_and_new_day_screens() -> None:
     assert "0011" in joined
     assert "DAY 15" in joined
     assert "FULL MOON" in joined
-
-    # New Day lunar banner renders DAY <n> and MoonPhase on solid fallback when bundle is None.
-    day_font = _RecordingFont()
-    render_new_day_screen(renderer, ow, day_font)
-    assert int(renderer.canvas[28, 0]) == 1
-    day_joined = "\n".join(day_font.lines)
-    assert "DAY 15" in day_joined
-    assert "FULL MOON" in day_joined
 
 
 def test_town_scroll_rendering_avoids_overlapping_text_and_aligns_highlight() -> None:

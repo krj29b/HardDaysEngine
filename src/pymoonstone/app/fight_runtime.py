@@ -599,6 +599,7 @@ class FightLoader:
         lanes: SpawnLanes | None = None,
         computers: frozenset[int] = frozenset(),
         day: int = 0,
+        moon_frame: int = 0,
     ) -> FightRuntime:
         if first == second or not {first, second} <= {1, 2, 3, 4}:
             raise FightUnavailableError("duel requires two different knight handles")
@@ -621,6 +622,7 @@ class FightLoader:
         edge = max((w.y for w in scene.fight.walls), default=self.knight_rules.clip.top)
         edge = max(edge, self.knight_rules.clip.top)
         scene.fight.ai_day = u16(day)
+        scene.fight.moon_frame = moon_frame
         self._duel_knights(scene.fight, first, second, computers, cursor, edge)
         pause_all(scene.fight)
         return self._runtime(scene, first, cursor, opponent=second)

@@ -46,6 +46,6 @@ RULES = MapRules(
 def make_world(players: tuple[KnightId, ...] = (KnightId.RED,), *, seed: int = 0) -> OverworldState:
     """Create test-owned records and explicitly inject fabricated map data."""
     actors = [Actor() for _ in range(4)]
-    world = OverworldState(actors, Actor(), {i: Inventory() for i in range(1, 5)}, Rng(1), players)
+    world = OverworldState(actors, Actor(), {i: Inventory() for i in range(1, 6)}, Rng(1), players)
     world.install(RULES, KINDS, seed)
     return world

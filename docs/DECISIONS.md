@@ -424,3 +424,34 @@ Synthetic movement/proximity/menu/palette checks replace obsolete graph and LCG 
 Real-disk tests independently inspect loaded tables, check movement without random fights,
 shared state and replay; the pixel_map audit includes natural map captures and labelled
 frame previews. No game data or generated contact sheet is committed.
+
+
+## ADR-026: Suspend the original scheduler at round screens and reuse jobs for map flight
+**Status:** ACCEPTED (2026-11-17, T11.13; follows ADR-011 / ADR-013 / ADR-025)
+**Context:** Budget exhaustion needs the original four-record scheduler, four-round clock,
+curse upkeep and dragon flight. The old human-only round logic and invented lunar banner
+have already been superseded. Computer map decisions and inventory screens have separate tasks.
+**Decision:** sim/turns.py advances record order and suspends before record0 setup at each
+Next Day screen. Its skipped count and pending setup survive that screen. Logical handles
+remain KnightId+1; turn_order maps original record indices to selection order, with unused
+records assigned to computers. Proximity, daily gifts and dragon target draws share that order.
+assets/turn_rules.py reads checked moon/gift/flight tables, text lists and operands. Shared
+stat/gift/loot rules in sim/rewards.py implement the computer day gift and dragon settlement;
+their state and the fifth actor inventory belong to the campaign. sim/map_dragon.py installs
+type28 on the existing Fight/ScriptEngine. app/map_runtime.py retains its real job draws and
+canvas; no alternate animation interpreter or frame counter is introduced. Clock day and moon
+frame reach the existing fight runtimes. Palette fade snapshots join host replay hashes.
+**Consequences:** The Next Day screen uses ch.piv, bold.f, the original linked text records,
+loaded moon frames and map palette. Host updates own fade clocks and require release/press/
+release; rendering does not advance calendar, jobs or colors. The original byte-wrapped
+recency decay, word-wrapped regeneration, flight job's unusual initial position, hover edge
+omissions, exact-zero-lives loot branch, sword typo and dragon gold-first double halving are
+preserved (§11.19). Invalid text loops/table reads raise; random selection retries are bounded.
+Game over uses the original farewell text and returns to title after fire. Computer turns
+are scheduled but report unavailable until T11.14 supplies map decisions; no idle AI or
+invented turn skipping is substituted. AI goal/walk/roam reset joins those cells in T11.14.
+New-game hoard/market/lair rolls remain the initialization follow-up of T11.12, while hoard
+and place/meeting sheets remain T11.15..21 and the full ending presentation T11.22. Existing
+natural Dragon outcome tests continue to validate the arena; new caller-boundary fixtures
+validate map attack and settlement independently. Contact sheets distinguish natural round/
+flight captures from moon previews. No game data is committed.

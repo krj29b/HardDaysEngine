@@ -28,12 +28,12 @@ from pymoonstone.app.location_screens import (
     LocationKind,
     LocationMenuState,
     render_location_menu,
-    render_new_day_screen,
     render_status_screen,
     step_location_menu,
 )
 from pymoonstone.app.loop import Accumulator50Hz
-from pymoonstone.app.map_scene import compose_map, draw_map_menu
+from pymoonstone.app.map_runtime import MapRuntime
+from pymoonstone.app.map_scene import compose_map, draw_calendar_screen, draw_map_menu
 from pymoonstone.app.scene_assets import (
     GameAssetBundle,
     build_intro_cinematic_frame,
@@ -53,6 +53,7 @@ from pymoonstone.render.scene import (
     BitmapFont,
     SceneRenderer,
     SceneSprite,
+    blit_indexed_sprite,
     default_bitmap_font,
     palette_fx_to_rgb,
 )
@@ -65,6 +66,11 @@ from pymoonstone.sim.locations import (
     perform_stonehenge_ritual,
 )
 from pymoonstone.sim.m68k import s8, s16, u8, u16
+from pymoonstone.sim.map_dragon import (
+    attacks as dragon_attacks,
+    automatic_loss,
+    settle as settle_dragon,
+)
 from pymoonstone.sim.overworld import (
     Arrival,
     EncounterTrigger,
@@ -74,6 +80,7 @@ from pymoonstone.sim.overworld import (
 )
 from pymoonstone.sim.palette_fx import PaletteFxState, pack_rgb12
 from pymoonstone.sim.rng import DEFAULT_SEED, Rng
+from pymoonstone.sim.turns import TurnResult, advance as advance_turn
 from pymoonstone.sim.types import KnightId
 
 if TYPE_CHECKING:
@@ -185,7 +192,7 @@ class GameSession:
         }
         self.actors = [Actor(kind=_KNIGHT_KINDS[kid]) for kid in KnightId]
         self.dragon_actor = Actor()
-        self.inventories = {handle: Inventory() for handle in range(1, 5)}
+        self.inventories = {handle: Inventory() for handle in range(1, 6)}
         self.fight_rng = Rng(seed)
         self.overworld = OverworldState(
             self.actors, self.dragon_actor, self.inventories, self.fight_rng, roster
@@ -204,6 +211,8 @@ class GameSession:
         self._pending_fade_in: bool = False
         self.last_status: str = "PRESS ENTER TO BEGIN"
         self._map_key = 0
+        self.map_runtime: MapRuntime | None = None
+        self._calendar_phase = 0
         if self.asset_bundle is not None:
             self._ensure_map()
 
@@ -232,6 +241,8 @@ class GameSession:
         self.lair_counts.clear()
         self.bad_luck = self.last_defeat_mask = 0
         self._map_key = 0
+        self.map_runtime = None
+        self._calendar_phase = 0
         if self.asset_bundle is not None:
             self._ensure_map()
 
@@ -329,6 +340,8 @@ class GameSession:
     def _enter_game_over(self) -> None:
         self.scene = GameScene.GAME_OVER
         self.last_status = "GAME OVER"
+        self.overworld.colors.active = False
+        self.overworld.turns.wait_stage = 0
         self._begin_fade_in(self._picture_target_palette("message.piv"))
 
     def _step_title(self, primary: PlayerInput) -> None:
@@ -434,6 +447,9 @@ class GameSession:
             self.last_status = "ORIGINAL DISKS REQUIRED"
             return False
         self.overworld.install(self.asset_bundle.get_map_rules(), _KNIGHT_KINDS, self.seed)
+        self.overworld.turn_rules = self.asset_bundle.get_turn_rules()
+        for offset, size, value in self.overworld.turn_rules.dragon_defaults:
+            self.dragon_actor.write(offset, size, value)
         for kid in KnightId:
             self._sync_legacy_actor(kid)
         self._start_map_colors()
@@ -466,18 +482,38 @@ class GameSession:
     def _reenter_map(self) -> None:
         self.scene = GameScene.OVERWORLD
         if self._ensure_map():
+            self._map_key = 0
             self.overworld.enter()
+            self._map_entry_jobs()
             self._start_map_colors()
             self._begin_fade_in(self._overworld_target_palette())
 
-    def _step_overworld(self, frame: InputFrame) -> None:
+    def _map_entry_jobs(self) -> None:
+        world = self.overworld
+        rules = world.turn_rules
+        if rules is None or self.asset_bundle is None:
+            return
+        if self.map_runtime is None and s16(world.day) >= s16(rules.dragon.day):
+            self.map_runtime = MapRuntime(self.asset_bundle, world, rules)
+        if self.map_runtime is not None:
+            self.map_runtime.enter(world, self.tick_count)
+
+    def _clear_map_jobs(self) -> None:
+        if self.map_runtime is not None:
+            self.map_runtime.clear(self.overworld)
+        self.overworld.dragon_active = False
+
+    def _map_ready(self) -> bool:
         if self.overworld.game_over:
             if self.overworld.winner is not None:
                 self._enter_victory(f"{self.overworld.winner.name} WINS")
             else:
-                self.scene = GameScene.GAME_OVER
-            return
-        if not self._ensure_map():
+                self._enter_game_over()
+            return False
+        return self._ensure_map()
+
+    def _step_overworld(self, frame: InputFrame) -> None:
+        if not self._map_ready():
             return
         world = self.overworld
         if frame.key:
@@ -489,21 +525,91 @@ class GameSession:
         kid = world.current_knight_id
         inp = self._player_input(frame, kid)
         key, self._map_key = self._map_key, 0
+        if world.current_actor.kind == 4:
+            self._computer_map_boundary(key)
+            return
         if inp.secondary:
             key = ord(" ")
         word = inp.to_joystick_word() | (FIRE if inp.confirm else 0)
         row = world.frame(word, ord("E") if inp.weapon_switch else key)
-        self._map_result(row, key)
+        if self._map_result(row, key) and self.map_runtime is not None:
+            self.map_runtime.advance(world, self.tick_count)
 
-    def _map_result(self, row: Arrival | None, key: int) -> None:
+    def _computer_map_boundary(self, key: int) -> None:
+        self.last_status = "COMPUTER MAP CONTROL UNAVAILABLE"
+        if key == ord("Q"):
+            self._enter_game_over()
+        elif dragon_attacks(self.overworld):
+            self._dragon_attack()
+        elif s16(self.overworld.spent) >= s16(self.overworld.budget):
+            self._advance_turns()
+
+    def _map_result(self, row: Arrival | None, key: int) -> bool:
         world = self.overworld
-        if not world.menu and key in (ord("Q"), ord(" ")):
-            self.scene = GameScene.TITLE if key == ord("Q") else GameScene.STATUS
+        if not world.menu and key == ord("Q"):
+            self._enter_game_over()
+        elif not world.menu and key == ord(" "):
+            self._sync_legacy_actor(world.current_knight_id)
+            self.scene = GameScene.STATUS
             world.colors.active = False
         elif row is not None:
             self._dispatch_arrival(row)
+        elif world.dragon_encounter:
+            self._dragon_attack()
         elif world.turn_over:
-            self.last_status = "TURN COMPLETE"
+            self._advance_turns()
+        else:
+            return not world.menu
+        return False
+
+    def _advance_turns(self) -> None:
+        world = self.overworld
+        if world.turn_rules is None:
+            raise ValueError("calendar data is required to advance turns")
+        result = advance_turn(world, world.turn_rules)
+        for kid in KnightId:
+            self._sync_legacy_actor(kid)
+        if result == TurnResult.NEXT_DAY:
+            self._show_next_day()
+        elif result == TurnResult.GAME_OVER:
+            self._enter_game_over()
+        else:
+            self._reenter_map()
+
+    def _show_next_day(self) -> None:
+        world = self.overworld
+        self.palette_fx.set_palette(
+            world.colors.colors or _palette_to_rgb12(self._overworld_target_palette())
+        )
+        world.colors.active = False
+        self.scene = GameScene.NEW_DAY
+        self._calendar_phase = 0
+        self._map_key = 0
+        self.palette_fx.fade_out()
+
+    def _dragon_attack(self) -> None:
+        world = self.overworld
+        rules = world.turn_rules
+        if rules is None:
+            raise ValueError("map dragon rules are required")
+        world.dragon_encounter = False
+        if automatic_loss(world, rules):
+            self._clear_map_jobs()
+            for kid in KnightId:
+                self._sync_legacy_actor(kid)
+            self._reenter_map()
+            self.last_status = "DRAGON TAKES LOOT"
+            return
+        self._start_combat(
+            EncounterTrigger(
+                TriggerKind.DRAGON_INTERCEPT,
+                world.current_knight_id,
+                -1,
+                world.day,
+                world.moon_phase,
+            ),
+            world.current_knight_id,
+        )
 
     def _dispatch_arrival(self, row: Arrival) -> None:
         world, kid = self.overworld, self.overworld.current_knight_id
@@ -556,8 +662,10 @@ class GameSession:
 
     def _open_location(self, knight_id: KnightId, location: LocationKind) -> None:
         if self.overworld.rules is not None:
+            self.overworld.setup_turn()
             self._sync_legacy_actor(knight_id)
         self.overworld.colors.active = False
+        self._clear_map_jobs()
         self.location_knight_id = knight_id
         self.location_menu = LocationMenuState(location=location)
         self.scene = GameScene.LOCATION
@@ -625,17 +733,29 @@ class GameSession:
         self._ow_prev_fire = inp.fire
         self._ow_prev_secondary = inp.secondary
         if inp.confirm or fire_edge or secondary_edge:
-            self.scene = GameScene.OVERWORLD
+            self._reenter_map()
             self.last_status = f"DAY {self.overworld.day}"
 
     def _step_new_day(self, primary: PlayerInput) -> None:
-        fire_edge = primary.fire and not self._ow_prev_fire
-        self._ow_prev_fire = primary.fire
-        if primary.confirm or fire_edge:
-            self.scene = GameScene.OVERWORLD
-            self.last_status = f"DAY {self.overworld.day}"
+        if self.palette_fx.is_fading:
+            return
+        if self._calendar_phase == 0:
+            self._calendar_phase = 1
+            self._begin_fade_in(self._overworld_target_palette())
+            return
+        if self.overworld.turns.wait_fire(primary.fire or primary.confirm):
+            self.palette_fx.set_palette([0] * 32)
+            self._advance_turns()
 
     def _step_end_screen(self, primary: PlayerInput) -> None:
+        if self.scene == GameScene.GAME_OVER and self.overworld.turn_rules is not None:
+            if not self.palette_fx.is_fading and self.overworld.turns.wait_fire(
+                primary.fire or primary.confirm
+            ):
+                self._clear_map_jobs()
+                self.scene = GameScene.TITLE
+                self._play_title_music()
+            return
         fire_edge = primary.fire and not self._end_prev_fire
         self._end_prev_fire = primary.fire
         if primary.confirm or fire_edge:
@@ -669,13 +789,23 @@ class GameSession:
             second_id = self.players[1]
             self._prepare_fight_knights(knight_id, second_id)
             runtime = loader.duel(
-                background, *args, first, int(second_id) + 1, lanes=self.spawn_lanes
+                background,
+                *args,
+                first,
+                int(second_id) + 1,
+                lanes=self.spawn_lanes,
+                moon_frame=self.overworld.moon_frame,
             )
             return ActiveEncounter(trigger, runtime, (knight_id, second_id))
         if trigger.kind == TriggerKind.DRAGON_INTERCEPT:
             self._prepare_fight_knights(knight_id)
             runtime = loader.creature(
-                loader.arena_for(0x14), background, *args, first, lanes=self.spawn_lanes
+                loader.arena_for(0x14),
+                background,
+                *args,
+                first,
+                self.overworld.moon_frame,
+                lanes=self.spawn_lanes,
             )
             return ActiveEncounter(trigger, runtime, (knight_id,))
         if trigger.kind == TriggerKind.PVP_DUEL:
@@ -689,6 +819,8 @@ class GameSession:
                 first,
                 int(opponent_id) + 1,
                 lanes=self.spawn_lanes,
+                day=self.overworld.day,
+                moon_frame=self.overworld.moon_frame,
                 computers=frozenset(
                     int(kid) + 1 for kid in (knight_id, opponent_id) if kid not in self.players
                 ),
@@ -698,7 +830,13 @@ class GameSession:
         lair_count = self._fight_lair_count(trigger, loader)
         self._prepare_fight_knights(knight_id)
         runtime = loader.creature(
-            arena, background, *args, first, lair_count=lair_count, lanes=self.spawn_lanes
+            arena,
+            background,
+            *args,
+            first,
+            self.overworld.moon_frame,
+            lair_count=lair_count,
+            lanes=self.spawn_lanes,
         )
         return ActiveEncounter(trigger, runtime, (knight_id,))
 
@@ -739,6 +877,7 @@ class GameSession:
         inventory.counts[0x16 // 2] = u8(legacy.moonstones)
 
     def _start_combat(self, trigger: EncounterTrigger, knight_id: KnightId) -> None:
+        self._clear_map_jobs()
         try:
             active = self._fight_runtime(trigger, knight_id)
         except FightUnavailableError as exc:
@@ -775,6 +914,24 @@ class GameSession:
         fight = active.runtime.fight
         self.last_defeat_mask = settle_defeats(fight, active.runtime.opponent)
         won = not self.last_defeat_mask & 1
+        self._settle_map_encounter(active, won)
+        self.bad_luck = 0
+        active.runtime.release()
+        if self.practice_mode:
+            self._finish_practice_combat()
+            return
+        self.active_encounter = None
+        self.overworld.spent = self.overworld.budget
+        if self.overworld.turn_rules is None and all(
+            not k.alive for k in self.overworld.knights.values()
+        ):
+            self.overworld.game_over = True
+            self._enter_game_over()
+        else:
+            self._return_from_map_fight(won)
+
+    def _settle_map_encounter(self, active: ActiveEncounter, won: bool) -> None:
+        fight = active.runtime.fight
         for kid in active.knight_ids:
             actor, legacy = self.actors[int(kid)], self.knight_combat[kid]
             legacy.hp, legacy.daggers, legacy.lives = s16(actor.hp), actor.daggers, s8(actor.lives)
@@ -788,18 +945,13 @@ class GameSession:
             if won:
                 actor = fight.actor(active.runtime.first)
                 actor.progress = u16(actor.progress + 1)
-        self.bad_luck = 0
-        active.runtime.release()
-        if self.practice_mode:
-            self._finish_practice_combat()
-            return
-        self.active_encounter = None
-        self.overworld.spent = self.overworld.budget
-        if all(not k.alive for k in self.overworld.knights.values()):
-            self.overworld.game_over = True
-            self._enter_game_over()
-        else:
-            self._return_from_map_fight(won)
+        if (
+            active.trigger.kind == TriggerKind.DRAGON_INTERCEPT
+            and self.overworld.turn_rules is not None
+        ):
+            settle_dragon(self.overworld, self.overworld.turn_rules, lost=not won)
+            for kid in KnightId:
+                self._sync_legacy_actor(kid)
 
     def _return_from_map_fight(self, won: bool) -> None:
         self.scene = GameScene.OVERWORLD
@@ -817,12 +969,17 @@ class GameSession:
         """Hash every mutable map/actor/fight cell, independent of rendering (§11.18)."""
         world = asdict(self.overworld)
         world.pop("rules")
+        world.pop("turn_rules")
         payload = {
             "tick": self.tick_count,
             "scene": int(self.scene),
             "paused": self.paused,
             "world": world,
             "map_key": self._map_key,
+            "calendar_phase": self._calendar_phase,
+            "palette": self.palette_fx.snapshot(),
+            "pending_fade": self._pending_fade_in,
+            "map_jobs": self.map_runtime.snapshot() if self.map_runtime else None,
             "legacy": [asdict(self.knight_combat[kid]) for kid in KnightId],
             "encounter": self.active_encounter.runtime.snapshot()
             if self.active_encounter
@@ -929,6 +1086,10 @@ class GameSession:
             raise ValueError("map picture and sprites are required")
         scene_renderer.set_palette(self._overworld_palette(picture.palette))
         compose_map(scene_renderer.canvas, picture.pixels, cel, map_sprites(world))
+        if world.dragon_active and self.map_runtime is not None:
+            blit_indexed_sprite(
+                scene_renderer.canvas, self.map_runtime.scene.canvas.pixels(), 0, 28
+            )
         if world.menu:
             draw_map_menu(scene_renderer.canvas, cel, world, self.asset_bundle)
 
@@ -946,12 +1107,32 @@ class GameSession:
             self._compose_picture_or_solid(scene_renderer, "ch.piv")
 
     def _render_end_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
+        if self.scene == GameScene.GAME_OVER and self.overworld.turn_rules is not None:
+            self._render_calendar(scene_renderer, farewell=True)
+            return
         if self.scene == GameScene.VICTORY:
             self._compose_picture_or_solid(scene_renderer, "WI1.P", "WI2.P")
             font.draw_text(scene_renderer.canvas, "VICTORY!", 128, 236, color_index=30)
         else:
             self._compose_picture_or_solid(scene_renderer, "message.piv")
             font.draw_text(scene_renderer.canvas, "GAME OVER", 124, 236, color_index=15)
+
+    def _render_new_day(self, renderer: SceneRenderer, font: BitmapFont) -> None:
+        if self._calendar_phase == 0:
+            self._render_overworld_scene(renderer, font)
+        else:
+            self._render_calendar(renderer)
+
+    def _render_calendar(self, renderer: SceneRenderer, *, farewell: bool = False) -> None:
+        if self.asset_bundle is None:
+            raise ValueError("original assets are required for calendar screens")
+        draw_calendar_screen(renderer.canvas, self.asset_bundle, self.overworld, farewell=farewell)
+        palette = (
+            self._picture_target_palette("message.piv")
+            if farewell
+            else self._overworld_target_palette()
+        )
+        renderer.set_palette(palette)
 
     def render_to_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         """Render the active game scene and HUD onto ``scene_renderer``."""
@@ -975,7 +1156,7 @@ class GameSession:
                 bundle=self.asset_bundle,
             )
         elif self.scene == GameScene.NEW_DAY:
-            render_new_day_screen(scene_renderer, self.overworld, font, bundle=self.asset_bundle)
+            self._render_new_day(scene_renderer, font)
         else:
             self._render_end_scene(scene_renderer, font)
 

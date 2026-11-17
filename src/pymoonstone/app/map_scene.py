@@ -39,9 +39,24 @@ def compose_map(
         _draw(canvas, cel, sprite.frame, sprite.x, sprite.y)
 
 
-def _text(
-    canvas: npt.NDArray[np.uint8], font: DecodedCel, mapping: bytes, text: str, x: int, y: int
+def draw_map_text(
+    canvas: npt.NDArray[np.uint8],
+    font: DecodedCel,
+    mapping: bytes,
+    text: str,
+    x: int,
+    y: int,
+    *,
+    style: int = 0,
+    span: int = 320,
 ) -> None:
+    """Original glyph lookup, style spacing and alignment (§11.18/19)."""
+    if style & 5:
+        width = sum(
+            font.frames[mapping[(ord(ch) - 32) & 255]].meta.width - (3 if style & 8 else 0)
+            for ch in text
+        )
+        x = (span - width) >> 1 if style & 1 else span - width
     home_x, home_y = x, y
     for character in text:
         index = (ord(character) - 32) & 255
@@ -50,7 +65,7 @@ def _text(
         frame = mapping[index]
         _draw(canvas, font, frame, x, y)
         glyph = font.frames[frame]
-        x += glyph.meta.width
+        x += glyph.meta.width - (3 if style & 8 else 0)
         if x >= 320:
             x, y = home_x, y + glyph.meta.height
             if y >= 200:
@@ -80,9 +95,9 @@ def draw_map_menu(
     _draw(canvas, cel, world.current_actor.kind, 55, 105)
     rules = world.data()
     headline = world.names[int(world.current_knight_id)] + rules.may_text
-    _text(canvas, font, rules.char_map, headline, 65, 105)
+    draw_map_text(canvas, font, rules.char_map, headline, 65, 105)
     for index, row in enumerate(list_rows(world)):
-        _text(
+        draw_map_text(
             canvas,
             font,
             rules.char_map,
@@ -90,3 +105,38 @@ def draw_map_menu(
             55,
             115 + index * 6,
         )
+
+
+def draw_calendar_screen(
+    canvas: npt.NDArray[np.uint8],
+    bundle: GameAssetBundle,
+    world: OverworldState,
+    *,
+    farewell: bool = False,
+) -> None:
+    """Original ch.piv, bold.f and moon, or the farewell message (§11.19)."""
+    rules = world.turn_rules
+    if rules is None:
+        raise ValueError("calendar rules are required")
+    picture = bundle.get_picture("message.piv" if farewell else "ch.piv")
+    font = bundle.get_cel("bold.f")
+    if picture is None or font is None:
+        raise ValueError("calendar picture and bold.f are required")
+    canvas[:] = 0
+    canvas[PLAYFIELD_Y_OFFSET : PLAYFIELD_Y_OFFSET + 200, :320] = picture.pixels[:200, :320]
+    for row in rules.farewell if farewell else rules.next_day:
+        draw_map_text(
+            canvas,
+            font,
+            world.data().char_map,
+            row.text,
+            row.x,
+            row.y,
+            style=row.style | 8,
+            span=rules.span,
+        )
+    if not farewell:
+        icons = bundle.get_cel("ki.cel")
+        if icons is None:
+            raise ValueError("ki.cel is required for the moon")
+        _draw(canvas, icons, world.moon_frame, rules.moon_x, rules.moon_y)

@@ -648,18 +648,3 @@ def render_status_screen(
     font.draw_text(canvas, f"KEYS MASK: {keys_mask:04b}", 24, 144, color_index=fg)
     font.draw_text(canvas, f"MOONSTONES MASK: {stones_mask:04b}", 24, 160, color_index=fg)
     font.draw_text(canvas, f"DAY {overworld.day}: {phase_label}", 24, 184, color_index=fg)
-
-
-def render_new_day_screen(
-    scene_renderer: SceneRenderTarget,
-    overworld: OverworldState,
-    font: FontTarget,
-    *,
-    bundle: PictureBundle | None = None,
-) -> None:
-    """Render the New Day lunar banner on ``ch.piv`` (or solid fallback)."""
-    fg, _ = _compose_backdrop(scene_renderer, bundle, ("ch.piv",))
-    canvas = scene_renderer.canvas
-    phase_label = overworld.moon_phase.name.replace("_", " ")
-    font.draw_text(canvas, f"DAY {overworld.day}", 120, 96, color_index=fg)
-    font.draw_text(canvas, phase_label, 80, 124, color_index=fg)
