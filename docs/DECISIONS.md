@@ -478,3 +478,20 @@ and replay natural computer turns through three days with existing encounters an
 Full human protection/meeting/loot sheets remain T11.21, item jingles remain T11.23, and
 new-game hoard/market/lair gift initialization retains its existing inventory-task follow-up.
 No alternate campaign model, reference implementation code or game data is added.
+
+## ADR-028: Decode sheet initialization through the existing bounded store reader
+**Status:** ACCEPTED (2026-11-17, T11.15a)
+**Context:** The seven sheet text tables live in BSS and acquire relocated string
+pointers through executable initialization. Some cells remain zero, while others
+explicitly point at empty strings. Panel lists are embedded in code.
+**Decision:** `assets/sheet_data.py` reuses `MogCode` and `StoreRun` for the bounded
+initializer and reads the two panel lists through checked relocated loads.
+Frozen records retain sparse text cells, signed positions, orientation and list
+order, plus the original sheet palette and checked class colour pairs.
+An independent real-disk walker verifies every initialized cell and panel
+entry. Unsupported code versions and malformed pointers/lists raise.
+**Consequences:** T11.15 is split into data decoding (a) and the sheet loop,
+presenter, callers and contact-sheet acceptance (b). Parent completion requires
+both. This follows the existing layer boundaries and introduces no parallel
+sheet model. No original strings, extracted tables or generated images are added
+to source control. Specification §12.25 records the initialization boundary.

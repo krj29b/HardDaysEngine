@@ -3755,3 +3755,36 @@ the contact sheet shows a mismatch), the order of tests in every rule.
 - **§11.13 step 6 and §11.17:** the scroll the computer knight uses against an engaged
   opponent is the Scroll of Acquisition (slot `$0E`); there is no conflict with §9.4.
 - **§10.1:** "temple sheet" and "status sheet" are the same sheet 9.
+
+### 12.25 Sheet data initialization (T11.15a)
+
+The button text tables occupy seven consecutive BSS arrays, each with 27 long
+cells. They are populated at runtime, rather than stored as pointer arrays on
+disk. For the supported code CRC, execute the bounded store run in hunk0 from
+$C6E0 up to $CBF4, checking the terminating LEA instruction. The existing
+StoreRun decoder handles its relocated loads and stores and its one counted
+fill loop. Sort the seven loaded BSS table starts by offset. Their meanings in
+that order are stat, temple, take, buy, offer, sell and plain.
+
+Each populated cell is a relocated long into hunk4 naming an ASCII string.
+An unwritten cell is the original zero-initialized BSS value, represented as
+None. An explicit pointer to an empty string remains an empty string. This
+distinction preserves sparse smith and stat tables. Reject unexpected table
+counts, overlapping arrays and pointers into other hunks. Never fill missing
+entries with invented labels.
+
+The panel renderer loads the narrow and wide draw lists through checked LEAs
+at hunk0 $AF32 and $AF4A. Each entry contains four big-endian words, frame,
+signed x, signed y and orientation. A negative frame word terminates the list.
+Decode all four words and retain list order. Preserve the last word unchanged
+for the presenter. Reject unterminated lists. Frame sizes and the visual meaning of each
+orientation are checked against ki.cel by the presenter subtask.
+
+This data-only boundary uses the existing asset-to-simulation layering. It
+introduces no second sheet state machine. T11.15b consumes these immutable
+records for the sheet loop, rendering and campaign callers of §12.2–9.
+The base 32-word sheet palette is loaded through the checked LEA at $AE56.
+Class colour pairs are checked MOVE.W-to-postincrement operands at $AE88,
+$AE9C, $AEC4, $AEB0 and $AECE, each followed four bytes later by its shade.
+This order produces class rows 0..4. The presenter substitutes the first pair
+at palette entries 28..29 and, for a second knight, the second pair at 30..31.

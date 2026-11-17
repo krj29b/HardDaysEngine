@@ -268,6 +268,10 @@ Rules for the whole phase:
   item icons from `ki.cel`, pointer from `po.cel`, the use and take button tables, the click
   dispatch, inventory transfer, item use. *Accept:* sheets 2 (lair loot) and 9 (status / temple)
   render and operate from the real tables.
+  Split into **T11.15a**, the checked runtime button-table and panel-list decoder,
+  and **T11.15b**, the shared sheet simulation, presenter, campaign callers and
+  real-disk contact-sheet acceptance. The first subtask independently validates
+  the executable-built sparse data before the shared screen loop consumes it.
 - **T11.16 Towns (`app/town_screen.py`, replaces `app/location_screens.py`):** Highwood and
   Waterdeep button screens with all five buttons each, routed to smith, market, dice house, healer,
   temple and mystic as the button tables say. The invented goods, services and training menu are
