@@ -63,6 +63,12 @@ _ROUTINES: tuple[tuple[int, int, int, str], ...] = (
     (GUARDIAN_HUNK, 0x04BC, 0x0679, "sound_pick_11"),
     (GUARDIAN_HUNK, 0x0682, 0x7E01, "sound_pick_12"),
     (GUARDIAN_HUNK, 0x0A0E, 0x2039, "guardian_2"),
+    (GUARDIAN_HUNK, 0x0A52, 0x2039, "guardian_body_facing"),
+    (GUARDIAN_HUNK, 0x0A76, 0x2039, "guardian_body_remove"),
+    (GUARDIAN_HUNK, 0x0A84, 0x303C, "guardian_fixed_sounds"),
+    (GUARDIAN_HUNK, 0x0AAE, 0x4EB9, "sound_pick_13"),
+    (GUARDIAN_HUNK, 0x0BA8, 0x48E7, "guardian_grab_damage"),
+    (GUARDIAN_HUNK, 0x0BD2, 0x2039, "guardian_release"),
 )
 
 # MOVE.B #imm,16(A2) in "end the fight" and MOVE.W #imm,80(A0) in "mark the first fighter dead".

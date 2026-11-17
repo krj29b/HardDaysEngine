@@ -20,6 +20,7 @@ from pymoonstone.app.fight_audit import (
     build_drake_audit,
     build_fight_audit,
     build_flyer_audit,
+    build_guardian_audit,
     build_snatcher_audit,
     build_stalker_audit,
     caster_pose_frames,
@@ -27,6 +28,7 @@ from pymoonstone.app.fight_audit import (
     fight_audit_frames,
     fight_host_input,
     flyer_pose_frames,
+    guardian_pose_frames,
     snatcher_pose_frames,
     stalker_pose_frames,
 )
@@ -321,7 +323,26 @@ def _drake_shots(rig: AuditRig) -> Iterator[AuditShot]:
     raise RuntimeError("idle Balok audit did not reach an outcome")
 
 
+def _guardian_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    bundle = rig.fight_assets()
+    for label, scene in guardian_pose_frames(bundle):
+        yield rig.capture_fight(scene, f"guardian_pose_{label}")
+    for label, scene in fight_audit_frames(build_guardian_audit(bundle)):
+        yield rig.capture_fight(scene, f"guardian_seeded_{label}")
+    audit = build_guardian_audit(bundle)
+    audit.scene.fight.actor(1).hp = 20
+    for frame in range(1000):
+        audit.scene.advance(frame * 6)
+        if frame in (20, 60, 120, 180):
+            yield rig.capture_fight(audit.scene, f"guardian_idle_loss_frame{frame + 1}")
+        if not audit.scene.fight.fight_active:
+            yield rig.capture_fight(audit.scene, f"guardian_idle_loss_outcome{frame + 1}")
+            return
+    raise RuntimeError("idle Guardian audit did not reach an outcome")
+
+
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
+    "guardian": _guardian_shots,
     "balok": _drake_shots,
     "troll": _stalker_shots,
     "flyer": _flyer_shots,

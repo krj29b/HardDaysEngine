@@ -167,6 +167,18 @@ class DrakeCells:
 
 
 @dataclass(slots=True)
+class GuardianCells:
+    """Encounter-owned Guardian body handles, stages and previous target (§10.29)."""
+
+    main: int = 0
+    body: int = 0
+    target: int = 0
+    flags: int = 0
+    spare: int = 0
+    fade: bool = False
+
+
+@dataclass(slots=True)
 class FlyerCells:
     """The persistent executable alternation word (§10.26)."""
 
@@ -256,6 +268,7 @@ class Fight:
     snatch_flags: int = 0
     flyer: FlyerCells = field(default_factory=FlyerCells)
     drake: DrakeCells = field(default_factory=DrakeCells)
+    guardian: GuardianCells = field(default_factory=GuardianCells)
     beam_word: int = 0
     shake: ShakeState = field(default_factory=ShakeState)
     shake_rules: ShakeRules | None = None

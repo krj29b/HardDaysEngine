@@ -36,7 +36,7 @@ def _put(buffer: bytearray, pos: int, *words: int) -> None:
 
 def _mog(*, break_entry: bool = False) -> MogCode:
     code = bytearray(max(offset for hunk, offset, _, _ in _ROUTINES if hunk == CODE_HUNK) + 2)
-    guardian = bytearray(0xA20)
+    guardian = bytearray(0xD00)
     for hunk, offset, opcode, _ in _ROUTINES:
         _put(code if hunk == CODE_HUNK else guardian, offset, opcode)
     _put(code, 0x38C, 0x157C, 0x0023, 0x0010)

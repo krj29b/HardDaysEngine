@@ -29,6 +29,7 @@ from pymoonstone.assets.fight_program import (
 from pymoonstone.assets.fight_setup import parse_fight_setup
 from pymoonstone.assets.fighter_rules import parse_knight_rules
 from pymoonstone.assets.flyer_rules import parse_flyer_rules
+from pymoonstone.assets.guardian_rules import parse_guardian_rules
 from pymoonstone.assets.hunk import parse_hunk_executable
 from pymoonstone.assets.mog_code import MogCode
 from pymoonstone.assets.screen_fx import parse_shake_rules
@@ -40,6 +41,7 @@ from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
 from pymoonstone.sim.fight_ai.caster import CASTER_TYPE, install_caster
 from pymoonstone.sim.fight_ai.drake import DRAKE_TYPE, install_drake
 from pymoonstone.sim.fight_ai.flyer import FLYER_TYPE, install_flyer
+from pymoonstone.sim.fight_ai.guardian import GUARDIAN_TYPE, install_guardian
 from pymoonstone.sim.fight_ai.snatcher import SNATCHER_TYPE, install_snatcher
 from pymoonstone.sim.fight_ai.stalker import STALKER_TYPE, install_stalker
 from pymoonstone.sim.fight_setup import (
@@ -51,7 +53,7 @@ from pymoonstone.sim.fight_setup import (
 )
 from pymoonstone.sim.fighters import KNIGHT_TYPE, install_knight_control
 from pymoonstone.sim.m68k import s16, u8, u16
-from pymoonstone.sim.palette_fx import pack_rgb12
+from pymoonstone.sim.palette_fx import pack_rgb12, step_color
 from pymoonstone.sim.screen_fx import SCREEN_SHAKE, screen_shake
 
 if TYPE_CHECKING:
@@ -74,6 +76,7 @@ _SUPPORTED_TYPES = (
     FLYER_TYPE,
     STALKER_TYPE,
     DRAKE_TYPE,
+    GUARDIAN_TYPE,
 )
 
 
@@ -166,6 +169,9 @@ class FightRuntime:
         self.fight.advance_vbl(vbl, ticks=1)
         if self.rules is not None and self.warnings is not None:
             self.warnings.step(self.rules)
+            if self.fight.guardian.fade:
+                for index in range(2, 8):
+                    self.warnings.colors[index] = step_color(self.warnings.colors[index], 0)
             self.scene.palette = palette_fx_to_rgb(self.warnings.colors)
         budget = FIGHT_VBLS if self.rules is None else self.rules.frame_vbls
         self.phase = (self.phase + 1) % budget
@@ -221,6 +227,7 @@ class FightRuntime:
             "snatch_flags": f.snatch_flags,
             "flyer": asdict(f.flyer),
             "drake": asdict(f.drake),
+            "guardian": asdict(f.guardian),
             "beam_word": f.beam_word,
             "shake": asdict(f.shake),
             "effect_vbl": f.effect_vbl,
@@ -273,6 +280,7 @@ class FightLoader:
         self.drake_rules = parse_drake_rules(
             executable, self.caster_rules.flight, self.stalker_rules.spark
         )
+        self.guardian_rules = parse_guardian_rules(executable)
         self.drake = DrakeCells()
         self.shake_rules = parse_shake_rules(executable)
         self.setup_rules = parse_fight_setup(executable)
@@ -333,6 +341,7 @@ class FightLoader:
         install_flyer(f, self.flyer_rules, self.knight_rules)
         install_stalker(f, self.stalker_rules, self.knight_rules)
         install_drake(f, self.drake_rules, self.knight_rules)
+        install_guardian(f, self.guardian_rules, self.knight_rules)
         f.drake = self.drake
         f.flyer = self.flyer
         f.shake_rules = self.shake_rules
@@ -385,6 +394,10 @@ class FightLoader:
             else self.knight_rules.clip.top
         )
         self._enter_knight(f, first, cursor, edge, 1)
+        if arena.creature.actor_type == GUARDIAN_TYPE:
+            self._guardian(f, arena)
+            pause_all(f)
+            return self._runtime(scene, first, cursor)
         if arena.creature.actor_type == CASTER_TYPE:
             self._caster_object(f, arena)
         waves = CreatureWaves(
@@ -450,6 +463,28 @@ class FightLoader:
             CREATURE_LIST if second else KNIGHT_LIST,
             rules.enter_script,
         )
+
+    def _guardian(self, fight: Fight, arena: ArenaDef) -> None:
+        """Start the fixed Guardian actor and reserve its separate body record (§10.29)."""
+        init = arena.creature
+        x, height, depth = init.position
+        if x is None or height is None or depth is None:
+            raise FightUnavailableError("Guardian initial position missing")
+        position = (x, height, depth)
+        if init.facing is None or init.frame_set is None:
+            raise FightUnavailableError("Guardian initial position or frame list missing")
+        handle = fight.alloc_record()
+        actor = fight.actor(handle)
+        keys = fight.register_tables(script_tables(init))
+        _initialise(actor, init, keys)
+        actor.x, actor.height, actor.y = (u16(v) for v in position)
+        actor.facing, actor.frame_list = init.facing, init.frame_set
+        fight.guardian.main, fight.guardian.body = handle, fight.alloc_record()
+        fight.guardian.target = fight.first
+        fight.start_job(
+            init.idle_script, handle, init.frame_set, position, init.facing, GUARDIAN_TYPE
+        )
+        fight.alive_now = fight.max_alive = fight.total = 1
 
     def _caster_object(self, fight: Fight, arena: ArenaDef) -> None:
         """Create Ratmen's flight anchor before the wave records (§10.23)."""

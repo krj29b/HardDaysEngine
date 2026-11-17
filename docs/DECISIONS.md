@@ -330,3 +330,24 @@ idle loss through grab/carry/finishing scripts, complete-state replay, fixed spa
 entry and cross-encounter cells. The audit controller dodges during a flight then
 closes for melee, using ordinary inputs. Pose previews and natural traces are
 labelled separately. Existing sound pickers and sample-bank playback remain T11.23.
+
+## ADR-022: Guardian owns a reserved body record and encounter stage cells
+**Status:** ACCEPTED (2026-11-17, T11.10g; follows ADR-011 / ADR-013 / ADR-017)
+**Context:** The Guardian uses two actor records, separate script jobs, staged grab flags
+and fixed scripts in executable hunk 40. Its setup is not a creature wave.
+**Decision:** Checked operands and relocated pointers in assets/guardian_rules.py supply
+sim/fight_ai/guardian.py. The existing loader starts the main actor at its decoded position,
+reserves the following record, and bypasses ordinary wave scaling/spawning. Body creation,
+facing, removal, victim damage and release use the existing job/record pools. GuardianCells
+is encounter-owned, including the previous-target handle and death-fade request; runtime
+snapshots include it. Fixed sound IDs are emitted in order. Random sound picker $0AAE and
+its PRNG draw remain deferred with other sound pickers to T11.23.
+**Consequences:** High-byte cooldown stores, the body's initial x-as-depth typo, staged
+priority, previous-target hurt read and job-only victim positioning are preserved (§10.29).
+The wrong-register release store into script +106 is omitted as an invalid-memory side effect,
+without substituting a cooldown update. Missing jobs cause no zero-address writes. Death
+fades target entries 2..7 through the existing PAL host update. The Guardian's hurt script
+ends the fight directly rather than decrementing a normal creature wave. Real-disk tests
+verify natural win/death, idle loss, exact loaded frames for every fixed script, original
+setup operands and full-state replay; pose previews are labelled apart from natural traces.
+Valley visit/reward integration remains T11.21.

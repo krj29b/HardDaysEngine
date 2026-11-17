@@ -125,3 +125,22 @@ def test_release_frees_jobs_and_ramps_but_retains_final_pixels() -> None:
     assert all(not job.active for job in runtime.fight.engine.jobs)
     assert runtime.warnings is not None and not runtime.warnings.ramps
     assert (runtime.scene.canvas.pixels() == pixels).all()
+
+
+def test_guardian_death_fade_advances_on_pal_ticks_and_is_in_snapshot() -> None:
+    runtime = _configured()
+    assert runtime.warnings is not None
+    runtime.warnings.colors[:] = [0x333] * 32
+    runtime.fight.guardian.fade = True
+    runtime.step_vbl(1, [0, 0])
+    assert runtime.warnings.colors[2:8] == [0x222] * 6
+    assert runtime.warnings.colors[:2] == [0x333] * 2
+    assert runtime.warnings.colors[8:] == [0x333] * 24
+    assert runtime.snapshot()["guardian"] == {
+        "main": 0,
+        "body": 0,
+        "target": 0,
+        "flags": 0,
+        "spare": 0,
+        "fade": True,
+    }

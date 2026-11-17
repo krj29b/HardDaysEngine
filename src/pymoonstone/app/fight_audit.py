@@ -34,6 +34,7 @@ from pymoonstone.sim.fight import Fight
 from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
 from pymoonstone.sim.fight_ai.caster import CASTER_TYPE
 from pymoonstone.sim.fight_ai.drake import DRAKE_TYPE, FLYING
+from pymoonstone.sim.fight_ai.guardian import GUARDIAN_TYPE
 from pymoonstone.sim.fight_ai.snatcher import SNATCHER_TYPE
 from pymoonstone.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
 from pymoonstone.sim.fight_routines import DAGGER_TYPE
@@ -80,22 +81,45 @@ class FightAudit:
 
     def input_word(self) -> int:
         """Audit-only joystick bot: align, face, strike or throw one dagger at a time."""
-        fight = self.scene.fight
-        knight, trogg = fight.actor(self.first), fight.actor(self.opponent)
-        if trogg.type == SNATCHER_TYPE:
-            self.input_frames += 1
-            return UP if self.input_frames <= 20 else FIRE | LEFT | DOWN
-        if trogg.type == CASTER_TYPE:
-            return _caster_input(self)
-        if trogg.type == DRAKE_TYPE:
-            return _drake_input(self)
-        dy = s16(trogg.y) - s16(knight.y)
-        if abs(dy) > 3:
-            return DOWN if dy > 0 else UP
-        dx = s16(trogg.x) - s16(knight.x)
-        if (knight.facing == 1) != (dx > 0):
-            return RIGHT if dx > 0 else LEFT
-        return _attack_word(fight, self.rules, abs(dx), self.first)
+        controller = {
+            SNATCHER_TYPE: _snatcher_input,
+            CASTER_TYPE: _caster_input,
+            DRAKE_TYPE: _drake_input,
+            GUARDIAN_TYPE: _guardian_input,
+        }.get(self.scene.fight.actor(self.opponent).type, _standard_input)
+        return controller(self)
+
+
+def _snatcher_input(audit: FightAudit) -> int:
+    audit.input_frames += 1
+    return UP if audit.input_frames <= 20 else FIRE | LEFT | DOWN
+
+
+def _standard_input(audit: FightAudit) -> int:
+    fight = audit.scene.fight
+    knight, target = fight.actor(audit.first), fight.actor(audit.opponent)
+    dy = s16(target.y) - s16(knight.y)
+    if abs(dy) > 3:
+        return DOWN if dy > 0 else UP
+    dx = s16(target.x) - s16(knight.x)
+    if (knight.facing == 1) != (dx > 0):
+        return RIGHT if dx > 0 else LEFT
+    return _attack_word(fight, audit.rules, abs(dx), audit.first)
+
+
+def _guardian_input(audit: FightAudit) -> int:
+    """Audit bot aligns, faces and uses the heavy sword move against the Guardian."""
+    f = audit.scene.fight
+    knight, target = f.actor(audit.first), f.actor(audit.opponent)
+    dy, dx = s16(target.y - knight.y), s16(target.x - knight.x)
+    if abs(dy) > 3:
+        return DOWN if dy > 0 else UP
+    if (knight.facing == 1) != (dx > 0):
+        return RIGHT if dx > 0 else LEFT
+    table = audit.rules.actions_right if knight.facing == 1 else audit.rules.actions_left
+    if abs(dx) > 100:
+        return RIGHT if dx > 0 else LEFT
+    return FIRE | table.index(0x20)
 
 
 def _drake_input(audit: FightAudit) -> int:
@@ -430,6 +454,52 @@ def drake_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightScene
         ("death", scripts.hurt),
     ):
         yield from _pose_frames(build_drake_audit(bundle), name, script)
+
+
+def build_guardian_audit(bundle: GameAssetBundle) -> FightAudit:
+    """One original Guardian and its reserved body, with explicit audit equipment (§10.29)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "guardian")
+    knights = [Actor() for _ in range(4)]
+    knight = knights[0]
+    knight.hp = knight.hp_max = 200
+    knight.strength, knight.sword, knight.inventory, knight.daggers = 3, 0x19, 1, 99
+    runtime = loader.creature(
+        arena, "fo1.t", knights, Actor(), {1: Inventory()}, Rng(0x2468ACE1), 1
+    )
+    return FightAudit(runtime.scene, loader.knight_rules, runtime.fight.guardian.main)
+
+
+def guardian_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightScene]]:
+    """Guardian multipart script previews, separate from ordinary-input fights (§10.29)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "guardian")
+    scripts = loader.guardian_rules.scripts
+    for name, script in (
+        ("idle", arena.creature.idle_script),
+        ("walk", arena.creature.idle_script),
+        ("attack", scripts.lunge),
+        ("strike8", scripts.strike8),
+        ("grab", scripts.grab7),
+        ("hurt", scripts.hurt),
+        ("death", scripts.hurt),
+    ):
+        audit = build_guardian_audit(bundle)
+        # Complete the original tornado entrance so pose previews include the following body.
+        for frame in range(32):
+            audit.scene.advance(frame * 6)
+        fight = audit.scene.fight
+        body = fight.find_job(fight.guardian.body)
+        if body is not None:
+            body.x, body.depth = 150, 120
+        if name in ("idle", "walk"):
+            script = fight.actor(audit.opponent).idle_script
+        samples = {"attack": (0, 3), "strike8": (0, 3, 7, 14), "death": (0, 3, 7)}
+        yield from _pose_frames(audit, name, script, samples.get(name, (0,)))
 
 
 def fight_audit_frames(audit: FightAudit) -> Iterator[tuple[str, FightScene]]:

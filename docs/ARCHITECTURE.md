@@ -2249,6 +2249,70 @@ The grab sound-pair engine call at `$6D3C` emits its decoded synth IDs in
 order; hard landing emits its pair directly. Existing sound pickers and
 sample-bank wiring remain deferred to T11.23.
 
+### 10.29 Guardian (T11.10g)
+
+Source: supported mog hunk 40 $06AC..$0C90 and hunk 0 $4908..$49EE;
+classic single-player rules, excluding the reference port's later party targeting.
+All amounts, fixed scripts, hop tables and sound IDs are decoded from checked
+instructions. Type $08 uses a main actor and a reserved second body record.
+Setup uses the decoded main position (100,5,100), facing 1 and creature frame
+list, with one alive and one total; it does not run ordinary creature waves
+or scaling. Reserve the body immediately after the main record. Encounter flags
+start at zero. The target cell starts as the first fighter and is refreshed only
+after hurt/hit checks, preserving the previous-target read on hurt.
+
+On every handler entry select idle, clear input and copy main x/depth into the
+body job, if it exists. Attacker wins over hit-target and all staged flags:
+clear both shared flag bytes, subtract contact damage, select fixed hurt, and
+if signed absolute x distance to the previous target <=60 snap to target x
+plus 60 facing 3, minus 60 otherwise. Sync body again. A hit-target sets the
+HIGH byte at actor +106 to 5, clears both flag bytes, syncs body and KEEPS the
+current job/script (the -1 next-script sentinel). It does not clear action.
+
+Otherwise target the first fighter and handle shared flags in order 0,3,1,4,5.
+Bit 0 becomes bit 4 and selects $69E2; bit 3 clears and selects $6AB4. In either
+case bit 6 releases the first fighter: hop facing comes from the main actor,
+toggle its pause, restart fixed $19B2, then clear bit 6. The original then writes
+3 or 5 into SCRIPT +106 through the wrong register; this corrupts unrelated
+script data and is deliberately omitted, without setting the Guardian cooldown.
+Bit 1 just clears. Bit 4 becomes bit 3, selects $6A7A, and grabs at inclusive
+x distance 130..150; bit 5 becomes bit 0, selects $69AE, grabs at 120..140.
+A grab toggles first-fighter pause, sets bit 6, selects the respective $6B52 /
+$6B9E script and writes cooldown byte 5 / 4 at +106. All these exits sync body.
+
+Ordinary decisions idle when target signed HP <=0. Run the shared approach
+helper (§10.20). When it requests movement with depth not near, walk immediately;
+when depth is near recompute absolute x distance. Otherwise use its distance
+result. Decrement the byte at +106 when nonzero; still nonzero walks. At distance
+<=100 choose heavy/action $20, $6536, first hop table, cooldown 6 and return
+without a second body sync. <=130 chooses action 8, bit 1, $6640, cooldown 6 and
+syncs. <=140 chooses action 4, bit 5, $68B4, second hop table, cooldown 5 and
+then walks. Farther walks. Walking uses fixed five-pixel steps, right before
+left and up before down, wraps words, has no clipping/probe, and syncs body.
+
+Engine routines reached by these fixed scripts:
+- $0A0E (guardian_2) creates a body job on decoded $6404, type 8, using the
+  main job x/height/facing and, deliberately, x AGAIN as the initial depth.
+  The reserved record receives those coordinates; frame list is the call's.
+- $0A52 copies main JOB facing to body JOB; $0A76 frees body job/record.
+- $0BA8 subtracts decoded 10 HP from first fighter and toggles its pause.
+- $0BD2 toggles first-fighter pause and repositions its job: facing main
+  actor facing XOR2, depth main depth, x main x minus 137 for new facing 1,
+  plus 137 otherwise, word wrapped then signed-clamped (>=320 ->319, <0 ->1).
+  Restart idle when alive; otherwise request the original fade with palette
+  entries 2..7 targeted to zero and restart decoded $1720. Fade is advanced
+  by the host on PAL ticks, independent of render calls.
+- $0A84 emits four decoded fixed synth IDs in order. $0AAE's random sound
+  pairs and draws remain deferred to T11.23, consistently with other pickers.
+
+Missing jobs leave no writes (the original writes through zero in some helpers).
+Guardian cells (main/body handles, flags, previous target, death-fade request)
+are encounter-owned and included in snapshots. Existing trajectory/hop machinery,
+persistent script jobs, contact damage, stamps and end-fight routines are reused.
+The hurt script branches on HP and ends the fight itself; the boss is not
+settled with the ordinary fighter_died wave decrement. Acceptance separately
+records that death branch and the resulting fight termination.
+
 ## 11. Overworld and Turns (`T11.4`)
 
 The overworld is one screen: the map picture with small sprites on it. Knights take turns. The
