@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+from dataclasses import replace
 from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
@@ -29,9 +30,9 @@ if TYPE_CHECKING:
 
     from pymoonstone.assets.fight_defs import ArenaDef
     from pymoonstone.sim.actor import Actor
+    from pymoonstone.sim.fight_setup import SpawnLanes
     from pymoonstone.sim.inventory import Inventory
     from pymoonstone.sim.rng import Rng
-    from pymoonstone.sim.fight_setup import SpawnLanes
 
 
 def _trigger() -> EncounterTrigger:
@@ -162,3 +163,47 @@ def test_no_disks_does_not_create_synthetic_gameplay() -> None:
     session._start_combat(_trigger(), KnightId.RED)
     assert session.active_encounter is None
     assert "original disks" in session.last_status
+
+
+@pytest.mark.parametrize("lost", [False, True])
+def test_lair_settlement_preserves_remaining_wave_and_awards_only_progress(lost: bool) -> None:
+    session = _session()
+    session._start_combat(_trigger(), KnightId.RED)
+    active = session.active_encounter
+    assert active is not None
+    active.trigger = replace(active.trigger, kind=TriggerKind.LAIR_BOSS, lair_index=3)
+    actor = active.runtime.fight.actor(active.runtime.first)
+    actor.hp, actor.progress = (0 if lost else 20), 4
+    active.runtime.fight.total = 2 if lost else 0
+    session.bad_luck = 1
+    inventory = session.inventories[1].counts.copy()
+    for _ in range(18):
+        session.step_tick(InputFrame())
+    assert session.active_encounter is None
+    assert session.lair_counts[3] == (2 if lost else 0)
+    assert actor.progress == (4 if lost else 5)
+    assert session.last_defeat_mask == int(lost)
+    assert session.bad_luck == 0
+    assert session.inventories[1].counts == inventory
+    assert all(not job.active for job in active.runtime.fight.engine.jobs)
+    state = session.state_hash()
+    session.lair_counts[3] += 1
+    assert session.state_hash() != state
+
+
+def test_pausing_combat_preserves_frame_clock_without_catchup() -> None:
+    session = _session()
+    session._start_combat(_trigger(), KnightId.RED)
+    active = session.active_encounter
+    assert active is not None
+    session.step_tick(InputFrame(players={KnightId.RED: PlayerInput(pause=True)}))
+    assert session.paused
+    before = active.runtime.snapshot()
+    for _ in range(60):
+        session.step_tick(InputFrame())
+    assert active.runtime.snapshot() == before
+    session.step_tick(InputFrame(players={KnightId.RED: PlayerInput(pause=True)}))
+    assert not session.paused
+    assert active.runtime.snapshot() == before
+    session.step_tick(InputFrame())
+    assert active.runtime.phase == 1

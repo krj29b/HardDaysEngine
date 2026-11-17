@@ -98,7 +98,7 @@ code that passes its tests but does not reproduce the original; T11.24 corrects 
 | T11.10g | Guardian (`$08`) | T11.10a | TODO | Includes the three guardian routines. |
 | T11.10h | Dragon and its object (`$14`, `$2C`) | T11.10a | TODO | Reuses the approach helpers of T11.10a (§10.20). |
 | T11.10i | Computer knight (`$10`) | T11.10a | TODO | |
-| T11.11 | Fight loop, outcomes, HUD | T11.8b, T11.9, T11.10a | IN PROGRESS (Codex/2026-11-17) | Original entry, lane/wave scaling, pacing/end timers, defeat settlement and low-health palette feedback. |
+| T11.11 | Fight loop, outcomes, HUD | T11.8b, T11.9, T11.10a | DONE | Codex/2026-11-17. Original entry scripts and persistent lanes, checked wave scaling, frame/end timers, defeat/life and lair settlement, low-health palette ramps; §10.24 / ADR-017. Resumed WIP: corrected missing-inventory ADF fixtures and import order; added host lair win/loss, replay-hash and pause/resume checks. Full gate: 625 passed, 18 GL deselected; GL: 18 passed. Regenerated and reviewed fights/regions contact sheets. No combat bars or invented loot rewards; original caller sheets remain T11.15 / T11.21, map/calendar T11.12 / T11.13, remaining handlers T11.10c–i. No game data committed. |
 | T11.12 | Map movement & proximity | T11.4 | TODO | |
 | T11.13 | Turns, clock, dragon | T11.12 | TODO | |
 | T11.14 | Computer-controlled knights on the map | T11.13 | TODO | |
@@ -133,3 +133,4 @@ code that passes its tests but does not reproduce the original; T11.24 corrects 
 - 2026-11-17 · Codex · T11.8b2 done: user-approved host cutover and eight obsolete-file removals; ADR-015, real-disk replay/practice checks, full gate (561 passed) and GL checks (17 passed); host contact sheets reviewed. T11.8 / T11.8b now DONE.
 
 - 2026-11-17 · Codex · T11.10b done: Ratmen handler, executable decoder, shared trajectory slots, anchor/moon-variant host wiring; §10.23 / ADR-016. Full gate: 593 passed; GL: 18 passed; Ratmen contact sheet reviewed.
+- 2026-11-17 · Codex · T11.11 done: resumed committed WIP, fixed validation fixtures, verified original fight setup/clock/warnings/settlement and added host regression checks; ADR-017. Full gate: 625 passed; GL: 18 passed; fights/regions contact sheets reviewed.

@@ -69,7 +69,14 @@ def test_entry_script_releases_paused_creatures_and_session_lanes_continue(
     assert cursor.counter == initial_cursor
     before = cursor.counter
     another = loader.creature(
-        arena, "fo1.t", _knights(20, 20), Actor(), {}, Rng(3), 1, lanes=cursor
+        arena,
+        "fo1.t",
+        _knights(20, 20),
+        Actor(),
+        {i: Inventory() for i in range(1, 5)},
+        Rng(3),
+        1,
+        lanes=cursor,
     )
     assert another.lanes is cursor
     assert cursor.counter == (before + 2 - 1) % 3 + 1
@@ -78,7 +85,14 @@ def test_entry_script_releases_paused_creatures_and_session_lanes_continue(
 def test_lair_count_override_precedes_original_cut(loader: FightLoader) -> None:
     arena = next(a for a in loader.defs.arenas if a.name == "trogg_axe")
     runtime = loader.creature(
-        arena, "fo1.t", _knights(20, 20), Actor(), {}, Rng(4), 1, lair_count=9
+        arena,
+        "fo1.t",
+        _knights(20, 20),
+        Actor(),
+        {i: Inventory() for i in range(1, 5)},
+        Rng(4),
+        1,
+        lair_count=9,
     )
     assert runtime.fight.max_alive == 1
     # Starting stats put this knight in the first cut column.

@@ -233,3 +233,19 @@ encountered sound-picker entry points join the existing deferred sound calls (T1
 pretending those calls already implement their random draws or audio. Flight pool exhaustion,
 division by zero and quotient overflow raise; meaningless low-memory coordinate writes are
 omitted, as documented in §10.23.
+
+## ADR-017: Keep fight entry and outcome cells at the existing host boundary
+**Status:** ACCEPTED (2026-11-17, T11.11; follows ADR-013 / ADR-015)
+**Context:** The persistent engine needs original spawn lanes, wave scaling, entry scripts,
+low-health warnings and caller settlement while the map and sheet replacements are pending.
+**Decision:** Checked executable operands are decoded by `assets/fight_setup.py` into frozen
+`FightSetupRules`. Integer lane, scaling, warning and defeat rules live in `sim/fight_setup.py`.
+`FightRuntime` owns the encounter clock and warning ramps; `GameSession` retains the lane cursor,
+lair remaining counts and defeat mask in replay state. Warning ramps use palette state outside
+the script-job pool and advance on VBLs, independently of rendering. Completion restores defeated
+knights and decrements lives before releasing jobs, updates lair counts even on loss, awards
+progress on a lair win and clears bad luck. No substitute loot or inventory reward is added.
+**Consequences:** Original caller sheets remain T11.15 / T11.21; original map and calendar state
+remain T11.12 / T11.13. Missing creature handlers still report unavailable. This completes the
+fight-host work deferred by ADR-015 without changing the layer boundaries or introducing another
+combat model. Specification §10.24 records word wrapping, warning ownership and timer ordering.
