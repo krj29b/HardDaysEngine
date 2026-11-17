@@ -1,0 +1,125 @@
+"""Balok seeded outcomes, fixed-script death, counter execution and shared cells (§10.28)."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import replace
+from typing import TYPE_CHECKING
+
+import pytest
+
+from pymoonstone.app.fight_audit import build_drake_audit
+from pymoonstone.app.fight_runtime import FightLoader, FightRuntime
+from pymoonstone.app.game import GameSession
+from pymoonstone.app.scene_assets import GameAssetBundle
+from pymoonstone.assets.adf import DiskSet
+from pymoonstone.assets.drake_rules import parse_drake_rules
+from pymoonstone.assets.fight_palette import MogVersionError
+from pymoonstone.sim.actor import Actor
+from pymoonstone.sim.fight import FIGHTER_DIED, Fight, HandlerResult, Restart, fighter_died
+from pymoonstone.sim.fight_ai.drake import DRAKE_TYPE
+from pymoonstone.sim.inventory import Inventory
+from pymoonstone.sim.m68k import s16
+from pymoonstone.sim.rng import Rng
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from pymoonstone.sim.fight_script import RoutineCall
+
+pytestmark = pytest.mark.adf
+
+
+@pytest.fixture(scope="module")
+def bundle(adf_dir: Path) -> GameAssetBundle:
+    return GameAssetBundle(DiskSet.from_directory(adf_dir))
+
+
+def _play(bundle: GameAssetBundle, *, defend: bool) -> tuple[Fight, list[str], list[int], set[int]]:
+    audit = build_drake_audit(bundle)
+    fight = audit.scene.fight
+    if not defend:
+        fight.actor(1).hp = 20
+    deaths, hashes, scripts = [], [], set()
+    original = fight.handlers[DRAKE_TYPE]
+    rules = FightLoader(bundle).drake_rules
+
+    def handler(f: Fight, owner: int) -> HandlerResult:
+        result = original(f, owner)
+        if isinstance(result, Restart):
+            scripts.add(result.script)
+        return result
+
+    def died(f: Fight, call: RoutineCall | None) -> None:
+        assert call is not None and call.owner == audit.opponent
+        deaths.append(s16(f.actor(call.owner).hp))
+        fighter_died(f, call)
+
+    fight.handlers[DRAKE_TYPE], fight.routines[FIGHTER_DIED] = handler, died
+    runtime = FightRuntime(audit.scene, 1)
+    for frame in range(2500):
+        fight.ports[0] = audit.input_word() if defend else 0
+        output = audit.scene.advance(frame * 6)
+        assert all(call.name.startswith("sound_pick_") for call in output.skipped_calls)
+        hashes.append(
+            hashlib.sha256(json.dumps(runtime.snapshot(), sort_keys=True).encode()).hexdigest()
+        )
+        if not fight.fight_active:
+            break
+    assert not fight.fight_active
+    assert rules.scripts.flight in scripts
+    return fight, hashes, deaths, scripts
+
+
+def test_seeded_win_follows_fixed_hurt_death_and_replays(bundle: GameAssetBundle) -> None:
+    fight, hashes, deaths, scripts = _play(bundle, defend=True)
+    assert fight.total == fight.alive_now == 0 and s16(fight.actor(1).hp) > 0
+    assert len(deaths) == 1 and deaths[0] <= 0
+    assert FightLoader(bundle).drake_rules.scripts.hurt in scripts
+    assert hashes == _play(bundle, defend=True)[1]
+
+
+def test_idle_knight_loses_through_grab_and_finishing_scripts(bundle: GameAssetBundle) -> None:
+    fight, _, deaths, scripts = _play(bundle, defend=False)
+    assert s16(fight.actor(1).hp) <= 0 and deaths == []
+    rules = FightLoader(bundle).drake_rules
+    assert {rules.scripts.grab, rules.scripts.carry, rules.scripts.finish_first} <= scripts
+
+
+def test_original_single_entry_wave_and_shared_state_between_encounters(
+    bundle: GameAssetBundle,
+) -> None:
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "balok")
+    assert loader.arena_for(arena.handler_offsets[0]) == arena
+    records = [Actor(hp=20, hp_max=20, strength=3) for _ in range(4)]
+    first = loader.creature(arena, "fo1.t", records, Actor(), {1: Inventory()}, Rng(7), 1)
+    f, waves = first.fight, first.waves
+    assert waves is not None and f.alive_now == f.max_alive == 1
+    entry = arena.next_creature[0]
+    assert len(arena.next_creature) == 1
+    assert next(j for j in f.engine.jobs if j.type == DRAKE_TYPE).x == entry.x & 0xFFFF
+    waves.next(f)
+    assert waves.toggle == 0 and len([j for j in f.engine.jobs if j.type == DRAKE_TYPE]) == 2
+    f.drake.toggle = 1
+    second = loader.creature(arena, "fo1.t", records, Actor(), {1: Inventory()}, Rng(8), 1)
+    assert first.fight.drake is second.fight.drake is loader.drake
+    session = GameSession()
+    session.fight_loader = loader
+    before = session.state_hash()
+    loader.drake.toggle ^= 1
+    assert session.state_hash() != before
+
+
+def test_unidentified_executable_is_rejected(bundle: GameAssetBundle) -> None:
+    loader = FightLoader(bundle)
+    executable = loader.mog.executable
+    section = executable.sections[0]
+    changed = replace(section, data=b"\x00\x00" + section.data[2:])
+    with pytest.raises(MogVersionError):
+        parse_drake_rules(
+            replace(executable, sections=(changed, *executable.sections[1:])),
+            loader.caster_rules.flight,
+            loader.stalker_rules.spark,
+        )

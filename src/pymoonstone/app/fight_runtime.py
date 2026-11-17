@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from pymoonstone.app.fight_scene import FightScene
 from pymoonstone.assets.caster_rules import parse_caster_rules
 from pymoonstone.assets.creature_rules import parse_brawler_rules
+from pymoonstone.assets.drake_rules import parse_drake_rules
 from pymoonstone.assets.fight_defs import ActorInit, ArenaDef, SpawnEntry, parse_fight_defs
 from pymoonstone.assets.fight_palette import assemble_fight_palette
 from pymoonstone.assets.fight_program import (
@@ -34,9 +35,10 @@ from pymoonstone.assets.screen_fx import parse_shake_rules
 from pymoonstone.assets.snatcher_rules import parse_snatcher_rules
 from pymoonstone.assets.stalker_rules import parse_stalker_rules
 from pymoonstone.render.scene import palette_fx_to_rgb
-from pymoonstone.sim.fight import Fight, FlyerCells, TableKeys, Wall, pause_all
+from pymoonstone.sim.fight import DrakeCells, Fight, FlyerCells, TableKeys, Wall, pause_all
 from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
 from pymoonstone.sim.fight_ai.caster import CASTER_TYPE, install_caster
+from pymoonstone.sim.fight_ai.drake import DRAKE_TYPE, install_drake
 from pymoonstone.sim.fight_ai.flyer import FLYER_TYPE, install_flyer
 from pymoonstone.sim.fight_ai.snatcher import SNATCHER_TYPE, install_snatcher
 from pymoonstone.sim.fight_ai.stalker import STALKER_TYPE, install_stalker
@@ -65,7 +67,14 @@ if TYPE_CHECKING:
 
 FIGHT_VBLS = 6
 _REGIONS = (4, 0, 8, 12)
-_SUPPORTED_TYPES = (*BRAWLER_TYPES, CASTER_TYPE, SNATCHER_TYPE, FLYER_TYPE, STALKER_TYPE)
+_SUPPORTED_TYPES = (
+    *BRAWLER_TYPES,
+    CASTER_TYPE,
+    SNATCHER_TYPE,
+    FLYER_TYPE,
+    STALKER_TYPE,
+    DRAKE_TYPE,
+)
 
 
 class FightUnavailableError(ValueError):
@@ -121,7 +130,10 @@ class CreatureWaves:
         fight.alive_now = u16(fight.alive_now + 1)
 
     def next(self, fight: Fight) -> None:
-        """Alternate the original's two entry records, starting with entry 1 (§10.5)."""
+        """Use a fixed entry or alternate two entry records, starting with entry 1 (§10.28)."""
+        if len(self.arena.next_creature) == 1:
+            self.spawn(fight, self.arena.next_creature[0])
+            return
         self.toggle ^= 1
         self.spawn(fight, self.arena.next_creature[self.toggle])
 
@@ -208,6 +220,7 @@ class FightRuntime:
             "caster": asdict(f.caster),
             "snatch_flags": f.snatch_flags,
             "flyer": asdict(f.flyer),
+            "drake": asdict(f.drake),
             "beam_word": f.beam_word,
             "shake": asdict(f.shake),
             "effect_vbl": f.effect_vbl,
@@ -257,6 +270,10 @@ class FightLoader:
         self.flyer_rules = parse_flyer_rules(executable)
         self.flyer = FlyerCells(self.flyer_rules.initial_toggle)
         self.stalker_rules = parse_stalker_rules(executable, self.defs.frame_set_lists)
+        self.drake_rules = parse_drake_rules(
+            executable, self.caster_rules.flight, self.stalker_rules.spark
+        )
+        self.drake = DrakeCells()
         self.shake_rules = parse_shake_rules(executable)
         self.setup_rules = parse_fight_setup(executable)
 
@@ -315,6 +332,8 @@ class FightLoader:
         install_snatcher(f, self.snatcher_rules, self.knight_rules)
         install_flyer(f, self.flyer_rules, self.knight_rules)
         install_stalker(f, self.stalker_rules, self.knight_rules)
+        install_drake(f, self.drake_rules, self.knight_rules)
+        f.drake = self.drake
         f.flyer = self.flyer
         f.shake_rules = self.shake_rules
         f.routines[SCREEN_SHAKE] = partial(screen_shake, self.shake_rules)

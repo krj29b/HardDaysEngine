@@ -20,7 +20,14 @@ from pymoonstone.assets.cel import CelFrame, CelFrameMeta, DecodedCel
 from pymoonstone.assets.fight_program import cel_shape
 from pymoonstone.assets.palette import default_combat_palette
 from pymoonstone.render.scene import SceneRenderer, default_bitmap_font
-from pymoonstone.sim.fight import END_FIGHT, Fight, FightConstants, FlyerCells, FrameOutput
+from pymoonstone.sim.fight import (
+    END_FIGHT,
+    DrakeCells,
+    Fight,
+    FightConstants,
+    FlyerCells,
+    FrameOutput,
+)
 from pymoonstone.sim.fight_script import ScriptImage, TickOutput
 from pymoonstone.sim.overworld import EncounterTrigger, MoonPhase, TriggerKind
 from pymoonstone.sim.types import KnightId
@@ -46,6 +53,7 @@ def _session(*, audio: AudioEngine | None = None) -> GameSession:
     session.asset_bundle = Mock(spec=GameAssetBundle)
     loader = Mock(spec=FightLoader)
     loader.flyer = FlyerCells()
+    loader.drake = DrakeCells()
 
     def create(
         _arena: ArenaDef,

@@ -2180,6 +2180,75 @@ The heavy script also reaches hunk-40 `$0682`, a two-iteration random sound
 picker. It is identified explicitly, but its two draws and playback remain
 deferred with the other sound pickers to T11.23.
 
+### 10.28 Balok drake (`T11.10f`)
+
+Source: supported `mog` hunk 0 `$6AD6..$6EC6`, counter `$50FC..$5114`,
+and the shared trajectory/spark helpers (§10.23 / §10.27). Classic target
+selection is always the first fighter. All thresholds, scripts, sounds and
+table pointers below are read from checked executable instructions at runtime.
+
+Default next script is idle; do not clear input or action on entry. Priorities:
+shared flying bit 1, attacker, hit target, grabbed bit 0, recovery bit 5, then
+normal decisions. An attacker subtracts contact damage, spawns the shared hit
+spark and selects fixed hurt. A heavy (`$20`) hit toggles the victim's pause,
+selects grab and sets shared grabbed. An action-8 hit selects after-strike;
+other hits select the actor's after-hit script. Grabbed selects carry, clears
+bit 0 and sets bit 5. During recovery, first-fighter HP <= 0 XORs the shared
+finisher toggle with 1 and chooses one of two finish scripts; flags become
+bit 6 only. Otherwise clear the first fighter's links, toggle its pause,
+restart its idle job, move that job's x to Balok x plus 75 (minus when facing
+bit 1 is set), clear flags, and select after-hit. This changes the job, not
+the knight's actor position, until script writeback. No escape input is added.
+
+Normal decision idles if the target's signed HP <= 0. Save target x/depth in
+shared words and face it (1 for signed self x < target x, else 3). If depth
+is within the actor's depth reach: clear flags and use absolute x distance.
+At most 70 clears behaviour_flags2 and goes to jump aiming. At most 80
+selects action 8 / hop-strike unless action was 8, in which case heavy. Up
+to 120 selects action `$20` / heavy. Hop-strike writes hop facing and table.
+At most 180 with the first fighter out of daggers idles; all other distances,
+or a depth mismatch, go to aiming.
+
+Aim through §10.23's helper, supplying an explicit reach offset of 80 rather
+than mutating the actor's reach field. Reuse the existing shared aim words
+(currently held in CasterCells). Aim steps <= 3 (signed) idles. Otherwise a
+nonzero behaviour_flags2 byte is decremented; still nonzero idles. Clear
+action, cap **request** steps at 20 (signed), save that as remaining steps,
+retain the original uncapped aim-step and arc words, start the shared flight,
+replace flags with bit 1 and select takeoff/landing.
+
+In flight clear behaviour_flags2, step the keyed trajectory (an absent slot
+keeps coordinates), then decrement the shared remaining word regardless of
+the trajectory helper's completion result. Zero lands normally. Otherwise
+select flight; when `(aim_steps >> 1) >= remaining` (signed), height >= -40
+and absolute x distance <= 10, copy target x/depth, restart the target on
+the fixed victim-landing script, mark the first fighter dead, and land.
+Landing sets behaviour_flags2 to 5, height to zero and flags to zero and
+selects takeoff/landing. Arc < 8 emits sound `$2F`; otherwise start the
+existing screen shake and emit `$2D`, `$2E`. The handler itself draws no PRNG.
+
+**Counter engine call:** decrement the owning actor's animation timer byte.
+The BGE test uses the signed subtraction before wrapping: if negative, make
+one original PRNG draw, mask its low byte with 31 (discarded), then replace
+the timer with the decoded fixed 30. For example, old timer `$80` reloads,
+even though the wrapped decrement is `$7F`; old timer `$81` also reloads.
+This routine is shared with later creature tasks; it is not a no-op or a
+random reload. Its state already belongs to the actor and PRNG snapshots.
+
+Balok's single-entry next-creature list always spawns that fixed entry; it
+does not use or flip the two-entry arena toggle. Its one-at-a-time wave
+rule remains in force. All job and script execution remains in Fight.
+Shared drake cells (flags, remaining, saved target, finisher toggle) belong
+to the loader's executable state and are retained across its fights, as
+with FlyerCells; runtime and inactive-host hashes include them. The existing
+trajectory, aim, hop, spark and shake state is reused, without another
+animation model. Decoder checks identify the handler-table entry, helper
+destinations/entry words, operands/displacements and relocated scripts.
+
+The grab sound-pair engine call at `$6D3C` emits its decoded synth IDs in
+order; hard landing emits its pair directly. Existing sound pickers and
+sample-bank wiring remain deferred to T11.23.
+
 ## 11. Overworld and Turns (`T11.4`)
 
 The overworld is one screen: the map picture with small sprites on it. Knights take turns. The

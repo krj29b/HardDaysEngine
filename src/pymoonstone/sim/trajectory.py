@@ -137,9 +137,12 @@ def aim_flight(
     actor: Actor,
     target: Actor,
     map_y_actor: Actor | None = None,
+    *,
+    reach_x: int | None = None,
 ) -> tuple[int, int, int]:
     """Fill a request aimed at the first fighter; return distance, steps and arc (§10.23)."""
-    offset = u16(actor.reach_x if u16(target.x - actor.x) & 0x8000 else -actor.reach_x)
+    reach = actor.reach_x if reach_x is None else reach_x
+    offset = u16(reach if u16(target.x - actor.x) & 0x8000 else -reach)
     request = state.request
     request.owner = owner
     request.x, request.depth, request.height = actor.x, actor.y, actor.height

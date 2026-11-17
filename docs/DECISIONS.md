@@ -307,3 +307,26 @@ single effect rather than creating the original's duplicate interrupt hooks (§1
 The single-opponent outcome fixture explicitly places both fighters inside the
 arena; original spawn placement and cap behavior have separate real-disk checks.
 The newly reached two-draw sound picker is identified but deferred to T11.23.
+
+## ADR-021: Balok reuses trajectory, aim, hop and impact state
+**Status:** ACCEPTED (2026-11-17, T11.10f; follows ADR-013 / ADR-016 / ADR-020)
+**Context:** Balok's fixed-script handler pounces through the same trajectory slots
+as Ratmen, reads the same aim words, and calls the existing hop, spark and shake
+helpers. Its recovery moves the victim's job rather than the actor directly.
+**Decision:** `assets/drake_rules.py` checks the handler identity, helpers and
+operand instructions and decodes the fixed scripts/tunables. It accepts the already
+checked flight and spark definitions rather than duplicating their decoders.
+`sim/fight_ai/drake.py` uses the existing flight request/slots and aim words;
+`aim_flight` accepts an explicit reach override without changing actor equipment
+or reach. The loader retains `DrakeCells` across encounters and both runtime and
+inactive-host hashes include them. The one-entry Balok wave does not flip the
+two-entry arena toggle. `counter` preserves signed byte-subtraction conditions,
+one discarded PRNG draw and the fixed timer reload. The new grab sound-pair
+engine call emits its two decoded IDs in order.
+**Consequences:** Synthetic tests cover priorities, flight cap versus uncapped aim,
+landing, sounds, recovery job placement, threshold decisions and timer overflow.
+Real-disk tests cover a natural seeded win through the hurt-script death branch,
+idle loss through grab/carry/finishing scripts, complete-state replay, fixed spawn
+entry and cross-encounter cells. The audit controller dodges during a flight then
+closes for melee, using ordinary inputs. Pose previews and natural traces are
+labelled separately. Existing sound pickers and sample-bank playback remain T11.23.

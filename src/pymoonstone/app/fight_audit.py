@@ -33,6 +33,7 @@ from pymoonstone.sim.actor import Actor
 from pymoonstone.sim.fight import Fight
 from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
 from pymoonstone.sim.fight_ai.caster import CASTER_TYPE
+from pymoonstone.sim.fight_ai.drake import DRAKE_TYPE, FLYING
 from pymoonstone.sim.fight_ai.snatcher import SNATCHER_TYPE
 from pymoonstone.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
 from pymoonstone.sim.fight_routines import DAGGER_TYPE
@@ -86,6 +87,8 @@ class FightAudit:
             return UP if self.input_frames <= 20 else FIRE | LEFT | DOWN
         if trogg.type == CASTER_TYPE:
             return _caster_input(self)
+        if trogg.type == DRAKE_TYPE:
+            return _drake_input(self)
         dy = s16(trogg.y) - s16(knight.y)
         if abs(dy) > 3:
             return DOWN if dy > 0 else UP
@@ -95,8 +98,18 @@ class FightAudit:
         return _attack_word(fight, self.rules, abs(dx), self.first)
 
 
-def _caster_input(audit: FightAudit) -> int:
-    """Audit melee bot; Ratmen reject ordinary dagger damage (§10.23)."""
+def _drake_input(audit: FightAudit) -> int:
+    """Audit controller: sidestep a pounce, then close and thrust at a landed Balok."""
+    knight = audit.scene.fight.actor(audit.first)
+    if audit.scene.fight.drake.flags & FLYING:
+        if knight.y > 95:
+            return UP
+        return RIGHT if knight.x < 250 else LEFT
+    return _caster_input(audit, reach=110)
+
+
+def _caster_input(audit: FightAudit, *, reach: int = 50) -> int:
+    """Audit melee policy for Ratmen and grounded Balok (§10.23 / §10.28)."""
     fight = audit.scene.fight
     knight, target = fight.actor(audit.first), fight.actor(audit.opponent)
     dx, dy = s16(target.x) - s16(knight.x), s16(target.y) - s16(knight.y)
@@ -104,7 +117,7 @@ def _caster_input(audit: FightAudit) -> int:
         return DOWN if dy > 0 else UP
     if (knight.facing == 1) != (dx > 0):
         return RIGHT if dx > 0 else LEFT
-    if abs(dx) > 50:
+    if abs(dx) > reach:
         return RIGHT if dx > 0 else LEFT
     table = audit.rules.actions_right if knight.facing == 1 else audit.rules.actions_left
     action = 0x04
@@ -379,6 +392,44 @@ def stalker_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightSce
         ("death", rules.hurt_script),
     ):
         yield from _pose_frames(build_stalker_audit(bundle), name, script)
+
+
+def build_drake_audit(bundle: GameAssetBundle) -> FightAudit:
+    """One Balok using original entry, trajectories and explicit audit equipment (§10.28)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "balok")
+    arena = replace(arena, total=1, max_alive=1)
+    knights = [Actor() for _ in range(4)]
+    knight = knights[0]
+    knight.hp = knight.hp_max = 20
+    knight.strength, knight.sword, knight.inventory, knight.daggers = 3, 0x19, 1, 99
+    runtime = loader.creature(
+        arena, "fo1.t", knights, Actor(), {1: Inventory()}, Rng(0x2468ACE1), 1
+    )
+    knight.hp = knight.hp_max = 200
+    opponent = next(j.owner for j in runtime.fight.engine.jobs if j.type == 0x30)
+    return FightAudit(runtime.scene, loader.knight_rules, opponent)
+
+
+def drake_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightScene]]:
+    """Balok's fixed script previews, labelled apart from natural fight frames (§10.28)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "balok")
+    scripts = loader.drake_rules.scripts
+    for name, script in (
+        ("idle", arena.creature.idle_script),
+        ("walk_flight", scripts.flight),
+        ("attack", scripts.strike),
+        ("heavy", scripts.heavy),
+        ("grab", scripts.grab),
+        ("hurt", scripts.hurt),
+        ("death", scripts.hurt),
+    ):
+        yield from _pose_frames(build_drake_audit(bundle), name, script)
 
 
 def fight_audit_frames(audit: FightAudit) -> Iterator[tuple[str, FightScene]]:

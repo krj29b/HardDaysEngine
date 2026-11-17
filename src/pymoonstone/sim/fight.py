@@ -156,6 +156,17 @@ class CasterCells:
 
 
 @dataclass(slots=True)
+class DrakeCells:
+    """Balok's shared executable cells (ARCHITECTURE.md §10.28)."""
+
+    flags: int = 0
+    remaining: int = 0
+    target_x: int = 0
+    target_y: int = 0
+    toggle: int = 0
+
+
+@dataclass(slots=True)
 class FlyerCells:
     """The persistent executable alternation word (§10.26)."""
 
@@ -244,6 +255,7 @@ class Fight:
     caster: CasterCells = field(default_factory=CasterCells)
     snatch_flags: int = 0
     flyer: FlyerCells = field(default_factory=FlyerCells)
+    drake: DrakeCells = field(default_factory=DrakeCells)
     beam_word: int = 0
     shake: ShakeState = field(default_factory=ShakeState)
     shake_rules: ShakeRules | None = None
