@@ -167,6 +167,19 @@ class DrakeCells:
 
 
 @dataclass(slots=True)
+class DragonCells:
+    """Encounter-owned Dragon phases, linked records and saved reach words (§10.30)."""
+
+    flags: int = 0
+    spare: int = 0
+    distance: int = 0
+    link_a: int = 0
+    link_b: int = 0
+    saved_reach: int = 0
+    saved_close: int = 0
+
+
+@dataclass(slots=True)
 class GuardianCells:
     """Encounter-owned Guardian body handles, stages and previous target (§10.29)."""
 
@@ -268,6 +281,7 @@ class Fight:
     snatch_flags: int = 0
     flyer: FlyerCells = field(default_factory=FlyerCells)
     drake: DrakeCells = field(default_factory=DrakeCells)
+    dragon_cells: DragonCells = field(default_factory=DragonCells)
     guardian: GuardianCells = field(default_factory=GuardianCells)
     beam_word: int = 0
     shake: ShakeState = field(default_factory=ShakeState)

@@ -37,8 +37,9 @@ def _put(buffer: bytearray, pos: int, *words: int) -> None:
 def _mog(*, break_entry: bool = False) -> MogCode:
     code = bytearray(max(offset for hunk, offset, _, _ in _ROUTINES if hunk == CODE_HUNK) + 2)
     guardian = bytearray(0xD00)
+    audio = bytearray(0x100)
     for hunk, offset, opcode, _ in _ROUTINES:
-        _put(code if hunk == CODE_HUNK else guardian, offset, opcode)
+        _put({CODE_HUNK: code, GUARDIAN_HUNK: guardian, 16: audio}[hunk], offset, opcode)
     _put(code, 0x38C, 0x157C, 0x0023, 0x0010)
     _put(code, 0x400, 0x317C, 0xFFFF, 0x0050)
     if break_entry:
@@ -57,6 +58,8 @@ def _mog(*, break_entry: bool = False) -> MogCode:
             payload, relocs = bytes(data), {CODE_HUNK: (10, 30, 36), GUARDIAN_HUNK: (20,)}
         elif index == GUARDIAN_HUNK:
             payload = bytes(guardian)
+        elif index == 16:
+            payload = bytes(audio)
         kind = HUNK_CODE if index in (CODE_HUNK, GUARDIAN_HUNK) else HUNK_DATA
         sections.append(HunkSection(index, kind, len(payload), payload, relocs))
     executable = DecodedHunkExecutable(name="mog", sections=tuple(sections))

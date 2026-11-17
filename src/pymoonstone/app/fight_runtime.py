@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from pymoonstone.app.fight_scene import FightScene
 from pymoonstone.assets.caster_rules import parse_caster_rules
 from pymoonstone.assets.creature_rules import parse_brawler_rules
+from pymoonstone.assets.dragon_rules import parse_dragon_rules
 from pymoonstone.assets.drake_rules import parse_drake_rules
 from pymoonstone.assets.fight_defs import ActorInit, ArenaDef, SpawnEntry, parse_fight_defs
 from pymoonstone.assets.fight_palette import assemble_fight_palette
@@ -36,9 +37,10 @@ from pymoonstone.assets.screen_fx import parse_shake_rules
 from pymoonstone.assets.snatcher_rules import parse_snatcher_rules
 from pymoonstone.assets.stalker_rules import parse_stalker_rules
 from pymoonstone.render.scene import palette_fx_to_rgb
-from pymoonstone.sim.fight import DrakeCells, Fight, FlyerCells, TableKeys, Wall, pause_all
+from pymoonstone.sim.fight import DRAGON, DrakeCells, Fight, FlyerCells, TableKeys, Wall, pause_all
 from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
 from pymoonstone.sim.fight_ai.caster import CASTER_TYPE, install_caster
+from pymoonstone.sim.fight_ai.dragon import DRAGON_TYPE, install_dragon
 from pymoonstone.sim.fight_ai.drake import DRAKE_TYPE, install_drake
 from pymoonstone.sim.fight_ai.flyer import FLYER_TYPE, install_flyer
 from pymoonstone.sim.fight_ai.guardian import GUARDIAN_TYPE, install_guardian
@@ -77,6 +79,7 @@ _SUPPORTED_TYPES = (
     STALKER_TYPE,
     DRAKE_TYPE,
     GUARDIAN_TYPE,
+    DRAGON_TYPE,
 )
 
 
@@ -228,6 +231,7 @@ class FightRuntime:
             "flyer": asdict(f.flyer),
             "drake": asdict(f.drake),
             "guardian": asdict(f.guardian),
+            "dragon_cells": asdict(f.dragon_cells),
             "beam_word": f.beam_word,
             "shake": asdict(f.shake),
             "effect_vbl": f.effect_vbl,
@@ -279,6 +283,12 @@ class FightLoader:
         self.stalker_rules = parse_stalker_rules(executable, self.defs.frame_set_lists)
         self.drake_rules = parse_drake_rules(
             executable, self.caster_rules.flight, self.stalker_rules.spark
+        )
+        self.dragon_rules = parse_dragon_rules(
+            executable,
+            self.caster_rules.flight,
+            self.stalker_rules.spark,
+            self.defs.frame_set_lists,
         )
         self.guardian_rules = parse_guardian_rules(executable)
         self.drake = DrakeCells()
@@ -342,6 +352,7 @@ class FightLoader:
         install_stalker(f, self.stalker_rules, self.knight_rules)
         install_drake(f, self.drake_rules, self.knight_rules)
         install_guardian(f, self.guardian_rules, self.knight_rules)
+        install_dragon(f, self.dragon_rules, self.knight_rules)
         f.drake = self.drake
         f.flyer = self.flyer
         f.shake_rules = self.shake_rules
@@ -394,6 +405,10 @@ class FightLoader:
             else self.knight_rules.clip.top
         )
         self._enter_knight(f, first, cursor, edge, 1)
+        if arena.creature.actor_type == DRAGON_TYPE:
+            self._dragon(f, arena)
+            pause_all(f)
+            return self._runtime(scene, first, cursor)
         if arena.creature.actor_type == GUARDIAN_TYPE:
             self._guardian(f, arena)
             pause_all(f)
@@ -463,6 +478,43 @@ class FightLoader:
             CREATURE_LIST if second else KNIGHT_LIST,
             rules.enter_script,
         )
+
+    def _fixed_actor(self, fight: Fight, init: ActorInit, handle: int, keys: TableKeys) -> None:
+        """Place a fixed arena actor using only its decoded record (§10.30)."""
+        x, height, depth = init.position
+        if x is None or height is None or depth is None:
+            raise FightUnavailableError("fixed fight actor lacks its original position")
+        if init.frame_set is None or init.facing is None or init.actor_type is None:
+            raise FightUnavailableError("fixed fight actor lacks its type or frame list")
+        actor = fight.actor(handle)
+        _initialise(actor, init, keys)
+        actor.idle_script, actor.after_hit_script = init.idle_script, init.after_hit_script
+        actor.active = 1
+        actor.hit_target = actor.attacker = actor.action = actor.input = 0
+        actor.x, actor.height, actor.y = (u16(v) for v in (x, height, depth))
+        actor.frame_list, actor.facing = init.frame_set, init.facing
+        fight.start_job(
+            init.idle_script,
+            handle,
+            init.frame_set,
+            (x, height, depth),
+            init.facing,
+            init.actor_type,
+        )
+
+    def _dragon(self, fight: Fight, arena: ArenaDef) -> None:
+        """Use persistent dragon handle 5 and the two ordered decoded objects (§10.30)."""
+        keys = fight.register_tables(script_tables(arena.creature))
+        self._fixed_actor(fight, arena.creature, DRAGON, keys)
+        handles = []
+        for init in arena.objects:
+            handle = fight.alloc_record()
+            self._fixed_actor(fight, init, handle, keys)
+            handles.append(handle)
+        if len(handles) != 2:
+            raise FightUnavailableError("Dragon arena does not define two linked objects")
+        fight.dragon_cells.link_a, fight.dragon_cells.link_b = handles
+        fight.alive_now = fight.max_alive = fight.total = 1
 
     def _guardian(self, fight: Fight, arena: ArenaDef) -> None:
         """Start the fixed Guardian actor and reserve its separate body record (§10.29)."""

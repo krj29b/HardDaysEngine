@@ -33,6 +33,7 @@ from pymoonstone.sim.actor import Actor
 from pymoonstone.sim.fight import Fight
 from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
 from pymoonstone.sim.fight_ai.caster import CASTER_TYPE
+from pymoonstone.sim.fight_ai.dragon import DRAGON_TYPE
 from pymoonstone.sim.fight_ai.drake import DRAKE_TYPE, FLYING
 from pymoonstone.sim.fight_ai.guardian import GUARDIAN_TYPE
 from pymoonstone.sim.fight_ai.snatcher import SNATCHER_TYPE
@@ -86,6 +87,7 @@ class FightAudit:
             CASTER_TYPE: _caster_input,
             DRAKE_TYPE: _drake_input,
             GUARDIAN_TYPE: _guardian_input,
+            DRAGON_TYPE: _dragon_input,
         }.get(self.scene.fight.actor(self.opponent).type, _standard_input)
         return controller(self)
 
@@ -105,6 +107,21 @@ def _standard_input(audit: FightAudit) -> int:
     if (knight.facing == 1) != (dx > 0):
         return RIGHT if dx > 0 else LEFT
     return _attack_word(fight, audit.rules, abs(dx), audit.first)
+
+
+def _dragon_input(audit: FightAudit) -> int:
+    """Audit-only sword policy: close beneath the Dragon and use action $18."""
+    fight = audit.scene.fight
+    knight, dragon = fight.actor(audit.first), fight.actor(5)
+    dx, dy = s16(dragon.x - knight.x), s16(dragon.y - knight.y)
+    if abs(dy) > 3:
+        return DOWN if dy > 0 else UP
+    if (knight.facing == 1) != (dx > 0):
+        return RIGHT if dx > 0 else LEFT
+    if abs(dx) > 40:
+        return RIGHT if dx > 0 else LEFT
+    table = audit.rules.actions_right if knight.facing == 1 else audit.rules.actions_left
+    return FIRE | table.index(0x18)
 
 
 def _guardian_input(audit: FightAudit) -> int:
@@ -470,6 +487,58 @@ def build_guardian_audit(bundle: GameAssetBundle) -> FightAudit:
         arena, "fo1.t", knights, Actor(), {1: Inventory()}, Rng(0x2468ACE1), 1
     )
     return FightAudit(runtime.scene, loader.knight_rules, runtime.fight.guardian.main)
+
+
+def build_dragon_audit(bundle: GameAssetBundle) -> FightAudit:
+    """Persistent Dragon and its two original objects with explicit audit equipment (§10.30)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "dragon")
+    knights = [Actor() for _ in range(4)]
+    knight = knights[0]
+    knight.hp = knight.hp_max = 80
+    knight.strength, knight.sword, knight.inventory, knight.daggers = 5, 0x19, 1, 10
+    knight.armour = 0x1E
+    inventory = Inventory()
+    inventory.counts[4], inventory.counts[11] = 1, 2
+    runtime = loader.creature(
+        arena, "fo1.t", knights, Actor(), {1: inventory}, Rng(0x2468ACE1), 1, 45
+    )
+    return FightAudit(runtime.scene, loader.knight_rules, 5)
+
+
+def dragon_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightScene]]:
+    """Dragon and both objects, labelled separately from natural fight outcomes (§10.30)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "dragon")
+    scripts = loader.dragon_rules.scripts
+    for name, script in (
+        ("idle", arena.creature.idle_script),
+        ("walk_flight", arena.creature.walk_scripts[loader.dragon_rules.near.block // 4]),
+        ("attack", scripts.strike8),
+        ("breath", scripts.breath),
+        ("bite", scripts.bite),
+        ("hurt", arena.creature.hurt_scripts[2]),
+        ("death", arena.creature.hurt_scripts[2]),
+    ):
+        audit = build_dragon_audit(bundle)
+        fight = audit.scene.fight
+        # Preview positions shift the whole multipart fixture into view; gameplay uses decoded ones.
+        for handle in (fight.dragon_cells.link_a, fight.dragon_cells.link_b):
+            actor, job = fight.actor(handle), fight.find_job(handle)
+            actor.x, actor.y = actor.x + 70, actor.y + 20
+            if job is not None:
+                job.x, job.depth, job.paused = actor.x, actor.y, 0
+        samples = {
+            "death": (0, 4, 9),
+            "attack": (0, 3, 7),
+            "breath": (0, 3, 7),
+            "bite": (0, 3),
+        }.get(name, (0,))
+        yield from _pose_frames(audit, name, script, samples)
 
 
 def guardian_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightScene]]:

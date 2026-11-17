@@ -351,3 +351,25 @@ ends the fight directly rather than decrementing a normal creature wave. Real-di
 verify natural win/death, idle loss, exact loaded frames for every fixed script, original
 setup operands and full-state replay; pose previews are labelled apart from natural traces.
 Valley visit/reward integration remains T11.21.
+
+## ADR-023: Dragon phases reuse persistent actor 5 and the shared fight jobs
+**Status:** ACCEPTED (2026-11-17, T11.10h; follows ADR-011 / ADR-013 / ADR-016)
+**Context:** The Dragon fight has a persistent actor, two linked objects, two flight phases,
+script-triggered ground steps and fire jobs. Its executable also contains misplaced job writes.
+**Decision:** assets/dragon_rules.py validates both handler entries and helper destinations,
+then decodes phase requests, operands, fixed scripts, sounds and frame-list pointers.
+sim/fight_ai/dragon.py uses existing approach, trajectories, hit sparks, contact damage,
+hop and job machinery. The loader applies decoded fixed records to actor5 and two ordered
+pool records, without ordinary wave scaling. DragonCells belongs to each fight and its
+snapshots. The campaign host routes Dragon intercepts into this runtime.
+**Consequences:** Signed phase comparisons, object action $14, x bounds, tracker depth,
+ignored trajectory depth and classic delayed bite death are preserved (§10.30). Misplaced
+restoration updates the width/height of a job two slots later and leaves actor reach reduced.
+The ignored-hit flight alias writes the neighboring job x and its own job height; a read
+outside the modeled table raises. Restoration writes beyond the table are omitted as invalid
+memory corruption. The link-job helper deliberately puts both objects at dragon+10.
+Fixed sound IDs are emitted; the newly identified random picker and synth-channel release
+callbacks remain deferred with their state/draws to T11.23. Real-disk outcome fixtures use
+explicit endgame equipment and ordinary inputs; they verify hurt-script death/win, idle loss,
+independent setup operands, exact frames and deterministic replay. Map/calendar and hoard
+settlement remain T11.12/13 and T11.21 respectively. No game data is committed.

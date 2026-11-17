@@ -698,7 +698,11 @@ class GameSession:
             )
             return ActiveEncounter(trigger, runtime, (knight_id, second_id))
         if trigger.kind == TriggerKind.DRAGON_INTERCEPT:
-            raise FightUnavailableError("dragon fights are not available yet")
+            self._prepare_fight_knights(knight_id)
+            runtime = loader.creature(
+                loader.arena_for(0x14), background, *args, first, lanes=self.spawn_lanes
+            )
+            return ActiveEncounter(trigger, runtime, (knight_id,))
         if trigger.kind == TriggerKind.PVP_DUEL:
             opponent_id = trigger.opponent_knight_id
             if opponent_id is None or opponent_id not in self.players:

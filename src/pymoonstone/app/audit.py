@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw
 from pymoonstone.app.fight_audit import (
     TROGG_ARENAS,
     build_caster_audit,
+    build_dragon_audit,
     build_drake_audit,
     build_fight_audit,
     build_flyer_audit,
@@ -24,6 +25,7 @@ from pymoonstone.app.fight_audit import (
     build_snatcher_audit,
     build_stalker_audit,
     caster_pose_frames,
+    dragon_pose_frames,
     drake_pose_frames,
     fight_audit_frames,
     fight_host_input,
@@ -341,7 +343,26 @@ def _guardian_shots(rig: AuditRig) -> Iterator[AuditShot]:
     raise RuntimeError("idle Guardian audit did not reach an outcome")
 
 
+def _dragon_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    bundle = rig.fight_assets()
+    for label, scene in dragon_pose_frames(bundle):
+        yield rig.capture_fight(scene, f"dragon_pose_{label}")
+    for label, scene in fight_audit_frames(build_dragon_audit(bundle)):
+        yield rig.capture_fight(scene, f"dragon_seeded_{label}")
+    audit = build_dragon_audit(bundle)
+    audit.scene.fight.actor(1).hp = 20
+    for frame in range(1000):
+        audit.scene.advance(frame * 6)
+        if frame in (20, 60, 120, 180):
+            yield rig.capture_fight(audit.scene, f"dragon_idle_loss_frame{frame + 1}")
+        if not audit.scene.fight.fight_active:
+            yield rig.capture_fight(audit.scene, f"dragon_idle_loss_outcome{frame + 1}")
+            return
+    raise RuntimeError("idle Dragon audit did not reach an outcome")
+
+
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
+    "dragon": _dragon_shots,
     "guardian": _guardian_shots,
     "balok": _drake_shots,
     "troll": _stalker_shots,

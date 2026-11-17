@@ -2313,6 +2313,118 @@ The hurt script branches on HP and ends the fight itself; the boss is not
 settled with the ordinary fighter_died wave decrement. Acceptance separately
 records that death branch and the resulting fight termination.
 
+### 10.30 Dragon and linked objects (T11.10h)
+
+Source: supported mog hunk 0 $6574..$6AD4 (handlers and helpers),
+$44C4..$469C (arena), scripts in hunk 4, and shared helpers of §10.20,
+§10.23 and §10.27. Use classic first-fighter targeting; later party changes
+in the reference port are excluded. All tunables, fixed scripts, table
+pointers and sound IDs below come from checked executable instructions.
+
+**Setup:** use persistent actor handle 5, not an ordinary pool monster.
+Apply the decoded dragon record, position (80,-40,100), facing 1 and creature
+frame list. Clear its links, action, input and encounter flags. Start idle.
+Allocate the two decoded type-$2C objects in order, each with its own record
+and shared dragon tables: positions (5,0,80) and (5,0,120). The common
+initializer overwrites their earlier HP=50 with 120; retain that order.
+One alive/one total, no wave scaling/refills. The first knight uses its
+normal entry script; pause the pool and dragon until that script releases
+them. Dragon HP is reinitialized by this arena's common initializer.
+The linked handles, flag bytes, saved reach/too-close words and distance
+are encounter cells and participate in runtime snapshots.
+
+**Main handler:** default next script is idle. Attacker precedes hit-target.
+A type-$0C attacker sets flag $80, subtracts contact damage, selects the
+hurt table by attacker's action and creates the shared hit spark at the
+DRAGON's contact coordinates. A dagger ($34) sets $80, selects hurt offset
+12 and subtracts 3, then the same spark. Other attackers keep the current
+script if the dragon job is running; otherwise think, retaining the
+original job-pointer alias described below. On hit-target, action !=4
+keeps the job; action 4 frees the target's job/record and selects the fixed
+bite/finish script. Classic code does not mark HP immediately; that script
+calls mark-first-dead. With no links clear action before thinking.
+
+**Ground step** (also script callback $6882): clear dragon input; if flag
+$40 is set save reach/too-close and replace them with 2/1. Run approach
+§10.20 against first fighter, then force facing 1. Apply right before left
+in separate tests: x+5 only if signed result <100, x-5 only if signed result
+>30. Apply up then down separately (five pixels, word wrap). Copy actor
+x/depth into its job. The original restores the saved reach/too-close
+through the JOB pointer: actor values stay 2/1; words at job+116/+118
+become the saved values (width/frame-height of the job two slots later).
+Preserve writes within the modeled ten-record table; writes beyond it
+are omitted as invalid-memory corruption. Save words remain in snapshots.
+
+After ground step save signed absolute x distance. Below 140, flag $20
+set picks an attack, otherwise start the near flight. At or above 140,
+flag $20 clear picks an attack, otherwise start the far flight. This is
+the assembly's actual branch order; the reference rule's introductory
+near/far prose states it backwards.
+
+**Start flight:** set flag $10, near also sets $20, far clears $20. Reset
+phase. Select walk table offset32 (near) or64 (far), first entry. Set
+actor cooldown WORD to 13/9. Fill the existing trajectory request owned
+by handle5 from current dragon coordinates to x100, first-fighter depth,
+height -70/-30, steps13/9, arc80/120 respectively, and start it. Sync links.
+
+**Flight handler:** decrement cooldown WORD, clear $10 at zero. Move actor
+depth +5 when signed depth <target depth, else -5 (including equality).
+Step the shared trajectory, accepting only x/height; its depth result is
+discarded, so depth remains the tracker result. Increment phase BYTE;
+if signed byte >=8 use7 for lookup, otherwise use the unsigned byte.
+Select walk offset32 when $20 is set,64 otherwise, plus phase*4. A wrapped
+negative phase can address beyond the table; bounds errors raise under
+ADR-011. Sync links. Hurt does not cancel a flight.
+
+**Attack pick:** clear $40 first. Target HP<=0 or approach near=0 leaves
+idle. With $20 clear set action8 and fixed strike script. With $20 set,
+distance<=70 and $80 clear selects action4/bite; otherwise select action
+$20/breath and set $40. Both latter choices clear $80. Breath also spawns
+an ordinary idle-object job (type$28, creature frame list) at dragon x+55,
+height0, depth+5, facing1 on the decoded fire script.
+
+**Job alias on an ignored hit:** when the dragon job has ended, the
+original enters think with A1 pointing to its JOB. Ground thinking restores
+the actor pointer and is normal. In-flight thinking instead decrements
+the word at job+106 (x of the job two slots later) and adjusts job+8 (its
+height) as if it were actor depth. A job pointer cannot match a trajectory
+owned by an actor, so dragon x/height remain unchanged. Phase advancement
+and link sync still operate on the dragon. A missing two-slots-later record
+raises instead of reading arbitrary memory. The normal handler result then
+replaces its job coordinates from the actor, as with every restart.
+
+**Linked records:** normal sync writes actor depth dragon+10 into link A,
+and dragon-20 into link B; it does not reposition their jobs. The separate
+$6A82 routine differs: BOTH jobs get dragon+10 (a subtraction uses the wrong
+register), then BOTH actors get the first job's depth. Preserve this typo;
+missing jobs cause no zero-address writes.
+
+**Object handler (type$2C):** default idle, first target. Attacker returns
+idle; hit-target returns idle, and unless the target is type$14 sets hop
+facing1 and the ordinary hop table. With neither link: dragon signed HP<=0
+selects fixed object-death. Otherwise target HP>0, depth within the object's
+reach and signed target x<=100 selects action **$14** (decimal20, not $20)
+and fixed attack. Otherwise normal linked-record sync then idle. No clipping,
+wave death or independent HP reaction is added.
+
+**Callbacks:** $6D28/$6D32 emit their decoded fixed sound IDs in order;
+$6882 runs the ground step; $6A82 synchronizes jobs as above. The newly
+reached random two-draw sound picker $71EC and hunk16 channel-release calls
+$40/$52 (which release a reserved synth voice before requesting sound $A7)
+are identified but deferred, including their audio state/draws, to T11.23.
+The existing counter, hop, shake and end-fight machinery is reused. Death
+comes from the hurt script's HP branch and ends the fight directly.
+
+Host Dragon intercepts use this runtime. Original map/calendar transitions
+remain T11.12/13; hoard/reward sheet and settlement remain T11.21. Real-disk
+acceptance uses ordinary recorded joystick inputs, checks natural hurt-script
+death/win and idle loss, full-state replay, independently read setup operands,
+and all reachable fixed-script draws. The audit knight explicitly has strength5,
+sharpness sword, battle armour, 80HP, one protection item and moonstone bit1
+at moon frame45; its controller closes and uses action $18. Pose previews
+are labelled separately from natural traces and include the complete dragon
+and linked objects.
+
 ## 11. Overworld and Turns (`T11.4`)
 
 The overworld is one screen: the map picture with small sprites on it. Knights take turns. The
