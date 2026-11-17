@@ -455,3 +455,26 @@ and place/meeting sheets remain T11.15..21 and the full ending presentation T11.
 natural Dragon outcome tests continue to validate the arena; new caller-boundary fixtures
 validate map attack and settlement independently. Contact sheets distinguish natural round/
 flight captures from moon previews. No game data is committed.
+
+
+## ADR-027: Computer map decisions share campaign records and retain frame continuations
+**Status:** ACCEPTED (2026-11-17, T11.14; follows ADR-025 / ADR-026)
+**Context:** The scheduler already visits computer knights, but their map turns were unavailable.
+Their original rules draw each frame, retain one walking line per turn, and call meetings
+synchronously before finishing the frame. The host suspends while an arena scene runs.
+**Decision:** `assets/ai_map_rules.py` reads checked executable operands into frozen rules;
+`sim/ai_map.py` and `sim/ai_shop.py` implement the original decision order and shopping quirks.
+Campaign-owned `MapAiCells` retains sorted rows, target/wish cells, line/error and encounter
+continuations. Scheduler classification resets the town and line/roam flags. A meeting resumes
+at terrain/charge, and a Dragon return resumes at the budget test, without repeating decisions.
+The existing duel runtime and original loot-transfer rule handle computer-initiated meetings.
+Computer actors retain their authoritative map resources at fight entry; the legacy sheet
+adapter is synchronized for display, without replacing those actor records.
+**Consequences:** Equal-distance roam swaps, the fourth null opponent draw, stale sword item,
+sword fallthrough, signed thresholds and high-byte dagger debit are preserved (§11.20).
+All mutable cells enter host hashes. Real-disk tests independently read operands, reject
+changed instructions, compare frame RNG state with an independent recurrence/draw oracle,
+and replay natural computer turns through three days with existing encounters and calendar.
+Full human protection/meeting/loot sheets remain T11.21, item jingles remain T11.23, and
+new-game hoard/market/lair gift initialization retains its existing inventory-task follow-up.
+No alternate campaign model, reference implementation code or game data is added.

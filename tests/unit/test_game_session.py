@@ -23,6 +23,7 @@ from pymoonstone.app.location_screens import LocationKind
 from pymoonstone.cli.main import main
 from pymoonstone.sim.overworld import scan
 from pymoonstone.sim.types import KnightId
+from tests.unit.ai_map_setup import AI_RULES
 from tests.unit.map_setup import KINDS, RULES
 from tests.unit.turn_setup import TURN_RULES
 
@@ -31,6 +32,7 @@ if TYPE_CHECKING:
 
     import pytest
 
+    from pymoonstone.sim.ai_map_state import MapAiRules
     from pymoonstone.sim.map_rules import MapRules
     from pymoonstone.sim.turn_rules import TurnRules
 
@@ -304,6 +306,9 @@ def test_victory_and_game_over_reset_to_menu_and_music() -> None:
 
         def get_turn_rules(self) -> TurnRules:
             return TURN_RULES
+
+        def get_ai_map_rules(self) -> MapAiRules:
+            return AI_RULES
 
         def get_test_picture(self, index: int) -> None:
             return None

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import TYPE_CHECKING
 
+from pymoonstone.sim.ai_map_state import MapAiCells, MapAiRules
 from pymoonstone.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
 from pymoonstone.sim.inventory import Inventory
 from pymoonstone.sim.m68k import s8, s16, u8, u16
@@ -184,6 +185,8 @@ class OverworldState:
     turn_order: tuple[KnightId, ...]
     rules: MapRules | None = None
     turn_rules: TurnRules | None = None
+    ai_rules: MapAiRules | None = None
+    ai: MapAiCells = field(default_factory=MapAiCells)
     human_order: tuple[KnightId, ...] = field(init=False)
     turns: TurnCells = field(default_factory=TurnCells)
     gifts: GiftState = field(default_factory=GiftState)

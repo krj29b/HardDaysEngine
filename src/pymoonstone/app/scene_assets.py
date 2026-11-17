@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from pymoonstone.app.intro_player import IntroCinematicPlayer
+from pymoonstone.assets.ai_map_rules import parse_ai_map_rules
 from pymoonstone.assets.arena import DecodedArena, composite_arena_background, decode_arena
 from pymoonstone.assets.audio import (
     DEFAULT_SAMPLE_RATE,
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
 
     from pymoonstone.app.audio import AudioEngine
     from pymoonstone.assets.adf import DiskSet
+    from pymoonstone.sim.ai_map_state import MapAiRules
     from pymoonstone.sim.map_rules import MapRules
     from pymoonstone.sim.turn_rules import TurnRules
 
@@ -300,6 +302,10 @@ class GameAssetBundle:
     def get_turn_rules(self) -> TurnRules:
         """Decode calendar, gift and flight tables from the original mog (§11.19)."""
         return parse_turn_rules(parse_hunk_executable("mog", self.disk_set.read_file("mog")))
+
+    def get_ai_map_rules(self) -> MapAiRules:
+        """Decode the original computer-map decision operands (§11.20)."""
+        return parse_ai_map_rules(parse_hunk_executable("mog", self.disk_set.read_file("mog")))
 
     def get_map_rules(self) -> MapRules:
         """Load original map records, grids and exact mi.c dimensions (§11.18)."""

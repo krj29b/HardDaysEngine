@@ -86,6 +86,9 @@ def _classify(world: OverworldState) -> TurnResult:
     world.setup_turn()
     actor = world.current_actor
     actor.engaged_with = 0
+    world.ai.built = world.ai.walk.initialized = world.ai.pending = False
+    world.ai.town = None
+    world.ai.after_dragon = False
     if s8(actor.frog_days) > 0:
         return TurnResult.REPEAT
     if s8(actor.lives) > 0:

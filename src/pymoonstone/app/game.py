@@ -58,6 +58,7 @@ from pymoonstone.render.scene import (
     palette_fx_to_rgb,
 )
 from pymoonstone.sim.actor import Actor
+from pymoonstone.sim.ai_map import computer_frame
 from pymoonstone.sim.fight_moves import FIRE
 from pymoonstone.sim.fight_setup import SpawnLanes, settle_defeats
 from pymoonstone.sim.inventory import Inventory
@@ -67,7 +68,6 @@ from pymoonstone.sim.locations import (
 )
 from pymoonstone.sim.m68k import s8, s16, u8, u16
 from pymoonstone.sim.map_dragon import (
-    attacks as dragon_attacks,
     automatic_loss,
     settle as settle_dragon,
 )
@@ -79,6 +79,7 @@ from pymoonstone.sim.overworld import (
     map_sprites,
 )
 from pymoonstone.sim.palette_fx import PaletteFxState, pack_rgb12
+from pymoonstone.sim.rewards import transfer_loot
 from pymoonstone.sim.rng import DEFAULT_SEED, Rng
 from pymoonstone.sim.turns import TurnResult, advance as advance_turn
 from pymoonstone.sim.types import KnightId
@@ -448,6 +449,7 @@ class GameSession:
             return False
         self.overworld.install(self.asset_bundle.get_map_rules(), _KNIGHT_KINDS, self.seed)
         self.overworld.turn_rules = self.asset_bundle.get_turn_rules()
+        self.overworld.ai_rules = self.asset_bundle.get_ai_map_rules()
         for offset, size, value in self.overworld.turn_rules.dragon_defaults:
             self.dragon_actor.write(offset, size, value)
         for kid in KnightId:
@@ -526,7 +528,7 @@ class GameSession:
         inp = self._player_input(frame, kid)
         key, self._map_key = self._map_key, 0
         if world.current_actor.kind == 4:
-            self._computer_map_boundary(key)
+            self._step_computer_map(key)
             return
         if inp.secondary:
             key = ord(" ")
@@ -535,14 +537,31 @@ class GameSession:
         if self._map_result(row, key) and self.map_runtime is not None:
             self.map_runtime.advance(world, self.tick_count)
 
-    def _computer_map_boundary(self, key: int) -> None:
-        self.last_status = "COMPUTER MAP CONTROL UNAVAILABLE"
-        if key == ord("Q"):
-            self._enter_game_over()
-        elif dragon_attacks(self.overworld):
-            self._dragon_attack()
-        elif s16(self.overworld.spent) >= s16(self.overworld.budget):
-            self._advance_turns()
+    def _step_computer_map(self, key: int) -> None:
+        world = self.overworld
+        if world.ai_rules is None:
+            raise ValueError("original computer map rules are required")
+        row = computer_frame(world, world.ai_rules, key)
+        for kid in KnightId:
+            self._sync_legacy_actor(kid)
+        if row is not None:
+            opponent = self.actors[row.key - 1]
+            if opponent.frog_days or s8(opponent.lives) <= 0:
+                self._computer_meeting_loot(world.current_actor, opponent)
+                return
+        self.last_status = ""
+        if self._map_result(row, ord("Q") if key == ord("Q") else 0) and self.map_runtime:
+            self.map_runtime.advance(world, self.tick_count)
+
+    def _computer_meeting_loot(self, winner: Actor, loser: Actor) -> None:
+        """Computer settlement shares the original transfer rule (§11.20)."""
+        rules = self.overworld.turn_rules
+        if rules is None:
+            raise ValueError("meeting loot requires original transfer tables")
+        winner.progress = u16(winner.progress + 1)
+        transfer_loot(winner, loser, self.overworld.ordered_actors(), self.inventories, rules.gifts)
+        for kid in KnightId:
+            self._sync_legacy_actor(kid)
 
     def _map_result(self, row: Arrival | None, key: int) -> bool:
         world = self.overworld
@@ -853,7 +872,10 @@ class GameSession:
 
     def _prepare_fight_knights(self, *kids: KnightId) -> None:
         for kid in kids:
-            self._prepare_fight_knight(kid)
+            if self.overworld.rules is not None and self.actors[int(kid)].kind == 4:
+                self._sync_legacy_actor(kid)
+            else:
+                self._prepare_fight_knight(kid)
 
     def _prepare_fight_knight(self, kid: KnightId) -> None:
         """Translate only the legacy sheet values at fight entry (§10.22)."""
@@ -932,6 +954,7 @@ class GameSession:
 
     def _settle_map_encounter(self, active: ActiveEncounter, won: bool) -> None:
         fight = active.runtime.fight
+        self._settle_computer_duel(active)
         for kid in active.knight_ids:
             actor, legacy = self.actors[int(kid)], self.knight_combat[kid]
             legacy.hp, legacy.daggers, legacy.lives = s16(actor.hp), actor.daggers, s8(actor.lives)
@@ -953,6 +976,17 @@ class GameSession:
             for kid in KnightId:
                 self._sync_legacy_actor(kid)
 
+    def _settle_computer_duel(self, active: ActiveEncounter) -> None:
+        if self.practice_mode or active.trigger.kind != TriggerKind.PVP_DUEL:
+            return
+        if self.last_defeat_mask not in (1, 2):
+            return
+        first = active.runtime.fight.actor(active.runtime.first)
+        second = active.runtime.fight.actor(active.runtime.opponent)
+        winner, loser = (second, first) if self.last_defeat_mask == 1 else (first, second)
+        if winner.kind == 4:
+            self._computer_meeting_loot(winner, loser)
+
     def _return_from_map_fight(self, won: bool) -> None:
         self.scene = GameScene.OVERWORLD
         if self.overworld.rules is not None:
@@ -970,6 +1004,7 @@ class GameSession:
         world = asdict(self.overworld)
         world.pop("rules")
         world.pop("turn_rules")
+        world.pop("ai_rules")
         payload = {
             "tick": self.tick_count,
             "scene": int(self.scene),

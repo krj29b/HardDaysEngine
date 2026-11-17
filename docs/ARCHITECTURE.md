@@ -3121,6 +3121,58 @@ sheet presentation remains T11.15/21; gift rolls at campaign initialization rema
 the initialization follow-up recorded by T11.12.
 
 
+### 11.20 Computer map integration (T11.14)
+
+The decision order and arithmetic of §11.13/14 apply to two-VBL map frames.
+Mutable AI cells belong to the campaign: sorted lair rows, chosen lair and hidden
+flag, neighbor distances/handles, gate, town distances/target, cost/kind/item,
+and the initialized walk line (axis bits, lengths, error). The scheduler clears
+the town target, roam-built and walk-initialized flags and the engaged handle
+when classifying each new turn, including record0 after the round screen.
+Screen re-entry does not clear the line. All cells participate in replay hashes.
+
+Distances subtract, take absolute values, add and wrap as words. Opponent distances
+are sign-extended to unsigned longs for their stable comparison. Roam sorting uses
+unsigned words but always swaps a leading negative word. Retry loops raise after
+4096 failed draws rather than hanging on an invalid seed. Town distance comparisons,
+walk-axis comparisons and the speed threshold use signed words. Shopping compares
+signed gold and signed equipment longs. The sword's lost absolute store does not
+update the item cell; the dagger store clears only that cell's high word. Dagger
+debits subtract from gold's high byte, preserving its low byte.
+
+Rest clears life_loss, restores HP, and when HP was already full increments lives;
+a signed result of six or more is forced to five. Stat purchase changes the byte
+and progress without recalculating derived values. Acquisition uses the existing
+original loot-transfer order and recalculates the four knight records; it neither
+grants progress nor ends the turn. It retains the engaged handle. The item jingles
+remain with sound wiring T11.23, as do other noncombat original synth triggers.
+
+Arrival reads the previous scan, stopping at its first zero key and testing no
+more than seven rows. A town target suppresses both opponent and lair tests.
+Arrival can set spent=budget, but the terrain test, one-frame charge and walk-line
+error update still happen before the budget check; the map position then stays
+unchanged. A meeting suspends the AI frame at arrival while the existing duel runs;
+on return, only that frame's remaining terrain/charge/walk and budget tail runs,
+without repeating its random decisions. Its resumed frame sets spent to the
+recomputed budget before the final charge. A Dragon return resumes only the budget
+tail, without another decision, charge or walk-line update. Frogged or dead
+opponents settle through the existing loot rule without a fight. Full human
+meeting/loot sheets stay T11.21.
+The existing duel runtime handles live human opponents in either fighter position;
+computer winners receive one progress and the original transfer after defeat
+settlement. The human winner's loot sheet remains that later task.
+
+`assets/ai_map_rules.py` reads hunk36 checked operands at $0F6A..$11AE for
+prices, equipment IDs, caps and town tiles/targets, $0AD2 for opponent odds,
+$0E36 for rest threshold; the stat-price load at $0F3C points into hunk4.
+Rest caps come from checked hunk0 operands $BEA6/$BEAE. Code-hunk CRC checking
+precedes reads, every immediate instruction form is checked, long immediates
+are checked before reading, and relocated data pointers require their target hunk.
+Rule records are frozen and contain no I/O. No prices or equipment tables are
+copied from original data into the implementation. Multi-day verification uses
+the real tables and original RNG, with an independent per-frame draw-order oracle
+and explicit checks for sorted ties, ignored candidates, terrain and shopping quirks.
+
 ## 12. Places and Sheets (`T11.5`)
 
 Everything that is neither the map (§11) nor a fight (§10) is one of two kinds of screen:
