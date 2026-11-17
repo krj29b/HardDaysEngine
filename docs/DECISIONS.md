@@ -522,3 +522,28 @@ continues to open remaining loot.
 Town transactions and their callers remain T11.16/17, place-specific callers
 remain T11.18–21, and sheet sound playback remains T11.23. New-game inventory
 rolls retain the existing initialization follow-up recorded by T11.12/13.
+
+
+## ADR-030: Decode town buttons as immutable snapshots before replacing the host
+**Status:** ACCEPTED (2026-11-17, T11.16a; follows ADR-028 / ADR-029)
+**Context:** The legacy Highwood menu omits the market and the existing location
+model still drives invented goods and services. The original town builders rewrite
+one scratch record between registrations, retaining geometry from previous buttons.
+The host replacement also spans sheet continuations, service callers and obsolete
+model/test removal, which need their own real-disk presentation acceptance.
+**Decision:** Split T11.16 into executable data (a) and host replacement (b).
+`assets/town_data.py` checks the two original builders' instruction operands,
+relocated scratch pointers and registration calls, then emits five immutable
+`sim/town_types.py` records per town. It reads names, picture and pointer filenames,
+initial coordinates and Space sheet selection through checked loads. The two
+loaders must agree on their shared pointer and name cells. The synthetic fixture
+changes widths between buttons to verify inherited fields; an independent real-disk
+walker executes stores sequentially and snapshots the byte record at registration.
+**Consequences:** No original geometry, strings or game data are committed. Invalid
+instruction forms, pointers, extents, ids and text fail explicitly. The frozen
+simulation records follow the existing asset-to-simulation boundary and introduce
+no new screen loop. T11.16b must consume these records, remove location_screens.py
+and locations.py with obsolete tests, wire sheets/services and spent exit, hash
+mutable town state, and review the real-disk contact sheet. T11.16 remains open;
+T11.17/18 still implement original transactions and services. T11.16a has no
+presentation change and therefore needs no contact sheet.

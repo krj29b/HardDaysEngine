@@ -277,6 +277,11 @@ Rules for the whole phase:
   temple and mystic as the button tables say. The invented goods, services and training menu are
   deleted with `sim/locations.py`. *Accept:* every button on both scrolls is selectable and opens
   its screen; Exit returns to the map.
+  Split into **T11.16a**, the checked runtime town layout/identity decoder, and
+  **T11.16b**, the presenter, host navigation, obsolete-model removal and
+  real-disk contact-sheet acceptance. Subtask a must independently verify all
+  five button records, pointer starts, original picture/name strings and the
+  Space-key sheet selection. Parent acceptance still requires subtask b.
 - **T11.17 Smith and market (sheets 5 and 6):** fixed-price smith, market stock and price list,
   buy and sell-back, gold cap, including the documented quirks. *Accept:* prices and caps come from
   `mog`; buying and selling change gold and inventory exactly as specified.

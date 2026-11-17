@@ -3823,3 +3823,47 @@ transfer's byte-indexed word table is reached through the checked LEA at $C19A.
 The stat price uses the existing checked map-AI decoder. Out-of-range sprite,
 button and armour-table accesses raise instead of substituting assets or reading
 unmodeled memory. No game tables are copied into source.
+
+### 12.27 Runtime town screen data (T11.16a)
+
+For the supported mog code CRC, read town geometry from the two button-building
+routines in hunk0 ($153C..$15FC, Highwood; $15FE..$16BE, Waterdeep).
+These are instruction operands, not on-disk arrays. Both routines clear the
+button list, then rewrite one 24-byte scratch record before registering each
+of its five snapshots. Check every relocated scratch-record LEA and registration
+call. All five loads must name the same record in hunk11; its allocation must
+contain 24 bytes. The clear and register calls must name hunk0 $94BA and $9480.
+Each immediate write is checked for its instruction and destination displacement.
+
+The first snapshot supplies x (+12), y (+14), width (+4), height (+6), id (+16),
+type (+20) and field (+22). The second and third change y/id only. The fourth
+rewrites y, width, height and id. The fifth changes y, height and id, retaining
+the fourth width. Preserve all inherited values in the decoded records. Require
+ids 1..5 in registration order, positive extents contained in the 320x200
+playfield, and the checked RTS at the end. The unused long at +8 is cleared.
+This produces five immutable records per town, including Highwood's market.
+No button geometry or original strings are embedded in Python source.
+
+Pointer starts are the checked absolute word stores at hunk0 $13F4/$13FC for
+Highwood and $12AE/$12B6 for Waterdeep. Their relocated destinations must name
+adjacent words in hunk4; both towns must use the same cells. The pointer cel
+filename is the NUL-terminated string ten bytes after the x cell (the cell's
+surrounding cursor block). Picture names come from the checked LEAs at $2DC2
+and $2DFE. Town names come from the relocated immediates at $2D96 and $2DD2,
+whose store destinations must also match in the two loaders. Require bounded,
+nonempty ASCII strings within hunk4.
+
+Both towns compare the translated key with Space. Highwood then loads the
+sheet number as a checked long immediate at $14C2 before the sheet call at
+$14C8. Waterdeep calls that same sheet entry at $137A without loading D0;
+its decoded Space sheet is the key operand at $1366. Check the intervening
+fade/pointer calls, the relocated sheet entry and the instruction forms, so
+this difference remains an explicit decoded property. Button action meanings
+remain the control-flow rules of ?12.15, rather than strings inferred from the
+painted pictures.
+
+Frozen records in sim/town_types.py form the data boundary for T11.16b.
+assets/town_data.py performs the checked reads without adding an alternate
+screen loop. T11.16a does not replace host menus or implement shop/service
+transactions. The parent task remains open until T11.16b removes the old
+location model, wires these records, and reviews real-disk contact sheets.
