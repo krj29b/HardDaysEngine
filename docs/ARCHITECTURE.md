@@ -2425,6 +2425,68 @@ at moon frame45; its controller closes and uses action $18. Pose previews
 are labelled separately from natural traces and include the complete dragon
 and linked objects.
 
+### 10.31 Computer knight (T11.10i)
+
+Sources: classic Amiga handler in mog hunk40 $0CAA..$112A, hunk41
+step data, and moonstone-ace fight_creatures/fighters and ai_fight_knight rules.
+Later cooperative targeting and difficulty adjustments in the reference port are excluded.
+
+The type-$10 handler clears input and defaults to idle. Its target is the opponent
+when it is the first fighter, otherwise the first fighter. Attacker takes priority
+over hit target. Hurt always uses the knight-versus-knight rule of §10.19, regardless
+of attacker type: block while alive, contact damage without protection, hurt table;
+when already down select the fixed knight down-hard script. On a landed hit, KEEP
+when the target is action $1C and either target type is $0C or own action is $20/$04;
+otherwise use own after-hit script. This differs from the human hit handler.
+
+Normal thinking saves the previous action in a shared word (hunk41 +52), then
+runs approach (§10.20) against the selected target. Movement requested with depth
+not near walks immediately; otherwise recompute absolute x distance when movement
+was requested, and decide. Own action is not cleared on idle or walk.
+
+A down target clears only the high cooldown byte (+106); at signed distance above
+90 walk, else strike $08 unless the shared gloat latch is set, in which case idle.
+Against a living target, with block latch clear, consume one percent draw. When
+its signed byte is at least the signed odds byte and facings differ: opponent
+action $08 within signed x distance120 selects defend $10; action $20 or $04
+within120 selects block $1C. A failed range test leaves distance equal to the
+x-difference sign (1 for opponent left, 0 otherwise), preserving the original bug.
+The redundant second facing comparison has no additional effect.
+
+Then consume a percent draw. A signed byte greater than odds attacks; otherwise
+consume one discarded full draw (the debug taunt), then walk. Attack tests in order:
+signed distance <=90 and last action !=$08 selects $08; <=95 and last !=$20 selects
+$20; <=100 and (no daggers or last !=$04) selects $04; otherwise with daggers select
+$0C, else walk. Every selected action uses own action script table. Odds are indexed
+by the original zero-based day word, not a new difficulty setting. The decoder
+retains bytes following the relocated odds pointer, including adjacent data when
+a late day reads past the nominal table; an index outside the loaded hunk raises.
+Calendar wiring remains T11.12/13; independent duels accept the original day index.
+
+Walking clears the block latch. Use §10.20 step helpers in up/down/right/left order,
+but their table pointers are hunk41 +20/+36/+0. Eight pairs per pointer are read
+from the user's executable: these overlap subsequent tables, the mutable last-action
+word at +52, and text. Substitute the current shared action word at +52 before a
+down step reads it. Up/down overrides are -5/+5 from checked operands. The old
+phase supplies movement; phase advancement and probes follow §10.20. No arena
+clip or obstacle probe is added. The original leaves stale high D0 bits when
+a down opponent is at least256 pixels away and can index far memory: use the
+bounded phase index instead (ADR-011), without emulating arbitrary memory reads.
+
+The decoder checks the type table entry ($10 -> hunk40 $0CAA), helper destinations,
+operand instructions, paired ranges, step pointers and odds pointers. Distances,
+overrides and odds bytes are runtime data. Fight snapshots include day and last
+action. The existing duel loader accepts explicit computer handles, sets their
+kind4/type$10/port4 before palette composition and job creation, and assigns human
+ports2 then1 skipping computers. Both computer fighters are rejected. Both use
+the ordinary knight tables/reach and separate knight/creature frame lists. The
+campaign caller identifies computers from its roster. The existing temporary legacy
+sheet boundary retains all four records on construction/reset, hashes all four,
+and synchronizes only existing map records at settlement. Computer records do not
+write joystick ports. Original map initialization remains T11.12/13; meeting sheets and loot
+remain T11.21. A seeded equipped audit uses ordinary joystick inputs for wins and
+idle input for losses, alongside separately labelled pose previews.
+
 ## 11. Overworld and Turns (`T11.4`)
 
 The overworld is one screen: the map picture with small sprites on it. Knights take turns. The

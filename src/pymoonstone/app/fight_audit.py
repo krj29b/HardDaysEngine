@@ -36,6 +36,7 @@ from pymoonstone.sim.fight_ai.caster import CASTER_TYPE
 from pymoonstone.sim.fight_ai.dragon import DRAGON_TYPE
 from pymoonstone.sim.fight_ai.drake import DRAKE_TYPE, FLYING
 from pymoonstone.sim.fight_ai.guardian import GUARDIAN_TYPE
+from pymoonstone.sim.fight_ai.knight import COMPUTER_KNIGHT_TYPE
 from pymoonstone.sim.fight_ai.snatcher import SNATCHER_TYPE
 from pymoonstone.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
 from pymoonstone.sim.fight_routines import DAGGER_TYPE
@@ -87,6 +88,7 @@ class FightAudit:
             CASTER_TYPE: _caster_input,
             DRAKE_TYPE: _drake_input,
             GUARDIAN_TYPE: _guardian_input,
+            COMPUTER_KNIGHT_TYPE: _guardian_input,
             DRAGON_TYPE: _dragon_input,
         }.get(self.scene.fight.actor(self.opponent).type, _standard_input)
         return controller(self)
@@ -615,3 +617,46 @@ def fight_host_input(session: GameSession) -> InputFrame:
     from pymoonstone.sim.types import KnightId
 
     return InputFrame(players={KnightId.RED: inp})
+
+
+def build_computer_knight_audit(bundle: GameAssetBundle) -> FightAudit:
+    """Human against black knight, with explicit audit equipment (§10.31)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    knights = [
+        Actor(kind=i, hp=20, hp_max=20, strength=3, sword=0x16, daggers=10, inventory=i + 1)
+        for i in range(4)
+    ]
+    knights[0].hp = knights[0].hp_max = 200
+    knights[0].sword = 0x19
+    runtime = loader.duel(
+        "fo1.t",
+        knights,
+        Actor(),
+        {i: Inventory() for i in range(1, 5)},
+        Rng(0x2468ACE1),
+        1,
+        2,
+        computers=frozenset({2}),
+    )
+    # Audit input controller uses port0; campaign duels retain their original port order.
+    knights[0].input_port = 1
+    return FightAudit(runtime.scene, loader.knight_rules, 2)
+
+
+def computer_knight_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightScene]]:
+    """Knight script previews, distinct from natural AI outcomes (§10.31)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    init = FightLoader(bundle).defs.knight
+    for name, script in (
+        ("idle", init.idle_script),
+        ("walk", init.walk_scripts[1]),
+        ("attack", init.action_scripts[2]),
+        ("guard", init.action_scripts[7]),
+        ("hurt", init.hurt_scripts[2]),
+        ("death", init.hurt_scripts[2]),
+    ):
+        samples = {"attack": (0, 3, 7), "hurt": (0, 3), "death": (0, 3, 12)}.get(name, (0,))
+        yield from _pose_frames(build_computer_knight_audit(bundle), name, script, samples)

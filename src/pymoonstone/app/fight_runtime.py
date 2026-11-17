@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from pymoonstone.app.fight_scene import FightScene
 from pymoonstone.assets.caster_rules import parse_caster_rules
+from pymoonstone.assets.computer_knight_rules import parse_computer_knight_rules
 from pymoonstone.assets.creature_rules import parse_brawler_rules
 from pymoonstone.assets.dragon_rules import parse_dragon_rules
 from pymoonstone.assets.drake_rules import parse_drake_rules
@@ -44,6 +45,7 @@ from pymoonstone.sim.fight_ai.dragon import DRAGON_TYPE, install_dragon
 from pymoonstone.sim.fight_ai.drake import DRAKE_TYPE, install_drake
 from pymoonstone.sim.fight_ai.flyer import FLYER_TYPE, install_flyer
 from pymoonstone.sim.fight_ai.guardian import GUARDIAN_TYPE, install_guardian
+from pymoonstone.sim.fight_ai.knight import COMPUTER_KNIGHT_TYPE, install_computer_knight
 from pymoonstone.sim.fight_ai.snatcher import SNATCHER_TYPE, install_snatcher
 from pymoonstone.sim.fight_ai.stalker import STALKER_TYPE, install_stalker
 from pymoonstone.sim.fight_setup import (
@@ -224,6 +226,8 @@ class FightRuntime:
             "tables": {key: values[:] for key, values in f.tables.items()},
             "inventories": {k: v.counts[:] for k, v in f.inventories.items()},
             "ports": f.ports[:],
+            "ai_day": f.ai_day,
+            "ai_last_action": f.ai_last_action,
             "rng": f.rng.state,
             "approach": asdict(f.approach),
             "caster": asdict(f.caster),
@@ -290,6 +294,7 @@ class FightLoader:
             self.stalker_rules.spark,
             self.defs.frame_set_lists,
         )
+        self.computer_knight_rules = parse_computer_knight_rules(executable)
         self.guardian_rules = parse_guardian_rules(executable)
         self.drake = DrakeCells()
         self.shake_rules = parse_shake_rules(executable)
@@ -345,6 +350,7 @@ class FightLoader:
         f.first, f.fight_active = first, True
         f.second = second
         install_knight_control(f, self.knight_rules)
+        install_computer_knight(f, self.computer_knight_rules, self.knight_rules)
         install_brawler(f, self.brawler_rules, self.knight_rules)
         install_caster(f, self.caster_rules, self.knight_rules)
         install_snatcher(f, self.snatcher_rules, self.knight_rules)
@@ -359,7 +365,7 @@ class FightLoader:
         f.routines[SCREEN_SHAKE] = partial(screen_shake, self.shake_rules)
         keys = f.register_tables(script_tables(self.defs.knight))
         for actor in knights:
-            keys.assign(actor)
+            _initialise(actor, self.defs.knight, keys)
         picture = loaded[1]
         words = [pack_rgb12(r >> 4, g >> 4, b >> 4) for r, g, b in picture.palette]
         palette = assemble_fight_palette(
@@ -555,6 +561,31 @@ class FightLoader:
                 obj.actor_type,
             )
 
+    def _duel_knights(
+        self,
+        fight: Fight,
+        first: int,
+        second: int,
+        computers: frozenset[int],
+        cursor: SpawnLanes,
+        edge: int,
+    ) -> None:
+        port = 2
+        for handle in (first, second):
+            computer = handle in computers
+            self._enter_knight(
+                fight, handle, cursor, edge, 4 if computer else port, second=handle == second
+            )
+            if computer:
+                actor = fight.actor(handle)
+                actor.type = COMPUTER_KNIGHT_TYPE
+                job = fight.find_job(handle)
+                if job is None:
+                    raise FightUnavailableError("computer knight job missing after setup")
+                job.type = COMPUTER_KNIGHT_TYPE
+            else:
+                port = 1
+
     def duel(
         self,
         background: str,
@@ -566,7 +597,15 @@ class FightLoader:
         second: int,
         *,
         lanes: SpawnLanes | None = None,
+        computers: frozenset[int] = frozenset(),
+        day: int = 0,
     ) -> FightRuntime:
+        if first == second or not {first, second} <= {1, 2, 3, 4}:
+            raise FightUnavailableError("duel requires two different knight handles")
+        if not computers <= {first, second} or computers == {first, second}:
+            raise FightUnavailableError("duel requires at least one human knight")
+        for handle in computers:
+            knights[handle - 1].kind = 4
         scene = self._scene(
             self.defs.duel_cels,
             background,
@@ -581,8 +620,8 @@ class FightLoader:
         cursor = SpawnLanes() if lanes is None else lanes
         edge = max((w.y for w in scene.fight.walls), default=self.knight_rules.clip.top)
         edge = max(edge, self.knight_rules.clip.top)
-        self._enter_knight(scene.fight, first, cursor, edge, 2)
-        self._enter_knight(scene.fight, second, cursor, edge, 1, second=True)
+        scene.fight.ai_day = u16(day)
+        self._duel_knights(scene.fight, first, second, computers, cursor, edge)
         pause_all(scene.fight)
         return self._runtime(scene, first, cursor, opponent=second)
 

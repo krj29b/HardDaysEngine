@@ -373,3 +373,25 @@ callbacks remain deferred with their state/draws to T11.23. Real-disk outcome fi
 explicit endgame equipment and ordinary inputs; they verify hurt-script death/win, idle loss,
 independent setup operands, exact frames and deterministic replay. Map/calendar and hoard
 settlement remain T11.12/13 and T11.21 respectively. No game data is committed.
+
+## ADR-024: Computer knights use the existing duel jobs and knight damage rules
+**Status:** ACCEPTED (2026-11-17, T11.10i; follows ADR-011 / ADR-013 / ADR-015)
+**Context:** The type-$10 knight chooses guards and attacks from day-indexed odds,
+shares a last-action word with overlapping step data, and targets either duel position.
+**Decision:** assets/computer_knight_rules.py checks handler identity, helper calls,
+relocations and instruction operands before decoding the original ranges, odds and
+step words. sim/fight_ai/knight.py uses the existing approach/move helpers, jobs and
+knight-versus-knight hurt rule; its hit reply retains its distinct stop conditions.
+The loader accepts explicit computer handles and a zero-based day index, selects
+the black palette before scene creation, and assigns human ports while skipping
+computers. Snapshots include the day and shared action word. The temporary legacy
+sheet boundary retains all four knights on creation/reset until the map/sheet tasks
+replace it; only humans supply port input and only existing map records synchronize.
+**Consequences:** Draw order, the discarded taunt draw, failed-guard distance alias,
+high-byte cooldown and overlapping data reads remain original (§10.31). As allowed
+by ADR-011, step lookup uses a bounded phase rather than stale high register bits
+that address arbitrary memory; invalid day indices raise. Calendar-to-day wiring
+and original campaign initialization remain T11.12/13, map AI T11.14 and meeting
+sheets/loot T11.21. Seeded ordinary-input wins and idle losses exercise hurt-script
+death and deterministic full-state replay, including campaign input and settlement.
+Pose previews are labelled separately from natural traces; no game data is committed.

@@ -275,6 +275,8 @@ class Fight:
     hop_table: int = 0
     hop_counter: int = 0
     rng: Rng = field(default_factory=lambda: Rng(1))
+    ai_day: int = 0
+    ai_last_action: int = 0
     gloated: bool = False
     approach: ApproachCells = field(default_factory=ApproachCells)
     caster: CasterCells = field(default_factory=CasterCells)

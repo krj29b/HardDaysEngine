@@ -213,7 +213,7 @@ class GameSession:
         graph = self.asset_bundle.build_overworld_graph() if self.asset_bundle is not None else None
         self.overworld: OverworldState = create_campaign(roster, graph=graph, seed=seed)
         self.knight_combat: dict[KnightId, KnightState] = {
-            kid: KnightState(knight_id=kid) for kid in roster
+            kid: KnightState(knight_id=kid) for kid in KnightId
         }
         self.actors = [Actor(kind=_KNIGHT_KINDS[kid]) for kid in KnightId]
         self.dragon_actor = Actor()
@@ -245,7 +245,7 @@ class GameSession:
         self.selected_move_index = 0
         graph = self.asset_bundle.build_overworld_graph() if self.asset_bundle is not None else None
         self.overworld = create_campaign(roster, graph=graph, seed=self.seed)
-        self.knight_combat = {kid: KnightState(knight_id=kid) for kid in roster}
+        self.knight_combat = {kid: KnightState(knight_id=kid) for kid in KnightId}
         self.active_encounter = None
         self.location_menu = None
         self.location_knight_id = roster[0]
@@ -705,11 +705,18 @@ class GameSession:
             return ActiveEncounter(trigger, runtime, (knight_id,))
         if trigger.kind == TriggerKind.PVP_DUEL:
             opponent_id = trigger.opponent_knight_id
-            if opponent_id is None or opponent_id not in self.players:
-                raise FightUnavailableError("computer knight fights are not available yet")
+            if opponent_id is None:
+                raise FightUnavailableError("duel opponent is missing")
             self._prepare_fight_knights(knight_id, opponent_id)
             runtime = loader.duel(
-                background, *args, first, int(opponent_id) + 1, lanes=self.spawn_lanes
+                background,
+                *args,
+                first,
+                int(opponent_id) + 1,
+                lanes=self.spawn_lanes,
+                computers=frozenset(
+                    int(kid) + 1 for kid in (knight_id, opponent_id) if kid not in self.players
+                ),
             )
             return ActiveEncounter(trigger, runtime, (knight_id, opponent_id))
         arena = loader.arena_for(trigger.creature_type)
@@ -774,6 +781,8 @@ class GameSession:
             return
         ports = [0, 0]
         for kid in active.knight_ids:
+            if kid not in self.players:
+                continue
             actor = self.actors[int(kid)]
             port = 0 if actor.input_port == 1 else 1
             ports[port] = self._player_input(frame, kid).to_joystick_word()
@@ -791,8 +800,9 @@ class GameSession:
         for kid in active.knight_ids:
             actor, legacy = self.actors[int(kid)], self.knight_combat[kid]
             legacy.hp, legacy.daggers, legacy.lives = s16(actor.hp), actor.daggers, s8(actor.lives)
-            ow = self.overworld.knights[kid]
-            ow.lives, ow.alive = legacy.lives, legacy.lives > 0
+            ow = self.overworld.knights.get(kid)
+            if ow is not None:
+                ow.lives, ow.alive = legacy.lives, legacy.lives > 0
         if active.trigger.kind == TriggerKind.LAIR_BOSS:
             self.lair_counts[active.trigger.lair_index] = fight.total
             if won:
@@ -820,7 +830,7 @@ class GameSession:
 
     def state_hash(self) -> str:
         """Hash the campaign summary and mutable persistent fight state deterministically."""
-        knights_payload = [asdict(self.knight_combat[kid]) for kid in self.overworld.turn_order]
+        knights_payload = [asdict(self.knight_combat[kid]) for kid in KnightId]
         encounter_payload = (
             self.active_encounter.runtime.snapshot() if self.active_encounter is not None else None
         )

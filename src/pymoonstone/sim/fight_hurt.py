@@ -159,7 +159,8 @@ def _contact(blow: Blow) -> HandlerResult:
     return _next(me, scripts.contact_down_hard if hard else scripts.contact_down)
 
 
-def _knight(blow: Blow) -> HandlerResult:
+def knight_duel_hurt(blow: Blow) -> HandlerResult:
+    """Knight-versus-knight block, damage and down reaction (§10.19 / §10.31)."""
     if s16(blow.me.hp) <= 0:
         return _next(blow.me, blow.rules.scripts.axe_down_hard)
     if block_check(blow):
@@ -264,7 +265,7 @@ def _dragon_object(blow: Blow) -> HandlerResult:
 
 _HURT: dict[HurtRule, Callable[[Blow], HandlerResult]] = {
     HurtRule.CONTACT: _contact,
-    HurtRule.KNIGHT: _knight,
+    HurtRule.KNIGHT: knight_duel_hurt,
     HurtRule.AXE: _axe,
     HurtRule.SPEAR: _spear,
     HurtRule.RATMEN: _ratmen,
