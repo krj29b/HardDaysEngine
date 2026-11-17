@@ -55,7 +55,7 @@ def _session(adf_dir: Path, arena_name: str, *, hp: int = 200) -> GameSession:
 def test_campaign_host_wins_each_trogg_encounter_and_returns_record_changes(
     adf_dir: Path, name: str
 ) -> None:
-    session = _session(adf_dir, name)
+    session = _session(adf_dir, name, hp=50)
     active = session.active_encounter
     assert active is not None
     fight = active.runtime.fight

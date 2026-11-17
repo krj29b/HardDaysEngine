@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from pymoonstone.sim.actor import Actor
     from pymoonstone.sim.inventory import Inventory
     from pymoonstone.sim.rng import Rng
+    from pymoonstone.sim.fight_setup import SpawnLanes
 
 
 def _trigger() -> EncounterTrigger:
@@ -52,6 +53,9 @@ def _session(*, audio: AudioEngine | None = None) -> GameSession:
         inventories: Mapping[int, Inventory],
         rng: Rng,
         first: int,
+        *,
+        lair_count: int | None = None,
+        lanes: SpawnLanes | None = None,
     ) -> FightRuntime:
         pixels = np.array([[2, 3]], dtype=np.uint8)
         cel = DecodedCel(
@@ -117,7 +121,7 @@ def test_host_returns_engine_health_and_lives_after_the_end_delay(lost: bool) ->
     actor = session.actors[0]
     actor.hp = 0 if lost else 35
     actor.daggers = 2
-    for _ in range(23):
+    for _ in range(17):
         session.step_tick(InputFrame())
     assert session.scene == GameScene.COMBAT
     session.step_tick(InputFrame())

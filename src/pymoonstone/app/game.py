@@ -58,6 +58,7 @@ from pymoonstone.render.scene import (
     render_overworld_hud,
 )
 from pymoonstone.sim.actor import Actor
+from pymoonstone.sim.fight_setup import SpawnLanes, settle_defeats
 from pymoonstone.sim.inventory import Inventory
 from pymoonstone.sim.location_state import KnightState
 from pymoonstone.sim.locations import (
@@ -219,6 +220,10 @@ class GameSession:
         self.inventories = {handle: Inventory() for handle in range(1, 5)}
         self.fight_rng = Rng(seed)
         self.fight_loader: FightLoader | None = None
+        self.spawn_lanes = SpawnLanes()
+        self.lair_counts: dict[int, int] = {}
+        self.bad_luck: int = 0
+        self.last_defeat_mask: int = 0
         self.active_encounter: ActiveEncounter | None = None
         self.location_menu: LocationMenuState | None = None
         self.location_knight_id: KnightId = roster[0]
@@ -249,6 +254,9 @@ class GameSession:
         self.dragon_actor = Actor()
         self.inventories = {handle: Inventory() for handle in range(1, 5)}
         self.fight_rng = Rng(self.seed)
+        self.spawn_lanes = SpawnLanes()
+        self.lair_counts.clear()
+        self.bad_luck = self.last_defeat_mask = 0
 
     def _player_input(self, frame: InputFrame, kid: KnightId) -> PlayerInput:
         direct = frame.for_player(kid)
@@ -684,7 +692,10 @@ class GameSession:
         args = (self.actors, self.dragon_actor, self.inventories, self.fight_rng)
         if self.practice_mode:
             second_id = self.players[1]
-            runtime = loader.duel(background, *args, first, int(second_id) + 1)
+            self._prepare_fight_knights(knight_id, second_id)
+            runtime = loader.duel(
+                background, *args, first, int(second_id) + 1, lanes=self.spawn_lanes
+            )
             return ActiveEncounter(trigger, runtime, (knight_id, second_id))
         if trigger.kind == TriggerKind.DRAGON_INTERCEPT:
             raise FightUnavailableError("dragon fights are not available yet")
@@ -692,11 +703,31 @@ class GameSession:
             opponent_id = trigger.opponent_knight_id
             if opponent_id is None or opponent_id not in self.players:
                 raise FightUnavailableError("computer knight fights are not available yet")
-            runtime = loader.duel(background, *args, first, int(opponent_id) + 1)
+            self._prepare_fight_knights(knight_id, opponent_id)
+            runtime = loader.duel(
+                background, *args, first, int(opponent_id) + 1, lanes=self.spawn_lanes
+            )
             return ActiveEncounter(trigger, runtime, (knight_id, opponent_id))
         arena = loader.arena_for(trigger.creature_type)
-        runtime = loader.creature(arena, background, *args, first)
+        lair_count = self._fight_lair_count(trigger, loader)
+        self._prepare_fight_knights(knight_id)
+        runtime = loader.creature(
+            arena, background, *args, first, lair_count=lair_count, lanes=self.spawn_lanes
+        )
         return ActiveEncounter(trigger, runtime, (knight_id,))
+
+    def _fight_lair_count(self, trigger: EncounterTrigger, loader: FightLoader) -> int | None:
+        if trigger.kind != TriggerKind.LAIR_BOSS:
+            return None
+        if not 0 <= trigger.lair_index < len(loader.defs.lairs):
+            raise FightUnavailableError("invalid lair index")
+        return self.lair_counts.setdefault(
+            trigger.lair_index, loader.defs.lairs[trigger.lair_index].creatures_left
+        )
+
+    def _prepare_fight_knights(self, *kids: KnightId) -> None:
+        for kid in kids:
+            self._prepare_fight_knight(kid)
 
     def _prepare_fight_knight(self, kid: KnightId) -> None:
         """Translate only the legacy sheet values at fight entry (§10.22)."""
@@ -726,8 +757,6 @@ class GameSession:
             self.last_status = f"FIGHT UNAVAILABLE: {exc}"
             self.practice_mode = False
             return
-        for kid in active.knight_ids:
-            self._prepare_fight_knight(kid)
         active.runtime.fight.engine.gore_off = not self.gore_enabled
         self.active_encounter = active
         self.scene = GameScene.COMBAT
@@ -751,16 +780,22 @@ class GameSession:
             self._finish_combat(active)
 
     def _finish_combat(self, active: ActiveEncounter) -> None:
-        """Return engine record changes to legacy locations; loot sheets remain T11.11/15."""
-        won = s16(active.runtime.fight.actor(active.runtime.first).hp) > 0
+        """Settle original defeat/lair records; original caller sheets remain T11.15 (§10.24)."""
+        fight = active.runtime.fight
+        self.last_defeat_mask = settle_defeats(fight, active.runtime.opponent)
+        won = not self.last_defeat_mask & 1
         for kid in active.knight_ids:
             actor, legacy = self.actors[int(kid)], self.knight_combat[kid]
-            if s16(actor.hp) <= 0:
-                actor.hp = actor.hp_max
-                actor.lives = u8(actor.lives - 1)
             legacy.hp, legacy.daggers, legacy.lives = s16(actor.hp), actor.daggers, s8(actor.lives)
             ow = self.overworld.knights[kid]
             ow.lives, ow.alive = legacy.lives, legacy.lives > 0
+        if active.trigger.kind == TriggerKind.LAIR_BOSS:
+            self.lair_counts[active.trigger.lair_index] = fight.total
+            if won:
+                actor = fight.actor(active.runtime.first)
+                actor.progress = u16(actor.progress + 1)
+        self.bad_luck = 0
+        active.runtime.release()
         if self.practice_mode:
             self._finish_practice_combat()
             return
@@ -805,6 +840,11 @@ class GameSession:
             ],
             "knights": knights_payload,
             "encounter": encounter_payload,
+            "fight_lanes": self.spawn_lanes.counter,
+            "lair_counts": self.lair_counts,
+            "bad_luck": self.bad_luck,
+            "defeats": self.last_defeat_mask,
+            "fight_progress": [a.progress for a in self.actors],
         }
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

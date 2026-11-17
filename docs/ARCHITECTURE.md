@@ -1945,6 +1945,61 @@ Their checked entry identities are registered now; their draws and playback rema
 with the other sound pickers to T11.23. Thus the handler itself makes no PRNG draws, but a
 fully wired original script's sound selection will do so when that task is implemented.
 
+### 10.24 Host setup, warnings and settlement (`T11.11`)
+
+Checked against the original executable's setup at $3EDA/$4A30, spawn helpers at
+$4A6E..$4B48, scaling at $40A4..$41D6, warning routines at $089E..$0A28 and loop at
+$073C..$089C. Reference extensions for cooperative parties and mod scaling are excluded.
+This section clarifies §10.2/5/6/7/14 and supersedes the anchor placement sentence of §10.23.
+
+**Order and lanes.** Copy the current caller's knight stats before arena setup. The knight
+enters with the checked relocated script at $4A64, not its idle script. It consumes the
+first lane; creature jobs consume the next lanes, including replacements. The lane counter
+is session-owned (the original common setup does not reset it), wraps through 1,2,3 and is
+included in replay state. Each lane calculation wraps word operations. Ratmen's fixed anchor
+uses lane 3's computed depth, and height depth minus the checked offset; it does not advance
+the counter. The first-wave list has enough decoded entries for the scaled maximum. A
+single-entry arena calls its alternating routine once. Before the first frame toggle only
+pool/dragon job pauses; the knight's enter script later calls pause-all to release them.
+Duel fighters both use enter scripts and lanes; the second starts at decoded x 30, facing 1.
+Fresh fights clear pool/job/trajectory state. Loading-screen transitions belong to scene
+presentation; this task does not introduce a loading delay into deterministic simulation.
+
+**Scaling clarification.** Strength is a signed byte, maximum HP a signed word. Apply §10.6
+threshold bonuses, optional lair count override and arena concurrency limits in that order.
+With positive total, force the knight's action to 8 (a preserved side effect) and compute
+contact damage. Add the logical word `hp_max >> 2`, wrapping; logically shift the sum right
+one; subtract decoded base 6, wrapping; clamp a negative result to zero and values at least
+16 to 15; logically shift right one to obtain column 0..7. Apply the arena's decoded signed
+cut only if the true signed difference is positive, then store the wrapped word. No PRNG
+draws are involved. Original death-accounting refill behavior in §10.12 remains unchanged.
+
+**Timing and warnings.** Sample ports each VBL and advance one frame each decoded budget
+(6 VBLs). After that frame's script/contact/draw work, register warnings, then test the first
+fighter's signed HP: negative while active starts the decoded death delay (50); zero alone
+does not trigger this end test. If inactive after the frame, decrement the timer immediately,
+including the frame that ended the fight; zero wraps to 255. Script-driven end uses its
+separately decoded delay (35). Retain the final frame until the caller returns.
+
+Warnings start once for HP <= decoded threshold (10). They persist even if health recovers.
+The first fighter owns entries 6..8; a duel's second owns 9..11. Targets are checked immediate
+colour runs by kind (0,1,2,3,other), independent of arena/region colours. Each VBL after
+registration steps every RGB nibble by one toward its target (decoded period 1); arrival
+swaps target and saved starting colour. Only these six entries can change. Warning jobs
+are palette state, separate from the ten creature/script jobs, and appear in snapshots.
+The host's pause command suspends fight and warning advancement; no game-time catch-up
+occurs on resume. Frame palette updates remain independent of render-call count.
+
+**Caller boundary.** On completion settle both participating knight records once: signed
+HP <= 0 restores HP to maximum and decrements the byte life count. Preserve a defeat mask
+(first bit 0, second bit 1) before restoring health. A lair writes total back even on loss;
+a first-fighter lair win increments its progress word. Spend the turn and clear bad luck,
+then free script jobs and warning ramps. Practice returns to title for either loser.
+The existing overworld caller receives the outcome until T11.15 supplies the original loot,
+meeting and temple sheets; this task does not substitute invented loot or inventory rewards.
+Lair remaining counts and the lane cursor persist in the session and its hash, ready for
+the original overworld state of T11.12. Unsupported creature handlers remain unavailable.
+
 ## 11. Overworld and Turns (`T11.4`)
 
 The overworld is one screen: the map picture with small sprites on it. Knights take turns. The

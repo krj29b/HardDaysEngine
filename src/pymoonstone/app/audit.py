@@ -187,7 +187,7 @@ def _host_fight_session(rig: AuditRig, name: str, lair_index: int = -1) -> GameS
     session.fight_loader = FightLoader(session.asset_bundle)
     arena = next(a for a in session.fight_loader.defs.arenas if a.name == name)
     knight = session.knight_combat[_PRIMARY]
-    knight.hp = knight.max_hp = 200
+    knight.hp = knight.max_hp = 50
     knight.strength, knight.sword_tier, knight.daggers = 3, 4, 99
     session._start_combat(
         EncounterTrigger(

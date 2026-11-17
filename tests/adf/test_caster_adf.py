@@ -18,6 +18,7 @@ from pymoonstone.assets.fight_palette import MogVersionError
 from pymoonstone.assets.hunk import parse_hunk_executable
 from pymoonstone.sim.fight import FIGHTER_DIED, Fight, HandlerResult, Restart, fighter_died
 from pymoonstone.sim.fight_ai.caster import CASTER_TYPE
+from pymoonstone.sim.fight_setup import lane_depth
 from pymoonstone.sim.m68k import s16
 
 if TYPE_CHECKING:
@@ -105,10 +106,11 @@ def test_anchor_and_moon_variants_use_decoded_original_values(bundle: GameAssetB
         fight = audit.scene.fight
         me, anchor = fight.actor(audit.opponent), fight.actor(fight.second)
         edge = max(loader.knight_rules.clip.top, *(w.y for w in fight.walls))
+        depth = lane_depth(3, edge, loader.setup_rules)
         assert (anchor.x, s16(anchor.height), anchor.y) == (
             loader.caster_rules.object_x,
-            edge - loader.caster_rules.object_height,
-            edge,
+            depth - loader.caster_rules.object_height,
+            depth,
         )
         assert me.hp == variant.hp
         assert tuple(fight.tables[me.damage_table]) == variant.damage_table

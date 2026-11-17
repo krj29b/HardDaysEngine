@@ -98,7 +98,7 @@ code that passes its tests but does not reproduce the original; T11.24 corrects 
 | T11.10g | Guardian (`$08`) | T11.10a | TODO | Includes the three guardian routines. |
 | T11.10h | Dragon and its object (`$14`, `$2C`) | T11.10a | TODO | Reuses the approach helpers of T11.10a (§10.20). |
 | T11.10i | Computer knight (`$10`) | T11.10a | TODO | |
-| T11.11 | Fight loop, outcomes, HUD | T11.8b, T11.9, T11.10a | TODO | |
+| T11.11 | Fight loop, outcomes, HUD | T11.8b, T11.9, T11.10a | IN PROGRESS (Codex/2026-11-17) | Original entry, lane/wave scaling, pacing/end timers, defeat settlement and low-health palette feedback. |
 | T11.12 | Map movement & proximity | T11.4 | TODO | |
 | T11.13 | Turns, clock, dragon | T11.12 | TODO | |
 | T11.14 | Computer-controlled knights on the map | T11.13 | TODO | |

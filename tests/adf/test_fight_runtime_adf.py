@@ -32,7 +32,7 @@ def loader(adf_dir: Path) -> FightLoader:
 
 def _records() -> list[Actor]:
     return [
-        Actor(hp=200, hp_max=200, strength=3, sword=0x19, daggers=99, inventory=i + 1)
+        Actor(hp=50, hp_max=50, strength=3, sword=0x19, daggers=99, inventory=i + 1)
         for i in range(4)
     ]
 

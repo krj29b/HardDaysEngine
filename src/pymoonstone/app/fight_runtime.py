@@ -24,15 +24,23 @@ from pymoonstone.assets.fight_program import (
     script_image,
     script_tables,
 )
+from pymoonstone.assets.fight_setup import parse_fight_setup
 from pymoonstone.assets.fighter_rules import parse_knight_rules
 from pymoonstone.assets.hunk import parse_hunk_executable
 from pymoonstone.assets.mog_code import MogCode
 from pymoonstone.render.scene import palette_fx_to_rgb
-from pymoonstone.sim.fight import Fight, TableKeys, Wall
+from pymoonstone.sim.fight import Fight, TableKeys, Wall, pause_all
 from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
 from pymoonstone.sim.fight_ai.caster import CASTER_TYPE, install_caster
+from pymoonstone.sim.fight_setup import (
+    FightSetupRules,
+    FightWarnings,
+    SpawnLanes,
+    lane_depth,
+    scale_wave,
+)
 from pymoonstone.sim.fighters import KNIGHT_TYPE, install_knight_control
-from pymoonstone.sim.m68k import u8, u16
+from pymoonstone.sim.m68k import s16, u8, u16
 from pymoonstone.sim.palette_fx import pack_rgb12
 
 if TYPE_CHECKING:
@@ -77,13 +85,16 @@ class CreatureWaves:
 
     arena: ArenaDef
     keys: TableKeys
+    rules: FightSetupRules
+    edge: int
+    lanes: SpawnLanes
     toggle: int = 0
 
     def spawn(self, fight: Fight, entry: SpawnEntry) -> None:
         handle = fight.alloc_record()
         actor = fight.actor(handle)
         _initialise(actor, self.arena.creature, self.keys)
-        position = (entry.x, entry.height, entry.y)
+        position = (entry.x, entry.height, self.lanes.next(self.edge, self.rules))
         actor.x, actor.height, actor.y = (u16(v) for v in position)
         actor.facing, actor.frame_list = entry.facing, CREATURE_LIST
         actor.hit_target = actor.attacker = 0
@@ -108,6 +119,9 @@ class FightRuntime:
     waves: CreatureWaves | None = None
     phase: int = 0
     finished: bool = False
+    rules: FightSetupRules | None = None
+    warnings: FightWarnings | None = None
+    lanes: SpawnLanes | None = None
 
     @property
     def fight(self) -> Fight:
@@ -120,20 +134,40 @@ class FightRuntime:
         if len(ports) != 2:
             raise ValueError("a fight has exactly two joystick ports")
         self.fight.ports[:] = ports
-        self.phase = (self.phase + 1) % FIGHT_VBLS
+        if self.rules is not None and self.warnings is not None:
+            self.warnings.step(self.rules)
+            self.scene.palette = palette_fx_to_rgb(self.warnings.colors)
+        budget = FIGHT_VBLS if self.rules is None else self.rules.frame_vbls
+        self.phase = (self.phase + 1) % budget
         if self.phase:
             return None
-        ending = not self.fight.fight_active
         output = self.scene.advance(vbl)
-        if ending:
+        self._after_frame()
+        if not self.fight.fight_active:
             self.fight.end_timer = u8(self.fight.end_timer - 1)
             self.finished = self.fight.end_timer == 0
         return output
 
+    def _after_frame(self) -> None:
+        if self.rules is None:
+            return
+        if self.warnings is not None:
+            self.warnings.register(self.fight, self.opponent, self.rules)
+        if self.fight.fight_active and s16(self.fight.actor(self.first).hp) < 0:
+            self.fight.end_timer = self.rules.death_delay
+            self.fight.fight_active = False
+
+    def release(self) -> None:
+        """Free script and warning jobs after the caller has settled the final records (§10.24)."""
+        for job in self.fight.engine.jobs:
+            job.active = job.running = False
+        if self.warnings is not None:
+            self.warnings.ramps.clear()
+
     def snapshot(self) -> dict[str, object]:
         """Serializable mutable fight state, including scripts, work blocks and spawn cursor."""
         f, e = self.fight, self.fight.engine
-        return {
+        payload: dict[str, object] = {
             "first": self.first,
             "opponent": self.opponent,
             "phase": self.phase,
@@ -173,6 +207,14 @@ class FightRuntime:
                 f.hop_counter,
                 f.gloated,
             ],
+        }
+        payload.update(self._clock_snapshot())
+        return payload
+
+    def _clock_snapshot(self) -> dict[str, object]:
+        return {
+            "warnings": None if self.warnings is None else asdict(self.warnings),
+            "lane": None if self.lanes is None else self.lanes.counter,
             "spawn_toggle": None if self.waves is None else self.waves.toggle,
         }
 
@@ -188,6 +230,7 @@ class FightLoader:
         self.knight_rules = parse_knight_rules(executable)
         self.brawler_rules = parse_brawler_rules(executable)
         self.caster_rules = parse_caster_rules(executable)
+        self.setup_rules = parse_fight_setup(executable)
 
     def arena_for(self, handler_offset: int) -> ArenaDef:
         """Resolve the lair's original arena-table byte offset without guessing a type."""
@@ -266,6 +309,9 @@ class FightLoader:
         rng: Rng,
         first: int,
         moon_frame: int = 0,
+        *,
+        lair_count: int | None = None,
+        lanes: SpawnLanes | None = None,
     ) -> FightRuntime:
         if arena.creature.actor_type not in _SUPPORTED_TYPES:
             raise FightUnavailableError(f"{arena.name} fights are not available yet")
@@ -279,28 +325,96 @@ class FightLoader:
         for poke in arena.knight_pokes:
             key = knight.action_scripts if poke.table == "action" else knight.hurt_scripts
             f.tables[key][poke.offset // 4] = poke.script
-        _start_knight(f, first, (250, 0, 100), 3, 1)
+        cursor = SpawnLanes() if lanes is None else lanes
+        edge = (
+            max(self.knight_rules.clip.top, *(w.y for w in f.walls))
+            if f.walls
+            else self.knight_rules.clip.top
+        )
+        self._enter_knight(f, first, cursor, edge, 1)
         if arena.creature.actor_type == CASTER_TYPE:
             self._caster_object(f, arena)
-        waves = CreatureWaves(arena, f.register_tables(script_tables(arena.creature)))
+        waves = CreatureWaves(
+            arena, f.register_tables(script_tables(arena.creature)), self.setup_rules, edge, cursor
+        )
         f.max_alive, f.total = arena.max_alive, arena.total
+        scale_wave(
+            f,
+            self.knight_rules,
+            self.setup_rules,
+            arena.cut_row,
+            lair_count=lair_count,
+            single=arena.one_at_a_time,
+            cap=arena.alive_cap,
+        )
         f.next_creature = waves.next
-        for entry in arena.first_wave[: f.max_alive]:
-            waves.spawn(f, entry)
-        return FightRuntime(scene, first, waves=waves)
+        if arena.one_at_a_time:
+            waves.next(f)
+        else:
+            for entry in arena.first_wave[: f.max_alive]:
+                waves.spawn(f, entry)
+        pause_all(f)
+        return self._runtime(scene, first, cursor, waves=waves)
+
+    def _runtime(
+        self,
+        scene: FightScene,
+        first: int,
+        lanes: SpawnLanes,
+        *,
+        opponent: int = 0,
+        waves: CreatureWaves | None = None,
+    ) -> FightRuntime:
+        colors = [pack_rgb12(r >> 4, g >> 4, b >> 4) for r, g, b in scene.palette]
+        return FightRuntime(
+            scene,
+            first,
+            opponent,
+            waves,
+            rules=self.setup_rules,
+            warnings=FightWarnings(colors),
+            lanes=lanes,
+        )
+
+    def _enter_knight(
+        self,
+        fight: Fight,
+        handle: int,
+        lanes: SpawnLanes,
+        edge: int,
+        port: int,
+        *,
+        second: bool = False,
+    ) -> None:
+        rules = self.setup_rules
+        pos = (
+            rules.opponent_x if second else rules.knight_x,
+            rules.knight_height,
+            lanes.next(edge, rules),
+        )
+        _start_knight(
+            fight,
+            handle,
+            pos,
+            rules.opponent_facing if second else rules.knight_facing,
+            port,
+            CREATURE_LIST if second else KNIGHT_LIST,
+            rules.enter_script,
+        )
 
     def _caster_object(self, fight: Fight, arena: ArenaDef) -> None:
         """Create Ratmen's flight anchor before the wave records (§10.23)."""
         rules = self.caster_rules
         edge = max((wall.y for wall in fight.walls), default=self.knight_rules.clip.top)
         edge = max(edge, self.knight_rules.clip.top)
+        depth = lane_depth(3, edge, self.setup_rules)
         for obj in arena.objects:
             if obj.actor_type is None or obj.frame_set is None:
                 raise FightUnavailableError("Ratmen flight anchor lacks type or frame set")
             fight.second = fight.spawn_actor(
                 obj.idle_script,
                 obj.frame_set,
-                (rules.object_x, u16(edge - rules.object_height), edge),
+                (rules.object_x, u16(depth - rules.object_height), depth),
                 rules.object_facing,
                 obj.actor_type,
             )
@@ -314,6 +428,8 @@ class FightLoader:
         rng: Rng,
         first: int,
         second: int,
+        *,
+        lanes: SpawnLanes | None = None,
     ) -> FightRuntime:
         scene = self._scene(
             self.defs.duel_cels,
@@ -326,9 +442,13 @@ class FightLoader:
             first,
             second,
         )
-        _start_knight(scene.fight, first, (250, 0, 100), 3, 2)
-        _start_knight(scene.fight, second, (80, 0, 100), 1, 1, CREATURE_LIST)
-        return FightRuntime(scene, first, second)
+        cursor = SpawnLanes() if lanes is None else lanes
+        edge = max((w.y for w in scene.fight.walls), default=self.knight_rules.clip.top)
+        edge = max(edge, self.knight_rules.clip.top)
+        self._enter_knight(scene.fight, first, cursor, edge, 2)
+        self._enter_knight(scene.fight, second, cursor, edge, 1, second=True)
+        pause_all(scene.fight)
+        return self._runtime(scene, first, cursor, opponent=second)
 
 
 def _moon_arena(arena: ArenaDef, moon_frame: int) -> ArenaDef:
@@ -346,10 +466,18 @@ def _start_knight(
     facing: int,
     port: int,
     frame_list: int = KNIGHT_LIST,
+    script: int | None = None,
 ) -> None:
     actor = fight.actor(handle)
     actor.x, actor.height, actor.y = pos
     actor.facing, actor.input_port, actor.type = facing, port, KNIGHT_TYPE
     actor.active, actor.frame_list = 1, frame_list
     actor.action = actor.input = actor.hit_target = actor.attacker = 0
-    fight.start_job(actor.idle_script, handle, frame_list, pos, facing, KNIGHT_TYPE)
+    fight.start_job(
+        actor.idle_script if script is None else script,
+        handle,
+        frame_list,
+        pos,
+        facing,
+        KNIGHT_TYPE,
+    )

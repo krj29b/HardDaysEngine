@@ -95,14 +95,14 @@ def _caster_input(audit: FightAudit) -> int:
     fight = audit.scene.fight
     knight, target = fight.actor(audit.first), fight.actor(audit.opponent)
     dx, dy = s16(target.x) - s16(knight.x), s16(target.y) - s16(knight.y)
-    if abs(dy) > 3:
+    if abs(dy) > 6:
         return DOWN if dy > 0 else UP
     if (knight.facing == 1) != (dx > 0):
         return RIGHT if dx > 0 else LEFT
     if abs(dx) > 50:
         return RIGHT if dx > 0 else LEFT
     table = audit.rules.actions_right if knight.facing == 1 else audit.rules.actions_left
-    action = 0x08
+    action = 0x04
     return FIRE | table.index(action)
 
 
@@ -203,11 +203,13 @@ def build_caster_audit(bundle: GameAssetBundle, moon_frame: int = 0) -> FightAud
     arena = replace(arena, total=1, max_alive=1, first_wave=arena.first_wave[:1])
     knights = [Actor() for _ in range(4)]
     knight = knights[0]
-    knight.hp = knight.hp_max = 200
+    # Size this explicit one-opponent fixture as a starting knight, then equip its test HP.
+    knight.hp = knight.hp_max = 20
     knight.strength, knight.sword, knight.inventory = 3, 0x19, 1
     runtime = loader.creature(
         arena, "fo1.t", knights, Actor(), {1: Inventory()}, Rng(0x2468ACE1), 1, moon_frame
     )
+    knight.hp = knight.hp_max = 200
     opponent = next(j.owner for j in runtime.fight.engine.jobs if j.type == CASTER_TYPE)
     return FightAudit(runtime.scene, loader.knight_rules, opponent)
 
@@ -237,6 +239,7 @@ def _pose_frames(audit: FightAudit, name: str, script: int) -> Iterator[tuple[st
     job = fight.find_job(audit.opponent)
     if job is None:
         raise ValueError("Ratmen pose preview has no creature job")
+    job.paused = 0
     job.x, job.height, job.depth = 150, 0, 120
     me.x, me.height, me.y = 150, 0, 120
     fight.restart_job(audit.opponent, script)
