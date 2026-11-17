@@ -12,7 +12,7 @@ from pymoonstone.app.config import ConfigError, find_adf_images, resolve_adf_dir
 from pymoonstone.app.game import run_game_window, run_headless_session
 from pymoonstone.cli.extract import run_extraction
 from pymoonstone.cli.inspect_assets import run_inspector_cli
-from pymoonstone.sim.prng import DEFAULT_SEED
+from pymoonstone.sim.rng import DEFAULT_SEED
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

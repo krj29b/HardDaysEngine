@@ -11,6 +11,8 @@ from dataclasses import dataclass
 
 from pymoonstone.sim.m68k import u32
 
+DEFAULT_SEED = 0x1234_5678
+
 _STEPS = 8
 _PERCENT_MASK = 0x7F
 _PERCENT_LIMIT = 100

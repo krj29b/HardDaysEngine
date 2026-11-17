@@ -2990,6 +2990,67 @@ frame time, the menu layout, the masks and thresholds of the draws.
 
 ---
 
+### 11.18 Map implementation boundary and palette jobs (T11.12)
+
+The pixel map replaces the graph completely. Actor.map_x/map_y and tile_x/tile_y
+are authoritative; the map and Fight share the same Rng object and actor records.
+Locations still awaiting their sheet replacement access resources through views
+of those records/inventories, never through an independent map combat record.
+Without decoded map data, headless title/menu/fight tests may construct a session,
+but entering or stepping the map reports missing original assets, not a synthetic
+road network. Data for headless rule tests is supplied explicitly.
+
+Read the nodes through hunk0 $0E7E; terrain through hunk36 $08BA and region through
+$13FE (1000 bytes each); the four seeds through hunk0 $A302. Read the default
+record stores at hunk0 $5092..$50E6 with the existing checked store-run reader.
+Human start/name instructions are $4FC6/$4FD4, $4FEE/$4FFC, $5014/$5022,
+$4F9E/$4FAC in kind order; computer positions/names come from $4BAC..$4C58.
+Lair records use the already checked four-table decoder (§10.15). Frame sizes
+come from the actual mi.c, without modulo or substitute frames. It contains
+47 frames (0..46); a frogged kind-4 computer requests missing frame47 in the
+original. That invalid draw raises here, rather than selecting another frame. Menu strings
+come from the hunk36 LEAs at $12E8, $13AC, $13C0, $13DE; character translation
+uses hunk34 $07AE. The lookup has a leading zero before the raw-code table;
+raw Space/$40, E/$12, Q/$10 and 1..9/$01..$09 use index raw+1. The host
+serializes the translated character tested by the map/menu instructions.
+
+Small.font actually contains72 variable-width glyphs (typically5 by6), not
+the ASCII strip claimed by §3.3. Read the character map through hunk0 $9252;
+character minus32 (byte wrapped) selects a glyph index. Ordinary map-menu text
+uses each glyph width as its advance, without a gap, and retains indexed colors.
+
+The map color ramp is the original palette job, not a tick-based grey pulse.
+It starts with index31, target word $00FF, countdown/reload1, saved original
+color, repetitions0 (infinite). Each PAL tick it calls the component step:
+blue and green are compared nibble by nibble, red compares the full high byte.
+On reaching target, target and saved color swap. The cycle reload is24; at
+zero rotate entries21..23 right by one (direction byte1). Fade and ramp/cycle
+state belong to simulation/host updates, never to render calls. Stop/restart
+on screen transitions discards jobs and starts from the map palette again.
+
+Rows retain raw keys: handles1..4 for knights; lair keys are disjoint handles
+starting at6; place keys pack x/y. Only the first five arrival rows are cleared;
+a full ten-row list and table reads outside loaded data raise rather than
+corrupting adjoining memory. Travel skips places, knights and dragon touches
+and leaves the old touch list unchanged. The scan's interval test is performed
+on zero-extended wrapped word endpoints, preserving its asymmetric edges.
+Menu key input is serialized in the input frame; digits select rows directly.
+A menu freezes map movement until a valid digit arrives; no cancel is added.
+The map frame decides status/end-turn/fire before moving, and charges before
+edge clipping. Screen re-entry applies stale move without charging again.
+
+T11.12 owns movement, terrain, scanning, menus, visibility and the turn-budget
+exhausted event. The original scheduler/clock/dragon jobs consume that event
+in T11.13; a host awaiting them shows TURN COMPLETE without inventing a day or
+advancing a human-only scheduler. Original computer map decisions remain T11.14.
+The default actor setup and lair definition allocation are present here;
+new-game market/dragon/lair gift rolls remain with the original shared inventory
+rules and campaign initialization tasks. A lair is hidden only by explicit loot
+settlement when both its gold and all twelve counts are empty, never on a fight
+win alone. Original place/loot sheets and their effects remain T11.15..T11.21;
+this task dispatches existing callers and reports unavailable unscheduled ones.
+
+
 ## 12. Places and Sheets (`T11.5`)
 
 Everything that is neither the map (§11) nor a fight (§10) is one of two kinds of screen:

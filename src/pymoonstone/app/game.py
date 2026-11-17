@@ -33,10 +33,10 @@ from pymoonstone.app.location_screens import (
     step_location_menu,
 )
 from pymoonstone.app.loop import Accumulator50Hz
+from pymoonstone.app.map_scene import compose_map, draw_map_menu
 from pymoonstone.app.scene_assets import (
     GameAssetBundle,
     build_intro_cinematic_frame,
-    make_sprite,
 )
 from pymoonstone.assets.adf import DiskSet
 from pymoonstone.assets.palette import (
@@ -51,13 +51,13 @@ from pymoonstone.render.renderer import (
 )
 from pymoonstone.render.scene import (
     BitmapFont,
-    OverworldHudState,
     SceneRenderer,
     SceneSprite,
     default_bitmap_font,
-    render_overworld_hud,
+    palette_fx_to_rgb,
 )
 from pymoonstone.sim.actor import Actor
+from pymoonstone.sim.fight_moves import FIRE
 from pymoonstone.sim.fight_setup import SpawnLanes, settle_defeats
 from pymoonstone.sim.inventory import Inventory
 from pymoonstone.sim.location_state import KnightState
@@ -66,22 +66,14 @@ from pymoonstone.sim.locations import (
 )
 from pymoonstone.sim.m68k import s8, s16, u8, u16
 from pymoonstone.sim.overworld import (
+    Arrival,
     EncounterTrigger,
-    NodeKind,
     OverworldState,
-    RegionId,
     TriggerKind,
-    create_campaign,
-    end_turn,
-    legal_moves,
-    move_knight,
-    resolve_maths_tower,
-    resolve_valley_of_the_gods,
-    step_dragon_flight,
+    map_sprites,
 )
 from pymoonstone.sim.palette_fx import PaletteFxState, pack_rgb12
-from pymoonstone.sim.prng import DEFAULT_SEED
-from pymoonstone.sim.rng import Rng
+from pymoonstone.sim.rng import DEFAULT_SEED, Rng
 from pymoonstone.sim.types import KnightId
 
 if TYPE_CHECKING:
@@ -90,25 +82,8 @@ if TYPE_CHECKING:
 
     import numpy.typing as npt
 
-    from pymoonstone.assets.cel import DecodedCel
 
-
-_REGION_WANDERING_ARENAS: dict[int, str] = {
-    int(RegionId.FOREST): "fo1.t",
-    int(RegionId.GLEN): "gl1.t",
-    int(RegionId.SWAMP): "sw1.t",
-    int(RegionId.WASTELAND): "wa1.t",
-    int(RegionId.VALLEY): "fo1.t",
-}
-
-_REGION_LAIR_ARENAS: tuple[str, ...] = ("fol1.t", "gll1.t", "swl1.t", "wal1.t")
-_OW_REPEAT_INITIAL_TICKS = 12
-_OW_REPEAT_STEP_TICKS = 6
-_MI_LAIR_FRAME = 20
-_MI_LAIR_HIGHLIGHT_FRAME = 31
-_MI_DRAGON_BASE = 34
-_MI_DRAGON_COUNT = 8
-_MI_PLACE_IDS: frozenset[int] = frozenset({21, 22, 23, 24, 25, 26, 27, 28, 30})
+_REGION_ARENAS = {0: "gl1.t", 4: "fo1.t", 8: "sw1.t", 12: "wa1.t"}
 
 # Actor ``kind`` of each selectable knight (ARCHITECTURE.md §9.2, §10.13).
 _KNIGHT_KINDS: dict[KnightId, int] = {
@@ -197,21 +172,14 @@ class GameSession:
         self._menu_prev_dx: int = 0
         self._menu_prev_dy: int = 0
         self._menu_prev_fire: bool = False
-        self._ow_prev_dx: int = 0
-        self._ow_prev_dy: int = 0
-        self._ow_repeat_ticks: int = 0
         self._ow_prev_fire: bool = False
         self._ow_prev_secondary: bool = False
-        self._ow_prev_end_turn: bool = False
         self._end_prev_fire: bool = False
-        self.selected_move_index: int = 0
         self.audio = audio
         self.disk_set = disk_set
         self.asset_bundle: GameAssetBundle | None = (
             GameAssetBundle(disk_set) if disk_set is not None else None
         )
-        graph = self.asset_bundle.build_overworld_graph() if self.asset_bundle is not None else None
-        self.overworld: OverworldState = create_campaign(roster, graph=graph, seed=seed)
         self.knight_combat: dict[KnightId, KnightState] = {
             kid: KnightState(knight_id=kid) for kid in KnightId
         }
@@ -219,6 +187,9 @@ class GameSession:
         self.dragon_actor = Actor()
         self.inventories = {handle: Inventory() for handle in range(1, 5)}
         self.fight_rng = Rng(seed)
+        self.overworld = OverworldState(
+            self.actors, self.dragon_actor, self.inventories, self.fight_rng, roster
+        )
         self.fight_loader: FightLoader | None = None
         self.spawn_lanes = SpawnLanes()
         self.lair_counts: dict[int, int] = {}
@@ -232,6 +203,9 @@ class GameSession:
         )
         self._pending_fade_in: bool = False
         self.last_status: str = "PRESS ENTER TO BEGIN"
+        self._map_key = 0
+        if self.asset_bundle is not None:
+            self._ensure_map()
 
     def _reset_campaign(self, count: int, custom_roster: Sequence[KnightId] = ()) -> None:
         clamped = max(1, min(4, count))
@@ -242,9 +216,6 @@ class GameSession:
         )
         self.players = roster
         self.selected_player_count = len(roster)
-        self.selected_move_index = 0
-        graph = self.asset_bundle.build_overworld_graph() if self.asset_bundle is not None else None
-        self.overworld = create_campaign(roster, graph=graph, seed=self.seed)
         self.knight_combat = {kid: KnightState(knight_id=kid) for kid in KnightId}
         self.active_encounter = None
         self.location_menu = None
@@ -254,9 +225,15 @@ class GameSession:
         self.dragon_actor = Actor()
         self.inventories = {handle: Inventory() for handle in range(1, 5)}
         self.fight_rng = Rng(self.seed)
+        self.overworld = OverworldState(
+            self.actors, self.dragon_actor, self.inventories, self.fight_rng, roster
+        )
         self.spawn_lanes = SpawnLanes()
         self.lair_counts.clear()
         self.bad_luck = self.last_defeat_mask = 0
+        self._map_key = 0
+        if self.asset_bundle is not None:
+            self._ensure_map()
 
     def _player_input(self, frame: InputFrame, kid: KnightId) -> PlayerInput:
         direct = frame.for_player(kid)
@@ -324,15 +301,9 @@ class GameSession:
         return default_combat_palette()
 
     def _overworld_palette(self, base_palette: Sequence[RGBColor]) -> tuple[RGBColor, ...]:
-        out = list(base_palette[:32])
-        while len(out) < 32:
-            out.append((0, 0, 0))
-        phase = (self.tick_count // 3) % 10
-        step = phase if phase <= 5 else 10 - phase
-        level = 10 + step
-        shade = level * 17
-        out[31] = (shade, shade, shade)
-        return tuple(out)
+        if self.overworld.colors.active:
+            return palette_fx_to_rgb(self.overworld.colors.colors)
+        return tuple(base_palette)
 
     def _overworld_target_palette(self) -> tuple[RGBColor, ...]:
         get_test_picture = getattr(self.asset_bundle, "get_test_picture", None)
@@ -385,7 +356,7 @@ class GameSession:
         if len(self.picked_knights) >= self.selected_player_count:
             self.knight_pick_active = False
             self._reset_campaign(self.selected_player_count, self.picked_knights)
-            self.scene = GameScene.OVERWORLD
+            self._reenter_map()
             self.last_status = f"DAY {self.overworld.day}"
             self._begin_fade_in(self._overworld_target_palette())
             return
@@ -456,126 +427,141 @@ class GameSession:
         if confirm:
             self._confirm_main_menu()
 
-    def _confirm_overworld_move(self, kid: KnightId, target_node: int) -> None:
-        prev_day = self.overworld.day
-        result = move_knight(self.overworld, target_node)
-        self.selected_move_index = 0
-        self._handle_overworld_triggers(kid, result.triggers)
-        if self.scene == GameScene.OVERWORLD and self.overworld.day > prev_day:
-            self.scene = GameScene.NEW_DAY
-            self.last_status = f"DAY {self.overworld.day}"
-
-    def _end_overworld_turn(self, kid: KnightId) -> None:
-        prev_day = self.overworld.day
-        result = end_turn(self.overworld)
-        self.selected_move_index = 0
-        self._handle_overworld_triggers(kid, result.triggers)
-        if self.scene == GameScene.OVERWORLD and self.overworld.day > prev_day:
-            self.scene = GameScene.NEW_DAY
-            self.last_status = f"DAY {self.overworld.day}"
-
-    def _handle_overworld_game_over(self) -> bool:
-        if not self.overworld.game_over:
+    def _ensure_map(self) -> bool:
+        if self.overworld.rules is not None:
+            return True
+        if self.asset_bundle is None:
+            self.last_status = "ORIGINAL DISKS REQUIRED"
             return False
-        if self.overworld.winner is not None:
-            self._enter_victory(f"{self.overworld.winner.name} WINS")
-        else:
-            self._enter_game_over()
+        self.overworld.install(self.asset_bundle.get_map_rules(), _KNIGHT_KINDS, self.seed)
+        for kid in KnightId:
+            self._sync_legacy_actor(kid)
+        self._start_map_colors()
         return True
 
-    def _cycle_overworld_move(self, inp: PlayerInput, move_count: int) -> None:
-        delta = inp.dx or inp.dy
-        if delta == 0:
-            self._ow_prev_dx = 0
-            self._ow_prev_dy = 0
-            self._ow_repeat_ticks = 0
-            return
-        dx_edge = inp.dx != 0 and inp.dx != self._ow_prev_dx
-        dy_edge = inp.dy != 0 and inp.dy != self._ow_prev_dy
-        self._ow_prev_dx = inp.dx
-        self._ow_prev_dy = inp.dy
-        if dx_edge or dy_edge:
-            self._ow_repeat_ticks = _OW_REPEAT_INITIAL_TICKS
-        elif self._ow_repeat_ticks > 1:
-            self._ow_repeat_ticks -= 1
-            return
-        else:
-            self._ow_repeat_ticks = _OW_REPEAT_STEP_TICKS
-        self.selected_move_index = (
-            self.selected_move_index + (1 if delta > 0 else -1)
-        ) % move_count
+    def _start_map_colors(self) -> None:
+        if self.asset_bundle is not None:
+            picture = self.asset_bundle.get_test_picture(8)
+            if picture is not None:
+                self.overworld.colors.start(
+                    _palette_to_rgb12(picture.palette), self.overworld.data()
+                )
+
+    def _sync_legacy_actor(self, kid: KnightId) -> None:
+        actor, legacy = self.actors[int(kid)], self.knight_combat[kid]
+        legacy.hp, legacy.max_hp = s16(actor.hp), s16(actor.hp_max)
+        legacy.strength, legacy.constitution, legacy.endurance = (
+            actor.strength,
+            actor.constitution,
+            actor.endurance,
+        )
+        legacy.gold, legacy.lives, legacy.daggers = s16(actor.gold), s8(actor.lives), actor.daggers
+        legacy.sword_tier, legacy.armour = actor.sword - 21, actor.armour - 27
+        legacy.xp = actor.progress
+        legacy.keys, legacy.moonstones = (
+            self.inventories[int(kid) + 1].byte(20),
+            self.inventories[int(kid) + 1].byte(22),
+        )
+
+    def _reenter_map(self) -> None:
+        self.scene = GameScene.OVERWORLD
+        if self._ensure_map():
+            self.overworld.enter()
+            self._start_map_colors()
+            self._begin_fade_in(self._overworld_target_palette())
 
     def _step_overworld(self, frame: InputFrame) -> None:
-        if self._handle_overworld_game_over():
+        if self.overworld.game_over:
+            if self.overworld.winner is not None:
+                self._enter_victory(f"{self.overworld.winner.name} WINS")
+            else:
+                self.scene = GameScene.GAME_OVER
             return
-
-        kid = self.overworld.current_knight_id
+        if not self._ensure_map():
+            return
+        world = self.overworld
+        if frame.key:
+            self._map_key = frame.key
+        world.colors.step(world.data())
+        world.phase = (world.phase + 1) % 2
+        if world.phase:
+            return
+        kid = world.current_knight_id
         inp = self._player_input(frame, kid)
-        moves = legal_moves(self.overworld, kid)
-        if not moves:
-            self._enter_game_over()
-            return
+        key, self._map_key = self._map_key, 0
+        if inp.secondary:
+            key = ord(" ")
+        word = inp.to_joystick_word() | (FIRE if inp.confirm else 0)
+        row = world.frame(word, ord("E") if inp.weapon_switch else key)
+        self._map_result(row, key)
 
-        secondary_edge = inp.secondary and not self._ow_prev_secondary
-        self._ow_prev_secondary = inp.secondary
-        if secondary_edge:
-            self.scene = GameScene.STATUS
-            self.last_status = "STATUS"
-            return
+    def _map_result(self, row: Arrival | None, key: int) -> None:
+        world = self.overworld
+        if not world.menu and key in (ord("Q"), ord(" ")):
+            self.scene = GameScene.TITLE if key == ord("Q") else GameScene.STATUS
+            world.colors.active = False
+        elif row is not None:
+            self._dispatch_arrival(row)
+        elif world.turn_over:
+            self.last_status = "TURN COMPLETE"
 
-        end_turn_edge = inp.weapon_switch and not self._ow_prev_end_turn
-        self._ow_prev_end_turn = inp.weapon_switch
-        if end_turn_edge:
-            self._end_overworld_turn(kid)
-            return
-
-        self._cycle_overworld_move(inp, len(moves))
-
-        fire_edge = inp.fire and not self._ow_prev_fire
-        self._ow_prev_fire = inp.fire
-        if inp.confirm or fire_edge:
-            self._confirm_overworld_move(kid, moves[self.selected_move_index % len(moves)])
+    def _dispatch_arrival(self, row: Arrival) -> None:
+        world, kid = self.overworld, self.overworld.current_knight_id
+        if row.kind == 2:
+            self._dispatch_lair(row.key - 6)
+        elif row.kind in (1, 33):
+            self._start_combat(
+                EncounterTrigger(
+                    TriggerKind.PVP_DUEL,
+                    kid,
+                    -1,
+                    world.day,
+                    world.moon_phase,
+                    opponent_knight_id=KnightId(row.key - 1),
+                ),
+                kid,
+            )
+        elif row.kind in (25, 26):
+            self._open_location(
+                kid, LocationKind.HIGHWOOD if row.kind == 25 else LocationKind.WATERDEEP
+            )
+        elif row.kind == 27:
+            self._open_stonehenge_or_victory(kid)
         else:
-            self._step_idle_dragon(kid)
+            self.last_status = "PLACE SCREEN UNAVAILABLE"
+        if self.scene != GameScene.OVERWORLD:
+            world.colors.active = False
 
-    def _step_idle_dragon(self, kid: KnightId) -> None:
-        if self.tick_count % 2 != 0:
+    def _dispatch_lair(self, index: int) -> None:
+        world, kid = self.overworld, self.overworld.current_knight_id
+        lair = world.lairs[index]
+        if world.travel:
+            self.last_status = "LAIR LOOT VIEW UNAVAILABLE"
             return
-        dragon_trig = step_dragon_flight(self.overworld)
-        if dragon_trig is not None:
-            self._handle_overworld_triggers(kid, (dragon_trig,))
+        if self.fight_loader is None and self.asset_bundle is not None:
+            self.fight_loader = FightLoader(self.asset_bundle)
+        if self.fight_loader is None:
+            return
+        arena = next(a for a in self.fight_loader.defs.arenas if lair.handler in a.handler_offsets)
+        trigger = EncounterTrigger(
+            TriggerKind.LAIR_BOSS,
+            kid,
+            -1,
+            world.day,
+            world.moon_phase,
+            lair_index=index,
+            creature_type=arena.creature.actor_type or 0,
+        )
+        self._start_combat(trigger, kid)
 
     def _open_location(self, knight_id: KnightId, location: LocationKind) -> None:
+        if self.overworld.rules is not None:
+            self._sync_legacy_actor(knight_id)
+        self.overworld.colors.active = False
         self.location_knight_id = knight_id
         self.location_menu = LocationMenuState(location=location)
         self.scene = GameScene.LOCATION
         self.last_status = location.name
-
-    def _handle_special_site_trigger(
-        self,
-        knight_id: KnightId,
-        trig: EncounterTrigger,
-    ) -> bool:
-        ow_k = self.overworld.knights[knight_id]
-        kstate = self.knight_combat[knight_id]
-        if trig.kind == TriggerKind.HOME_CASTLE:
-            kstate.lives = ow_k.lives
-            kstate.hp = kstate.max_hp
-            self.last_status = "HOME CASTLE"
-            return True
-        if trig.kind == TriggerKind.VALLEY_OF_THE_GODS:
-            xp = resolve_valley_of_the_gods(self.overworld, knight_id)
-            kstate.lives = ow_k.lives
-            kstate.xp = ow_k.xp
-            self.last_status = f"VALLEY BLESSING +{xp}XP"
-            return True
-        if trig.kind == TriggerKind.MATHS_TOWER:
-            xp = resolve_maths_tower(self.overworld, knight_id)
-            kstate.xp = ow_k.xp
-            kstate.gold = ow_k.gold
-            self.last_status = f"MATHS TOWER +{xp}XP"
-            return True
-        return False
 
     def _open_stonehenge_or_victory(self, knight_id: KnightId) -> None:
         if self.overworld.knights[knight_id].has_all_moonstones:
@@ -599,18 +585,11 @@ class GameSession:
                 self._enter_victory(f"{knight_id.name} WINS")
                 return
             if trig.kind == TriggerKind.TOWN_VISIT:
-                node = self.overworld.graph.nodes.get(trig.node_id)
-                loc_kind = (
-                    LocationKind.WATERDEEP
-                    if node is not None and node.kind == NodeKind.WATERDEEP
-                    else LocationKind.HIGHWOOD
-                )
+                loc_kind = LocationKind.WATERDEEP if trig.node_id == 26 else LocationKind.HIGHWOOD
                 self._open_location(knight_id, loc_kind)
                 return
             if trig.kind == TriggerKind.STONEHENGE_RITUAL:
                 self._open_stonehenge_or_victory(knight_id)
-                return
-            if self._handle_special_site_trigger(knight_id, trig):
                 return
             if trig.kind in (
                 TriggerKind.WANDERING_MONSTER,
@@ -628,13 +607,15 @@ class GameSession:
         kid = self.location_knight_id
         inp = self._player_input(frame, kid)
         res = step_location_menu(self.location_menu, inp, self.knight_combat[kid], self.overworld)
+        if self.overworld.rules is not None:
+            self._prepare_fight_knight(kid)
         if res.victory:
             self.location_menu = None
             self._enter_victory(f"{kid.name} WINS")
             return
         if res.left_location:
             self.location_menu = None
-            self.scene = GameScene.OVERWORLD
+            self._reenter_map()
             self.last_status = f"DAY {self.overworld.day}"
 
     def _step_status(self, frame: InputFrame) -> None:
@@ -665,15 +646,9 @@ class GameSession:
             self._play_title_music()
 
     def _arena_name_for_trigger(self, trigger: EncounterTrigger) -> str:
-        node = self.overworld.graph.nodes.get(trigger.node_id)
-        if node is not None and node.arena_script:
-            script = node.arena_script
-            return script if script.lower().endswith(".t") else f"{script}.t"
-        if trigger.kind == TriggerKind.LAIR_BOSS:
-            lair_idx = max(0, trigger.lair_index)
-            return _REGION_LAIR_ARENAS[lair_idx % len(_REGION_LAIR_ARENAS)]
-        region_id = node.region_id if node is not None else int(RegionId.FOREST)
-        return _REGION_WANDERING_ARENAS.get(region_id, "fo1.t")
+        if trigger.kind == TriggerKind.LAIR_BOSS and self.overworld.lairs:
+            return self.overworld.lairs[trigger.lair_index].arena
+        return _REGION_ARENAS.get(self.overworld.region_code, "fo1.t")
 
     def _finish_practice_combat(self) -> None:
         self.practice_mode = False
@@ -732,6 +707,8 @@ class GameSession:
             return None
         if not 0 <= trigger.lair_index < len(loader.defs.lairs):
             raise FightUnavailableError("invalid lair index")
+        if self.overworld.lairs:
+            return self.overworld.lairs[trigger.lair_index].creatures_left
         return self.lair_counts.setdefault(
             trigger.lair_index, loader.defs.lairs[trigger.lair_index].creatures_left
         )
@@ -770,6 +747,7 @@ class GameSession:
             return
         active.runtime.fight.engine.gore_off = not self.gore_enabled
         self.active_encounter = active
+        self.overworld.colors.active = False
         self.scene = GameScene.COMBAT
         self._begin_fade_in(active.runtime.scene.palette)
         self.last_status = "COMBAT"
@@ -802,9 +780,11 @@ class GameSession:
             legacy.hp, legacy.daggers, legacy.lives = s16(actor.hp), actor.daggers, s8(actor.lives)
             ow = self.overworld.knights.get(kid)
             if ow is not None:
-                ow.lives, ow.alive = legacy.lives, legacy.lives > 0
+                ow.lives = legacy.lives
         if active.trigger.kind == TriggerKind.LAIR_BOSS:
             self.lair_counts[active.trigger.lair_index] = fight.total
+            if self.overworld.lairs:
+                self.overworld.lairs[active.trigger.lair_index].creatures_left = fight.total
             if won:
                 actor = fight.actor(active.runtime.first)
                 actor.progress = u16(actor.progress + 1)
@@ -814,13 +794,18 @@ class GameSession:
             self._finish_practice_combat()
             return
         self.active_encounter = None
-        self.overworld.moves_remaining = 0
+        self.overworld.spent = self.overworld.budget
         if all(not k.alive for k in self.overworld.knights.values()):
             self.overworld.game_over = True
             self._enter_game_over()
         else:
-            self.scene = GameScene.OVERWORLD
-            self.last_status = "FIGHT WON" if won else "KNIGHT FALLEN"
+            self._return_from_map_fight(won)
+
+    def _return_from_map_fight(self, won: bool) -> None:
+        self.scene = GameScene.OVERWORLD
+        if self.overworld.rules is not None:
+            self._reenter_map()
+        self.last_status = "FIGHT WON" if won else "KNIGHT FALLEN"
 
     def _render_combat_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         if self.active_encounter is None:
@@ -829,76 +814,29 @@ class GameSession:
             self.active_encounter.runtime.scene.render(scene_renderer)
 
     def state_hash(self) -> str:
-        """Hash the campaign summary and mutable persistent fight state deterministically."""
-        knights_payload = [asdict(self.knight_combat[kid]) for kid in KnightId]
-        encounter_payload = (
-            self.active_encounter.runtime.snapshot() if self.active_encounter is not None else None
-        )
+        """Hash every mutable map/actor/fight cell, independent of rendering (§11.18)."""
+        world = asdict(self.overworld)
+        world.pop("rules")
         payload = {
             "tick": self.tick_count,
             "scene": int(self.scene),
             "paused": self.paused,
-            "prng": self.overworld.prng.state,
-            "day": self.overworld.day,
-            "turn_idx": self.overworld.turn_index,
-            "total_turns": self.overworld.total_turns,
-            "claimed_stones": self.overworld.claimed_moonstones_mask,
-            "winner": int(self.overworld.winner) if self.overworld.winner is not None else None,
-            "game_over": self.overworld.game_over,
-            "dragon": [
-                self.overworld.dragon.node_id,
-                self.overworld.dragon.patrol_index,
-                self.overworld.dragon.x,
-                self.overworld.dragon.y,
-                int(self.overworld.dragon.facing_left),
-            ],
-            "knights": knights_payload,
-            "encounter": encounter_payload,
+            "world": world,
+            "map_key": self._map_key,
+            "legacy": [asdict(self.knight_combat[kid]) for kid in KnightId],
+            "encounter": self.active_encounter.runtime.snapshot()
+            if self.active_encounter
+            else None,
             "fight_lanes": self.spawn_lanes.counter,
             "flyer_toggle": self.fight_loader.flyer.toggle if self.fight_loader else 0,
             "drake_cells": asdict(self.fight_loader.drake) if self.fight_loader else None,
             "lair_counts": self.lair_counts,
             "bad_luck": self.bad_luck,
             "defeats": self.last_defeat_mask,
-            "fight_progress": [a.progress for a in self.actors],
         }
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-    def _render_overworld_hud(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
-        kid = self.overworld.current_knight_id
-        kstate = self.knight_combat[kid]
-        moves = legal_moves(self.overworld, kid)
-        target = moves[self.selected_move_index % len(moves)] if moves else -1
-        ow_k = self.overworld.knights[kid]
-        render_overworld_hud(
-            scene_renderer.canvas,
-            OverworldHudState(
-                knight_name=kid.name,
-                hp=kstate.hp,
-                max_hp=kstate.max_hp,
-                gold=ow_k.gold,
-                lives=ow_k.lives,
-                moon_phase=self.overworld.day_of_cycle,
-                turn=self.overworld.total_turns + 1,
-                score=ow_k.xp,
-            ),
-            font,
-        )
-        font.draw_text(
-            scene_renderer.canvas,
-            f"MOVES:{self.overworld.moves_remaining}",
-            8,
-            246,
-            color_index=30,
-        )
-        font.draw_text(
-            scene_renderer.canvas,
-            f"NODE:{ow_k.node_id} TO {target}",
-            104,
-            246,
-            color_index=31,
-        )
+        return hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
 
     def _compose_picture_or_solid(
         self,
@@ -925,140 +863,6 @@ class GameSession:
         pal = palette_override if palette_override is not None else default_combat_palette()
         self._apply_scene_palette(scene_renderer, pal)
         scene_renderer.compose_scene(background=bg, sprites=sprites, border_index=0)
-
-    def _append_target_marker(
-        self,
-        sprites: list[SceneSprite],
-        mi_cel: object,
-        active_kid: KnightId,
-        color_slot: dict[KnightId, int],
-    ) -> None:
-        from pymoonstone.assets.cel import DecodedCel
-
-        if not isinstance(mi_cel, DecodedCel):
-            return
-        moves = legal_moves(self.overworld, active_kid)
-        if not moves:
-            return
-        target_id = moves[self.selected_move_index % len(moves)]
-        tnode = self.overworld.graph.nodes.get(target_id)
-        if tnode is None:
-            return
-        flag_idx = 15 + color_slot.get(active_kid, 0)
-        fsp = make_sprite(mi_cel, flag_idx, x=tnode.x - 5, y=tnode.y - 4, layer=3, order=50)
-        if fsp is not None:
-            sprites.append(fsp)
-
-    def _selected_target_node_id(self, active_kid: KnightId) -> int | None:
-        moves = legal_moves(self.overworld, active_kid)
-        if not moves:
-            return None
-        return moves[self.selected_move_index % len(moves)]
-
-    def _highlighted_overworld_nodes(self, target_node_id: int | None) -> set[int]:
-        highlighted = {
-            self.overworld.knights[kid].node_id
-            for kid in self.overworld.turn_order
-            if self.overworld.knights[kid].alive
-        }
-        if target_node_id is not None:
-            highlighted.add(target_node_id)
-        return highlighted
-
-    def _build_site_marker_sprite(
-        self,
-        mi_cel: DecodedCel,
-        node_id: int,
-        is_highlighted: bool,
-    ) -> SceneSprite | None:
-        node = self.overworld.graph.nodes[node_id]
-        frame_count = len(mi_cel.frames)
-        if node.kind == NodeKind.LAIR and node_id not in self.overworld.cleared_lair_nodes:
-            use_hl = is_highlighted and frame_count > _MI_LAIR_HIGHLIGHT_FRAME
-            frame_id = _MI_LAIR_HIGHLIGHT_FRAME if use_hl else _MI_LAIR_FRAME
-            return make_sprite(
-                mi_cel, frame_id, x=node.x, y=node.y, layer=2, order=50 + node_id, top_left=True
-            )
-        if node_id in _MI_PLACE_IDS and frame_count > node_id and is_highlighted:
-            return make_sprite(
-                mi_cel, node_id, x=node.x, y=node.y, layer=1, order=80 + node_id, top_left=True
-            )
-        return None
-
-    def _append_lair_and_place_markers(
-        self,
-        mi_cel: DecodedCel,
-        target_node_id: int | None,
-        sprites: list[SceneSprite],
-    ) -> None:
-        if not mi_cel.frames:
-            return
-        highlighted = self._highlighted_overworld_nodes(target_node_id)
-        for node_id in sorted(self.overworld.graph.nodes):
-            sp = self._build_site_marker_sprite(mi_cel, node_id, node_id in highlighted)
-            if sp is not None:
-                sprites.append(sp)
-
-    def _overworld_sprites(self) -> list[SceneSprite]:
-        if self.asset_bundle is None:
-            return []
-        sprites: list[SceneSprite] = []
-        color_slot = {
-            KnightId.BLUE: 0,
-            KnightId.YELLOW: 1,
-            KnightId.GREEN: 2,
-            KnightId.RED: 3,
-        }
-        mi_cel = self.asset_bundle.get_cel("mi.c")
-        if mi_cel is not None:
-            active_kid = self.overworld.current_knight_id
-            target_node_id = self._selected_target_node_id(active_kid)
-            self._append_lair_and_place_markers(mi_cel, target_node_id, sprites)
-            for idx, kid in enumerate(self.overworld.turn_order):
-                ow_k = self.overworld.knights[kid]
-                if not ow_k.alive:
-                    continue
-                node = self.overworld.graph.nodes.get(ow_k.node_id)
-                px = (node.x - 5) if node is not None else 40 + idx * 32
-                py = (node.y - 4) if node is not None else 90
-                c_idx = color_slot.get(kid, idx & 3)
-                frame_idx = c_idx + (5 if kid == active_kid else 0)
-                sp = make_sprite(mi_cel, frame_idx, x=px, y=py, layer=2, order=idx)
-                if sp is not None:
-                    sprites.append(sp)
-            self._append_target_marker(sprites, mi_cel, active_kid, color_slot)
-        self._append_dragon_marker(sprites)
-        return sprites
-
-    def _append_dragon_marker(self, sprites: list[SceneSprite]) -> None:
-        if self.asset_bundle is None:
-            return
-        dragon = self.overworld.dragon
-        mi_cel = self.asset_bundle.get_cel("mi.c")
-        if mi_cel is not None and mi_cel.frames:
-            span = min(_MI_DRAGON_COUNT, max(1, len(mi_cel.frames) - _MI_DRAGON_BASE))
-            dframe = _MI_DRAGON_BASE + ((dragon.anim_phase + (self.tick_count // 6)) % span)
-            dsp = make_sprite(
-                mi_cel,
-                dframe,
-                x=dragon.x,
-                y=dragon.y - 6,
-                flipped=dragon.facing_left,
-                layer=3,
-                order=99,
-                top_left=True,
-            )
-            if dsp is not None:
-                sprites.append(dsp)
-                return
-        dnode = self.overworld.graph.nodes.get(dragon.node_id)
-        if dnode is None:
-            return
-        dragon_cel = self.asset_bundle.get_cel("DRAGON1.CEL")
-        if dragon_cel is not None:
-            dsp = make_sprite(dragon_cel, 0, x=dnode.x, y=dnode.y, layer=3, order=99)
-            if dsp is not None:
-                sprites.append(dsp)
 
     def _apply_scene_palette(
         self, scene_renderer: SceneRenderer, base_palette: Sequence[RGBColor]
@@ -1116,18 +920,17 @@ class GameSession:
         font.draw_text(scene_renderer.canvas, "PRESS ENTER", 116, 236, color_index=31)
 
     def _render_overworld_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
-        sprites = self._overworld_sprites()
-        map_pic = self.asset_bundle.get_test_picture(8) if self.asset_bundle is not None else None
-        if map_pic is not None:
-            self._apply_scene_palette(scene_renderer, self._overworld_palette(map_pic.palette))
-            scene_renderer.compose_scene(
-                background=map_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH],
-                sprites=sprites,
-                border_index=0,
-            )
-        else:
-            self._compose_picture_or_solid(scene_renderer, "bg2.PIV", sprites=sprites)
-        self._render_overworld_hud(scene_renderer, font)
+        if self.overworld.rules is None or self.asset_bundle is None:
+            self._compose_picture_or_solid(scene_renderer)
+            return
+        world = self.overworld
+        picture, cel = self.asset_bundle.get_test_picture(8), self.asset_bundle.get_cel("mi.c")
+        if picture is None or cel is None:
+            raise ValueError("map picture and sprites are required")
+        scene_renderer.set_palette(self._overworld_palette(picture.palette))
+        compose_map(scene_renderer.canvas, picture.pixels, cel, map_sprites(world))
+        if world.menu:
+            draw_map_menu(scene_renderer.canvas, cel, world, self.asset_bundle)
 
     def _render_location_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         if self.location_menu is not None:

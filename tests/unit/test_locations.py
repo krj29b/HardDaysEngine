@@ -49,12 +49,15 @@ from pymoonstone.sim.locations import (
     visit_mystic,
 )
 from pymoonstone.sim.overworld import (
+    Arrival,
     MoonPhase,
     collect_moonstone,
-    create_campaign,
 )
-from pymoonstone.sim.prng import SimPrng
+from pymoonstone.sim.rng import Rng
 from pymoonstone.sim.types import KnightId
+from tests.unit.map_setup import make_world
+
+ALL_MOONSTONES_MASK = 15
 
 
 def _make_knight(*, gold: int = 500, xp: int = 200) -> KnightState:
@@ -62,7 +65,7 @@ def _make_knight(*, gold: int = 500, xp: int = 200) -> KnightState:
 
 
 def test_highwood_merchant_buy_and_sell_equipment() -> None:
-    ow = create_campaign((KnightId.RED,))
+    ow = make_world((KnightId.RED,))
     knight = _make_knight(gold=500)
 
     sword_res = buy_merchant_item(knight, MerchantItemKind.SWORD_UPGRADE, overworld=ow)
@@ -178,7 +181,7 @@ def test_highwood_healer_services() -> None:
 
 def test_highwood_tavern_dice_determinism_and_outcomes() -> None:
     knight = _make_knight(gold=100)
-    prng = SimPrng(42)
+    prng = Rng(42)
 
     bad_low = play_tavern_dice(knight, 0, prng)
     assert not bad_low.accepted
@@ -196,8 +199,8 @@ def test_highwood_tavern_dice_determinism_and_outcomes() -> None:
     for seed in range(1, 200):
         k_a = _make_knight(gold=100)
         k_b = _make_knight(gold=100)
-        r_a = play_tavern_dice(k_a, 25, SimPrng(seed))
-        r_b = play_tavern_dice(k_b, 25, SimPrng(seed))
+        r_a = play_tavern_dice(k_a, 25, Rng(seed))
+        r_b = play_tavern_dice(k_b, 25, Rng(seed))
         assert r_a == r_b
         assert r_a.accepted
         assert r_a.player_total == sum(r_a.player_dice)
@@ -218,7 +221,7 @@ def test_highwood_tavern_dice_determinism_and_outcomes() -> None:
 
 
 def test_waterdeep_mystic_services() -> None:
-    ow = create_campaign((KnightId.RED,))
+    ow = make_world((KnightId.RED,))
     knight = _make_knight(gold=400)
 
     scroll = visit_mystic(knight, MysticService.FIREBALL_SCROLL, overworld=ow)
@@ -284,14 +287,14 @@ def test_waterdeep_stat_training() -> None:
 
 
 def test_stonehenge_ritual_validation_and_victory() -> None:
-    ow = create_campaign((KnightId.RED,))
+    ow = make_world((KnightId.RED,))
     knight = _make_knight()
 
     not_there = perform_stonehenge_ritual(ow, KnightId.RED)
     assert not not_there.accepted
     assert not_there.reason == "not_at_stonehenge"
 
-    ow.knights[KnightId.RED].node_id = ow.graph.stonehenge_node_id
+    ow.arrivals[0] = Arrival(150 << 16 | 100, 27)
     missing_ms = perform_stonehenge_ritual(ow, KnightId.RED)
     assert not missing_ms.accepted
     assert missing_ms.reason == "missing_moonstones"
@@ -303,7 +306,7 @@ def test_stonehenge_ritual_validation_and_victory() -> None:
     assert not wrong_phase.accepted
     assert wrong_phase.reason == "wrong_moon_phase"
 
-    ow.day = 15
+    ow.moon_index = 4
     assert ow.moon_phase == MoonPhase.FULL_MOON
     victory = perform_stonehenge_ritual(ow, KnightId.RED, knight_combat=knight)
     assert victory.accepted
@@ -319,13 +322,13 @@ def test_stonehenge_ritual_validation_and_victory() -> None:
 
 
 def test_lair_loot_distribution_is_deterministic() -> None:
-    ow_a = create_campaign((KnightId.RED,), seed=99)
-    ow_b = create_campaign((KnightId.RED,), seed=99)
+    ow_a = make_world((KnightId.RED,), seed=99)
+    ow_b = make_world((KnightId.RED,), seed=99)
     k_a = KnightState(knight_id=KnightId.RED, hp=70)
     k_b = KnightState(knight_id=KnightId.RED, hp=70)
 
-    loot_a = distribute_lair_loot(k_a, 0, SimPrng(777), overworld=ow_a)
-    loot_b = distribute_lair_loot(k_b, 0, SimPrng(777), overworld=ow_b)
+    loot_a = distribute_lair_loot(k_a, 0, Rng(777), overworld=ow_a)
+    loot_b = distribute_lair_loot(k_b, 0, Rng(777), overworld=ow_b)
     assert loot_a == loot_b
     assert loot_a.gold_awarded >= LAIR_BASE_GOLD
     assert loot_a.xp_awarded >= LAIR_BASE_XP
@@ -335,9 +338,9 @@ def test_lair_loot_distribution_is_deterministic() -> None:
     assert ow_a.knights[KnightId.RED].has_key(1)
     assert k_a.hp == 90
 
-    repeat = distribute_lair_loot(k_a, 0, SimPrng(777), overworld=ow_a)
+    repeat = distribute_lair_loot(k_a, 0, Rng(777), overworld=ow_a)
     assert not repeat.moonstone_claimed
     assert repeat.key_granted is None
 
     with pytest.raises(ValueError, match="lair_index"):
-        distribute_lair_loot(k_a, 4, SimPrng(1))
+        distribute_lair_loot(k_a, 4, Rng(1))

@@ -395,3 +395,32 @@ and original campaign initialization remain T11.12/13, map AI T11.14 and meeting
 sheets/loot T11.21. Seeded ordinary-input wins and idle losses exercise hurt-script
 death and deterministic full-state replay, including campaign input and settlement.
 Pose previews are labelled separately from natural traces; no game data is committed.
+
+
+## ADR-025: The pixel map shares persistent actors, inventories and the original PRNG
+**Status:** ACCEPTED (2026-11-17, T11.12; follows ADR-009 / ADR-013 / ADR-015)
+**Context:** The previous map used invented roads, a separate LCG, independent knight
+resources and random walking encounters. The original uses pixel coordinates, terrain
+masks, an ordered proximity list and persistent records shared with fights.
+**Decision:** assets/map_rules.py checks instruction forms and relocated tables before
+loading nodes, terrain, regions, seeds, defaults, names, starts, menu text and palette
+parameters. sim/overworld.py owns pixel movement, budget exhaustion, proximity rows,
+mode flags, lair records and original palette jobs. The host advances a map frame every
+two PAL ticks; palette jobs advance every PAL tick. InputFrame serializes translated
+menu keys. Map drawing uses exact mi.c frames in list order and the original Small.font
+lookup. No render call initializes or steps map simulation. The road graph and sim/prng.py
+are removed; rule tests explicitly inject synthetic MapRules instead of a runtime fallback.
+Legacy location screens retain a temporary adapter: resources view the shared actor and
+inventory, and sheet/fight entry and exit synchronize their remaining presentation fields.
+**Consequences:** Terrain counts persist, edge pushes cost budget, screen entry applies
+stale movement without charging, arrival rows retain the five-row-clear quirk and menus
+wait for a valid digit without cancel. Invalid table/arrival/frame accesses raise rather
+than corrupt memory or substitute frames; mi.c has no frame47 for a frogged computer.
+Lair creature depletion alone does not hide a lair. New-game gift rolls remain with the
+shared inventory initialization work. Budget exhaustion is exposed for T11.13; until its
+scheduler arrives the host reports TURN COMPLETE without inventing day advancement.
+T11.13 owns clock/dragon jobs, T11.14 map AI, and T11.15..21 the original place/loot callers.
+Synthetic movement/proximity/menu/palette checks replace obsolete graph and LCG tests.
+Real-disk tests independently inspect loaded tables, check movement without random fights,
+shared state and replay; the pixel_map audit includes natural map captures and labelled
+frame previews. No game data or generated contact sheet is committed.

@@ -26,12 +26,14 @@ from pymoonstone.render.scene import BitmapFont, default_bitmap_font
 from pymoonstone.sim.location_state import KnightState
 from pymoonstone.sim.locations import MerchantItemKind
 from pymoonstone.sim.overworld import (
-    ALL_MOONSTONES_MASK,
+    Arrival,
     MoonPhase,
     OverworldState,
-    create_campaign,
 )
 from pymoonstone.sim.types import KnightId
+from tests.unit.map_setup import make_world
+
+ALL_MOONSTONES_MASK = 15
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -135,7 +137,7 @@ def _make_knight(gold: int = 500, hp: int = 60) -> KnightState:
 
 
 def _make_overworld() -> OverworldState:
-    ow = create_campaign((KnightId.RED,), seed=42)
+    ow = make_world((KnightId.RED,), seed=42)
     ow.knights[KnightId.RED].gold = 500
     ow.knights[KnightId.RED].xp = 200
     return ow
@@ -304,9 +306,10 @@ def test_waterdeep_all_services_training_and_stonehenge_ritual() -> None:
     assert res_train.left_location is False
 
     # Stonehenge ritual succeeds when at Stonehenge, full moon, and all 4 moonstones.
-    ow.knights[KnightId.RED].node_id = ow.graph.stonehenge_node_id
+    ow.arrivals[0] = Arrival(150 << 16 | 100, 27)
     ow.knights[KnightId.RED].moonstones_mask = ALL_MOONSTONES_MASK
-    ow.day = 15  # FULL_MOON
+    ow.moon_index = 4
+    ow.day = 15
     assert ow.moon_phase == MoonPhase.FULL_MOON
     sh_state = LocationMenuState(location=LocationKind.STONEHENGE)
     res_ritual = step_location_menu(sh_state, PlayerInput(confirm=True), knight, ow)
@@ -319,6 +322,7 @@ def test_render_location_status_and_new_day_screens() -> None:
     ow = _make_overworld()
     ow.knights[KnightId.RED].keys_mask = 0b0101
     ow.knights[KnightId.RED].moonstones_mask = 0b0011
+    ow.moon_index = 4
     ow.day = 15
     knight = _make_knight(gold=345, hp=77)
     renderer = _FakeSceneRenderer()

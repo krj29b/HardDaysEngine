@@ -15,17 +15,6 @@ from pymoonstone.app.audio import AudioEngine
 from pymoonstone.app.input import InputRouter, PlayerInput
 from pymoonstone.app.scene_assets import COMBAT_SFX_KEYS, GameAssetBundle
 from pymoonstone.assets.adf import OFSFileEntry
-from pymoonstone.assets.tables import (
-    BuiltinFontTable,
-    CombatActionTables,
-    CreatureNodeRecord,
-    EncounterBandRecord,
-    LairRegionMetadata,
-    MapSiteRecord,
-    MogRuntimeTables,
-    SynthSequenceTables,
-)
-from pymoonstone.sim.overworld import NodeKind
 from pymoonstone.sim.types import KnightId
 
 
@@ -119,67 +108,3 @@ def test_preload_audio_exposes_combat_sfx_keys_and_8svx_chunks() -> None:
     for key in (*COMBAT_SFX_KEYS, "kn.a", "kn:0", "kn:1", "hit.a", "splat.a", "hurt.a", "throw.a"):
         ch = audio.play_sample(key)
         assert 0 <= ch < 4
-
-
-def test_build_overworld_graph_maps_sites_and_all_nodes() -> None:
-    disks = _StubDiskSet()
-    bundle = GameAssetBundle(disk_set=cast("DiskSet", disks))
-    sites = (
-        MapSiteRecord(site_id=21, x=40, y=40),
-        MapSiteRecord(site_id=22, x=260, y=40),
-        MapSiteRecord(site_id=23, x=40, y=160),
-        MapSiteRecord(site_id=24, x=260, y=160),
-        MapSiteRecord(site_id=25, x=90, y=60),
-        MapSiteRecord(site_id=26, x=200, y=130),
-        MapSiteRecord(site_id=27, x=150, y=100),
-        MapSiteRecord(site_id=28, x=152, y=97),
-        MapSiteRecord(site_id=30, x=217, y=11),
-    )
-    bundle._mog_tables_checked = True
-    bundle._mog_tables = MogRuntimeTables(
-        knight_names=("Red", "Blue", "Green", "Yellow"),
-        combat_actions=CombatActionTables(right_offsets=(0,) * 11, left_offsets=(0,) * 11),
-        lair_region=LairRegionMetadata(
-            map_sites=sites,
-            creature_nodes=tuple(
-                CreatureNodeRecord(
-                    idx,
-                    (idx // 6) + 1,
-                    1,
-                    60 if (idx // 6) % 2 == 0 else 240,
-                    50 if idx < 12 else 150,
-                    0,
-                    "fol1.t",
-                )
-                for idx in range(24)
-            ),
-            encounter_bands=(EncounterBandRecord(limit=50, kind=0),),
-        ),
-        builtin_font=BuiltinFontTable(glyphs=(b"\x00" * 8,) * 128),
-        synth=SynthSequenceTables(
-            blob_base=0,
-            blob=b"",
-            vibrato_rows=(),
-            envelope_rows=(),
-            sequences=(),
-            waveforms=b"",
-            instruments=(),
-        ),
-    )
-
-    graph = bundle.build_overworld_graph()
-    assert graph is not None
-    assert len(graph.nodes) == 35
-    assert graph.moves_per_turn == 3
-    assert graph.nodes[0].kind == NodeKind.ROAD
-    assert graph.nodes[29].kind == NodeKind.ROAD
-    assert graph.nodes[21].kind == NodeKind.START
-    assert graph.nodes[22].kind == NodeKind.START
-    assert graph.nodes[23].kind == NodeKind.START
-    assert graph.nodes[24].kind == NodeKind.START
-    assert graph.nodes[25].kind == NodeKind.HIGHWOOD
-    assert graph.nodes[26].kind == NodeKind.WATERDEEP
-    assert graph.nodes[27].kind == NodeKind.STONEHENGE
-    assert 28 in graph.nodes
-    assert 30 in graph.nodes
-    assert len(graph.dragon_patrol_route) == 4

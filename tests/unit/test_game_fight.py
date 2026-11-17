@@ -142,7 +142,7 @@ def test_host_returns_engine_health_and_lives_after_the_end_delay(lost: bool) ->
     assert legacy.hp == (80 if lost else 35)
     assert legacy.lives == (1 if lost else 2)
     assert legacy.daggers == 2
-    assert session.overworld.moves_remaining == 0
+    assert session.overworld.spent == session.overworld.budget
 
 
 def test_unsupported_encounter_preserves_campaign_and_records() -> None:

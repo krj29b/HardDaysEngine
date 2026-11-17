@@ -16,8 +16,17 @@ from pymoonstone.sim.overworld import (
 )
 
 if TYPE_CHECKING:
-    from pymoonstone.sim.prng import SimPrng
+    from pymoonstone.sim.rng import Rng
     from pymoonstone.sim.types import KnightId
+
+
+def _legacy_range(prng: Rng, low: int, high: int | None = None) -> int:
+    """Temporary legacy shop range draw; the LCG is removed (§11.18)."""
+    start, stop = (0, low) if high is None else (low, high)
+    if stop <= start:
+        raise ValueError("empty legacy shop range")
+    return start + (prng.draw() * (stop - start) >> 32)
+
 
 # Equipment and stat caps.
 MAX_SWORD_TIER: int = 4
@@ -448,7 +457,7 @@ def _healer_lift_curse(
 def play_tavern_dice(
     knight: KnightState,
     wager: int,
-    prng: SimPrng,
+    prng: Rng,
     *,
     overworld: OverworldState | None = None,
 ) -> TavernDiceResult:
@@ -480,10 +489,10 @@ def play_tavern_dice(
             "insufficient_gold",
         )
 
-    p_die1 = prng.rand_range(1, 7)
-    p_die2 = prng.rand_range(1, 7)
-    h_die1 = prng.rand_range(1, 7)
-    h_die2 = prng.rand_range(1, 7)
+    p_die1 = _legacy_range(prng, 1, 7)
+    p_die2 = _legacy_range(prng, 1, 7)
+    h_die1 = _legacy_range(prng, 1, 7)
+    h_die2 = _legacy_range(prng, 1, 7)
     p_total = p_die1 + p_die2
     h_total = h_die1 + h_die2
 
@@ -753,7 +762,7 @@ def perform_stonehenge_ritual(
 ) -> RitualResult:
     """Validate Moonstone altar ritual requirements at Stonehenge and award victory."""
     ow_knight = overworld.knights[knight_id]
-    at_stonehenge = ow_knight.node_id == overworld.graph.stonehenge_node_id
+    at_stonehenge = any(row.kind == 27 for row in overworld.arrivals if row.key)
     phase = overworld.moon_phase
     held = ow_knight.moonstone_count
 
@@ -800,7 +809,7 @@ def _validate_ritual_preconditions(
 def distribute_lair_loot(
     knight: KnightState,
     lair_index: int,
-    prng: SimPrng,
+    prng: Rng,
     *,
     overworld: OverworldState | None = None,
 ) -> LairLootResult:
@@ -810,10 +819,12 @@ def distribute_lair_loot(
         raise ValueError(msg)
 
     gold_awarded = (
-        LAIR_BASE_GOLD + lair_index * LAIR_GOLD_PER_TIER + prng.rand_range(LAIR_GOLD_VARIANCE)
+        LAIR_BASE_GOLD + lair_index * LAIR_GOLD_PER_TIER + _legacy_range(prng, LAIR_GOLD_VARIANCE)
     )
-    xp_awarded = LAIR_BASE_XP + lair_index * LAIR_XP_PER_TIER + prng.rand_range(LAIR_XP_VARIANCE)
-    daggers_awarded = min(MAX_DAGGERS - knight.daggers, 2 + prng.rand_range(3))
+    xp_awarded = (
+        LAIR_BASE_XP + lair_index * LAIR_XP_PER_TIER + _legacy_range(prng, LAIR_XP_VARIANCE)
+    )
+    daggers_awarded = min(MAX_DAGGERS - knight.daggers, 2 + _legacy_range(prng, 3))
     daggers_awarded = max(0, daggers_awarded)
     hp_restored = min(LAIR_HEAL_BONUS, max(0, knight.max_hp - knight.hp))
 

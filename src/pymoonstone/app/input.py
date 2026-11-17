@@ -93,6 +93,7 @@ class InputFrame:
 
     players: dict[KnightId, PlayerInput] = field(default_factory=dict)
     quit_requested: bool = False
+    key: int = 0
 
     def for_player(self, knight_id: KnightId) -> PlayerInput:
         """Return the input for ``knight_id``, defaulting to neutral."""
@@ -103,6 +104,7 @@ class InputFrame:
         return {
             "players": {str(int(kid)): inp.to_dict() for kid, inp in sorted(self.players.items())},
             "quit_requested": self.quit_requested,
+            "key": self.key,
         }
 
     @classmethod
@@ -115,7 +117,11 @@ class InputFrame:
                 kid = KnightId(int(key))
                 if isinstance(value, Mapping):
                     parsed[kid] = PlayerInput.from_dict(value)
-        return cls(players=parsed, quit_requested=bool(data.get("quit_requested", False)))
+        return cls(
+            players=parsed,
+            quit_requested=bool(data.get("quit_requested", False)),
+            key=int(data.get("key", 0)),
+        )
 
 
 @dataclass(slots=True, frozen=True)
@@ -425,9 +431,20 @@ class InputRouter:
             pad = self._sample_pad(pad_state) if pad_state is not None else PlayerInput()
             players[kid] = self._merge_inputs(kb, pad)
 
+        key = next(
+            (
+                code
+                for code in sorted(self._edge_keys)
+                if code
+                in (*range(pygame.K_1, pygame.K_9 + 1), pygame.K_e, pygame.K_q, pygame.K_SPACE)
+            ),
+            0,
+        )
+        if key in (pygame.K_e, pygame.K_q):
+            key -= 32
         self._edge_keys.clear()
         for pad_state in self._pads.values():
             pad_state.edge_buttons.clear()
         quit_req = self._quit_requested
         self._quit_requested = False
-        return InputFrame(players=players, quit_requested=quit_req)
+        return InputFrame(players=players, quit_requested=quit_req, key=key)

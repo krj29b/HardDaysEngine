@@ -40,11 +40,12 @@ from pymoonstone.app.fight_runtime import FightLoader
 from pymoonstone.app.game import GameScene, GameSession
 from pymoonstone.app.input import InputFrame, PlayerInput
 from pymoonstone.app.location_screens import LocationKind
+from pymoonstone.app.map_scene import compose_map
 from pymoonstone.assets.adf import DiskSet
 from pymoonstone.assets.palette import default_combat_palette
 from pymoonstone.render.renderer import MoonstoneRenderer
 from pymoonstone.render.scene import SceneRenderer, default_bitmap_font
-from pymoonstone.sim.overworld import EncounterTrigger, TriggerKind
+from pymoonstone.sim.overworld import EncounterTrigger, MapSprite, TriggerKind, open_menu, scan
 from pymoonstone.sim.types import KnightId
 
 if TYPE_CHECKING:
@@ -128,6 +129,21 @@ class AuditRig:
         rgba = self._base.read_canvas_rgba()
         return AuditShot(name=name, rgb=np.ascontiguousarray(rgba[..., :3]))
 
+    def capture_map_frames(self, frames: tuple[int, ...]) -> AuditShot:
+        """Preview every used mi.c frame separately from natural map captures (§11.15)."""
+        bundle = self.fight_assets()
+        picture, cel = bundle.get_test_picture(8), bundle.get_cel("mi.c")
+        if picture is None or cel is None:
+            raise ValueError("map previews require the original picture and sprites")
+        sprites = tuple(MapSprite(frame, 60 + index * 25, 90) for index, frame in enumerate(frames))
+        compose_map(self._scene.canvas, picture.pixels, cel, sprites)
+        self._scene.set_palette(picture.palette)
+        self._scene.flush_to_fbo()
+        rgba = self._base.read_canvas_rgba()
+        return AuditShot(
+            name="mi_frames_" + "_".join(map(str, frames)), rgb=np.ascontiguousarray(rgba[..., :3])
+        )
+
     def fight_assets(self) -> GameAssetBundle:
         """Return the real-disk bundle used for fight-engine audit fixtures."""
         from pymoonstone.app.scene_assets import GameAssetBundle
@@ -172,6 +188,51 @@ def _menu_and_map_shots(rig: AuditRig) -> Iterator[AuditShot]:
         session.scene = scene
         _step(session, 20)
         yield rig.capture(session, f"screen_{scene.name.lower()}")
+
+
+def _pixel_map_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    """Original map frames, proximity highlights and the numbered panel (§11.18)."""
+    session = rig.new_session()
+    session.scene = GameScene.OVERWORLD
+    _step(session, 40)
+    yield rig.capture(session, "pixel_start")
+    _step(session, 16, PlayerInput(dx=-1))
+    yield rig.capture(session, "pixel_walk")
+    world = session.overworld
+    node = next(n for n in world.data().nodes if n.kind == 25)
+    actor = world.current_actor
+    actor.map_x, actor.map_y = node.x, node.y
+    world.move = 0
+    scan(world)
+    yield rig.capture(session, "place_highlight")
+    lair = world.lairs[0]
+    actor.map_x, actor.map_y = lair.map_x, lair.map_y
+    scan(world)
+    yield rig.capture(session, "lair_highlight")
+    other = world.actors[1]
+    other.map_x, other.map_y = actor.map_x, actor.map_y
+    scan(world)
+    open_menu(world)
+    yield rig.capture(session, "numbered_arrivals")
+    world.menu = False
+    world.travel = True
+    scan(world)
+    yield rig.capture(session, "travel_frame")
+    world.ambush = True
+    scan(world)
+    yield rig.capture(session, "ambush_frame")
+    for frames in (
+        tuple(range(0, 5)),
+        tuple(range(5, 10)),
+        tuple(range(10, 15)),
+        tuple(range(15, 20)),
+        tuple(range(20, 25)),
+        tuple(range(25, 32)),
+        (32,),
+        (33, 42),
+        tuple(range(43, 47)),
+    ):
+        yield rig.capture_map_frames(frames)
 
 
 def _place_shots(rig: AuditRig) -> Iterator[AuditShot]:
@@ -391,6 +452,7 @@ AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
     "mudmen": _snatcher_shots,
     "intro": _intro_shots,
     "menu_map": _menu_and_map_shots,
+    "pixel_map": _pixel_map_shots,
     "places": _place_shots,
     "fights": _fight_shots,
     "regions": _region_shots,

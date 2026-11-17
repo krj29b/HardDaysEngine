@@ -21,12 +21,16 @@ from pymoonstone.app.input import (
 from pymoonstone.app.intro_player import assemble_stile_panorama
 from pymoonstone.app.location_screens import LocationKind
 from pymoonstone.cli.main import main
+from pymoonstone.sim.overworld import scan
 from pymoonstone.sim.types import KnightId
+from tests.unit.map_setup import KINDS, RULES
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     import pytest
+
+    from pymoonstone.sim.map_rules import MapRules
 
 
 def _frame_p1(
@@ -128,8 +132,7 @@ def _build_scripted_campaign_frames() -> list[InputFrame]:
     frames.append(_frame_p1(confirm=True))
     # Tick 1: Knight Select (keep 1 knight) -> Overworld
     frames.append(_frame_p1(confirm=True))
-    # Tick 2-4: Overworld, edge-triggered cycle to wilderness node 11 and confirm move
-    # Start node for RED is 10 with neighbors (0, 1, 11); index 2 is 11 (wilderness).
+    # Missing original assets must not fabricate navigation or encounters.
     frames.append(_frame_p1(dx=1))
     frames.append(_frame_p1())
     frames.append(_frame_p1(dx=1))
@@ -146,10 +149,10 @@ def _build_scripted_campaign_frames() -> list[InputFrame]:
 
 
 def test_campaign_navigation_and_replay_determinism_without_disks(tmp_path: Path) -> None:
-    # Seed chosen so wilderness arrival triggers a wandering monster encounter.
+    # Missing assets are deterministic for every replay seed.
     chosen_seed = 7
     probe = GameSession(seed=chosen_seed, start_scene=GameScene.OVERWORLD)
-    # Probe the same navigation; encounters require original assets to start.
+    # Probe navigation without inventing a replacement map.
     probe.step_tick(_frame_p1(dx=1))
     probe.step_tick(_frame_p1())
     probe.step_tick(_frame_p1(dx=1))
@@ -171,7 +174,8 @@ def test_campaign_navigation_and_replay_determinism_without_disks(tmp_path: Path
     assert run1.ticks_executed == len(script)
     assert run2.ticks_executed == len(script)
     assert run1.final_hash == run2.final_hash
-    assert run1.session.overworld.total_turns >= 1
+    assert run1.session.overworld.rules is None
+    assert run1.session.last_status == "ORIGINAL DISKS REQUIRED"
     assert run1.scene in (GameScene.OVERWORLD, GameScene.COMBAT, GameScene.VICTORY)
 
 
@@ -262,46 +266,41 @@ def test_knight_pick_routes_p1_input_and_edge_triggers_fire() -> None:
     assert session2.players == (KnightId.BLUE,)
     assert session2.overworld.current_knight_id == KnightId.BLUE
 
-    session2.step_tick(_frame_p1(confirm=True))
-    assert session2.overworld.total_turns == 1
+    session2.overworld.install(RULES, KINDS, 7)
+    x = session2.overworld.current_actor.map_x
+    session2.step_tick(_frame_p1(dx=1))
+    session2.step_tick(_frame_p1(dx=1))
+    assert session2.overworld.current_actor.map_x == x + 1
+    assert session2.overworld.spent == 1
 
 
-def test_status_new_day_and_location_transitions() -> None:
+def test_status_and_proximity_location_transitions() -> None:
     session = GameSession(seed=1, start_scene=GameScene.OVERWORLD)
+    session.overworld.install(RULES, KINDS, 1)
+    session.step_tick(_frame_p1(secondary=True))
     session.step_tick(_frame_p1(secondary=True))
     assert session.scene == GameScene.STATUS
-
     session.step_tick(_frame_p1(confirm=True))
     assert session.scene == GameScene.OVERWORLD
-
-    # Move RED to Highwood (node 1) to open LOCATION menu, then leave.
-    session.step_tick(_frame_p1(dx=1))
+    actor = session.overworld.current_actor
+    actor.map_x = actor.map_y = 50
+    scan(session.overworld)
+    session.step_tick(_frame_p1(confirm=True))
     session.step_tick(_frame_p1(confirm=True))
     assert session.scene == GameScene.LOCATION
     assert session.location_menu is not None
     assert session.location_menu.location == LocationKind.HIGHWOOD
-
-    for _ in range(3):
-        session.step_tick(_frame_p1(dy=1))
-        session.step_tick(_frame_p1())
-    session.step_tick(_frame_p1(confirm=True))
-    assert session.scene == GameScene.OVERWORLD
-
-    # Move from Highwood (1) back to start node (10) -> day advances to 3, shows NEW_DAY.
-    session.step_tick(_frame_p1(dx=1))
-    session.step_tick(_frame_p1(confirm=True))
-    assert session.overworld.day == 3
-    assert session.scene == GameScene.NEW_DAY
-
-    session.step_tick(_frame_p1(confirm=True))
-    assert session.scene == GameScene.OVERWORLD
+    assert session.overworld.day == 0
 
 
 def test_victory_and_game_over_reset_to_menu_and_music() -> None:
     calls: list[str] = []
 
     class _FakeBundle:
-        def build_overworld_graph(self) -> None:
+        def get_map_rules(self) -> MapRules:
+            return RULES
+
+        def get_test_picture(self, index: int) -> None:
             return None
 
         def load_victory_music(self) -> None:
@@ -341,134 +340,18 @@ def test_intro_skip_input() -> None:
     assert session.scene == GameScene.KNIGHT_SELECT
 
 
-def test_overworld_edge_triggered_direction_and_repeat() -> None:
-    session = GameSession(seed=7, start_scene=GameScene.OVERWORLD)
-    assert session.selected_move_index == 0
-
-    # Holding dx=1 for 6 ticks (a normal human tap) cycles only once.
-    for _ in range(6):
-        session.step_tick(_frame_p1(dx=1))
-    assert session.selected_move_index == 1
-
-    # Releasing and tapping again cycles to 2.
-    session.step_tick(_frame_p1())
-    session.step_tick(_frame_p1(dx=1))
-    assert session.selected_move_index == 2
-
-    # Holding past the initial repeat cooldown (12 ticks) repeats once.
-    for _ in range(12):
-        session.step_tick(_frame_p1(dx=1))
-    assert session.selected_move_index == 0
-
-
-def test_overworld_road_budget_and_end_turn() -> None:
-    from pymoonstone.sim.overworld import (
-        MapSiteInput,
-        NodeKind,
-        RegionId,
-        build_overworld_graph_from_sites,
-        create_campaign,
-    )
-
-    sites = (
-        MapSiteInput(
-            site_id=0, x=60, y=50, kind=NodeKind.START, region_id=RegionId.FOREST, neighbors=(1,)
-        ),
-        MapSiteInput(
-            site_id=1,
-            x=80,
-            y=50,
-            kind=NodeKind.ROAD,
-            region_id=RegionId.FOREST,
-            neighbors=(0, 2),
-        ),
-        MapSiteInput(
-            site_id=2,
-            x=100,
-            y=50,
-            kind=NodeKind.ROAD,
-            region_id=RegionId.FOREST,
-            neighbors=(1, 3),
-        ),
-        MapSiteInput(
-            site_id=3,
-            x=160,
-            y=100,
-            kind=NodeKind.STONEHENGE,
-            region_id=RegionId.VALLEY,
-            neighbors=(2,),
-        ),
-    )
-    graph = build_overworld_graph_from_sites(sites, dragon_route=(2,))
-    session = GameSession(seed=1, start_scene=GameScene.OVERWORLD)
-    session.overworld = create_campaign((KnightId.RED,), graph=graph, seed=1)
-    assert session.overworld.moves_remaining == 4
-
-    # Single road hop decrements moves_remaining without ending the day or popping NEW_DAY.
-    session.step_tick(_frame_p1(confirm=True))
-    assert session.overworld.day == 1
-    assert session.overworld.moves_remaining == 3
-    assert session.scene == GameScene.OVERWORLD
-
-    # Pressing weapon_switch ends the turn voluntarily and advances the day.
-    session.step_tick(_frame_p1(weapon_switch=True))
-    assert session.overworld.day == 2
-    assert session.scene == GameScene.NEW_DAY
-
-
-def test_overworld_home_castle_valley_and_maths_tower_triggers() -> None:
-    from pymoonstone.sim.overworld import EncounterTrigger, MoonPhase, TriggerKind
-
-    session = GameSession(seed=1, start_scene=GameScene.OVERWORLD)
-    kstate = session.knight_combat[KnightId.RED]
-    kstate.hp = 50
-    session.overworld.knights[KnightId.RED].lives = 2
-
-    session._handle_overworld_triggers(
-        KnightId.RED,
-        (
-            EncounterTrigger(
-                kind=TriggerKind.HOME_CASTLE,
-                knight_id=KnightId.RED,
-                node_id=10,
-                day=1,
-                moon_phase=MoonPhase.NEW_MOON,
-            ),
-        ),
-    )
-    assert kstate.lives == 2
-    assert kstate.hp == kstate.max_hp
-    assert session.last_status == "HOME CASTLE"
-
-    session._handle_overworld_triggers(
-        KnightId.RED,
-        (
-            EncounterTrigger(
-                kind=TriggerKind.VALLEY_OF_THE_GODS,
-                knight_id=KnightId.RED,
-                node_id=28,
-                day=1,
-                moon_phase=MoonPhase.NEW_MOON,
-            ),
-        ),
-    )
-    assert kstate.lives == 3
-    assert kstate.xp > 0
-    assert "VALLEY BLESSING" in session.last_status
-
-    prev_xp = kstate.xp
-    session._handle_overworld_triggers(
-        KnightId.RED,
-        (
-            EncounterTrigger(
-                kind=TriggerKind.MATHS_TOWER,
-                knight_id=KnightId.RED,
-                node_id=30,
-                day=1,
-                moon_phase=MoonPhase.NEW_MOON,
-            ),
-        ),
-    )
-    assert kstate.xp > prev_xp
-    assert kstate.gold > 0
-    assert "MATHS TOWER" in session.last_status
+def test_map_key_translation_and_replay_roundtrip() -> None:
+    router = InputRouter(init_joysticks=False)
+    for raw, translated in (
+        (pygame.K_3, "3"),
+        (pygame.K_e, "E"),
+        (pygame.K_q, "Q"),
+        (pygame.K_SPACE, " "),
+    ):
+        router.process_pygame_event(pygame.event.Event(pygame.KEYDOWN, key=raw))
+        frame = router.sample_frame()
+        assert frame.key == ord(translated)
+        assert InputFrame.from_dict(frame.to_dict()) == frame
+        assert router.sample_frame().key == 0
+        router.process_pygame_event(pygame.event.Event(pygame.KEYUP, key=raw))
+    assert InputFrame.from_dict({"players": {}}).key == 0
