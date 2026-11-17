@@ -526,7 +526,57 @@ def _sheet_shots(rig: AuditRig) -> Iterator[AuditShot]:
     yield rig.capture(session, "sheet2_natural_lair_win_equipment_fixture")
 
 
+def _shop_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    """Original shop panels and trades through the town caller (§12.29)."""
+    for waterdeep in (False, True):
+        name = "waterdeep" if waterdeep else "highwood"
+        session = rig.new_session()
+        actor = session.overworld.current_actor
+        actor.gold, actor.hp = 149, 1
+        session._open_town(_PRIMARY, waterdeep=waterdeep)
+        _audit_town_button(session, 1)
+        _step(session, 24)
+        yield rig.capture(session, f"{name}_smith_offers_gold_fixture")
+        _audit_shop_click(session, 92, 1, 1)
+        yield rig.capture(session, f"{name}_smith_mail")
+        _audit_shop_click(session, 88, 1, 2)
+        yield rig.capture(session, f"{name}_smith_claymore")
+    session = rig.new_session()
+    session.overworld.current_actor.gold = 149
+    session._open_town(_PRIMARY, waterdeep=False)
+    _audit_town_button(session, 4)
+    _step(session, 24)
+    yield rig.capture(session, "market_natural_starting_stock_gold_fixture")
+    _audit_shop_click(session, 8, 1)
+    yield rig.capture(session, "market_after_talisman_buy")
+    _audit_shop_click(session, 8, 0)
+    yield rig.capture(session, "market_after_talisman_sale")
+
+
+def _audit_town_button(session: GameSession, number: int) -> None:
+    screen = session.town_screen
+    if screen is None:
+        raise ValueError("town audit requires its parent screen")
+    region = screen.data.buttons[number - 1]
+    screen.state.pointer_x, screen.state.pointer_y = region.x, region.y
+    session.step_tick(_frame(PlayerInput(fire=True)))
+
+
+def _audit_shop_click(session: GameSession, field: int, side: int, mask: int = 0) -> None:
+    screen = session.sheet_screen
+    if screen is None:
+        raise ValueError("shop audit requires its shared sheet")
+    region = next(
+        r
+        for r in screen.state.regions
+        if r.field == field and r.side == side and r.mask == mask and not r.id
+    )
+    screen.state.pointer_x, screen.state.pointer_y = region.x, region.y
+    session.step_tick(_frame(PlayerInput(fire=True)))
+
+
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
+    "shops": _shop_shots,
     "sheets": _sheet_shots,
     "computer_knight": _computer_knight_shots,
     "dragon": _dragon_shots,

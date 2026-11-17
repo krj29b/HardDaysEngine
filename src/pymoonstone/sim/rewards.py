@@ -55,6 +55,16 @@ def item_gift(
     actor: Actor, inventory: Inventory, rng: Rng, rules: GiftRules, state: GiftState
 ) -> None:
     """Preserve last-gift memory even when rejecting a duplicate sharp sword (§12.12)."""
+    slot = inventory_gift(inventory, rng, rules, state)
+    if slot == 4:
+        actor.sword = 25
+    if slot == 6:
+        actor.hp = u16(actor.hp + 20)
+        recalc_hp(actor, inventory)
+
+
+def inventory_gift(inventory: Inventory, rng: Rng, rules: GiftRules, state: GiftState) -> int:
+    """Inventory-only gift for stock/lairs, with shared rejection memory (§12.12/29)."""
     for _ in range(4096):
         roll = rng.percent()
         slot = next(slot for limit, slot in rules.bands if roll <= limit)
@@ -64,12 +74,7 @@ def item_gift(
         if slot == 4 and inventory.byte(4):
             continue
         inventory.counts[slot // 2] = u8(inventory.byte(slot) + 1)
-        if slot == 4:
-            actor.sword = 25
-        if slot == 6:
-            actor.hp = u16(actor.hp + 20)
-            recalc_hp(actor, inventory)
-        return
+        return slot
     raise ValueError("item gift did not terminate")
 
 

@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from pymoonstone.sim.shop_types import StockRules
+
 
 @dataclass(slots=True, frozen=True)
 class TextLine:
@@ -50,3 +52,4 @@ class TurnRules:
     dragon: MapDragonRules
     gifts: GiftRules
     dragon_defaults: tuple[tuple[int, int, int], ...]
+    stock: StockRules | None = None

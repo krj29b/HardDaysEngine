@@ -190,6 +190,7 @@ class OverworldState:
     human_order: tuple[KnightId, ...] = field(init=False)
     turns: TurnCells = field(default_factory=TurnCells)
     gifts: GiftState = field(default_factory=GiftState)
+    market: Inventory = field(default_factory=Inventory)
     knights: dict[KnightId, KnightView] = field(init=False)
     lairs: list[Lair] = field(default_factory=list)
     arrivals: list[Arrival] = field(default_factory=lambda: [Arrival() for _ in range(10)])
@@ -304,9 +305,11 @@ class OverworldState:
         actor.tile_y = u16(actor.map_y + height) >> 3
         return u16(actor.tile_y * 40 + actor.tile_x)
 
-    def grid_byte(self, table: bytes) -> int:
-        """Signed word indexing; invalid loaded memory reads raise (§11.18)."""
+    def grid_byte(self, table: bytes, suffix: bytes = b"") -> int:
+        """Signed indexing into the grid and its bounded executable suffix (§11.21)."""
         index = s16(self.tile())
+        if len(table) <= index < len(table) + len(suffix):
+            return suffix[index - len(table)]
         if not 0 <= index < len(table):
             raise ValueError(f"map tile {index} outside loaded grid")
         return table[index]
@@ -318,7 +321,7 @@ class OverworldState:
         if actor.kind != 4:
             actor.type = 12
         self.budget = u16(actor.derived_endurance << 4)
-        self.region_code = self.grid_byte(self.data().regions)
+        self.region_code = self.grid_byte(self.data().regions, self.data().region_tail)
 
     def enter(self) -> None:
         """Recompute turn cells and apply stale move without charging (§11.4)."""
@@ -332,7 +335,7 @@ class OverworldState:
         self.blocked = False
         if self.travel or self.ambush:
             return
-        mask = self.grid_byte(self.data().terrain)
+        mask = self.grid_byte(self.data().terrain, self.data().terrain_tail)
         if mask:
             self.terrain_counter = u16(self.terrain_counter + 1)
             self.blocked = bool(self.terrain_counter & u16(s8(mask)))

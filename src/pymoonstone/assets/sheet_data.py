@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from pymoonstone.assets.ai_map_rules import parse_ai_map_rules
 from pymoonstone.assets.fight_palette import MogVersionError
 from pymoonstone.assets.mog_code import MogCode, Pointer, StoreRun
+from pymoonstone.assets.shop_data import parse_shop_rules
 from pymoonstone.sim.sheet_types import SheetRules
 
 if TYPE_CHECKING:
@@ -114,4 +115,5 @@ def parse_sheet_rules(
         mog.operand(0xBF4C, 0xB07C, "hawk threshold"),
         mog.operand(0xBFB6, 0xB07C, "protection threshold"),
         mog.code[table.offset : table.offset + 8],
+        parse_shop_rules(executable),
     )

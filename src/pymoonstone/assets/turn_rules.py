@@ -9,6 +9,7 @@ from pymoonstone.assets.fight_defs import parse_fight_defs
 from pymoonstone.assets.fight_palette import MogVersionError
 from pymoonstone.assets.map_rules import _bytes, _pointer
 from pymoonstone.assets.mog_code import MogCode, Pointer
+from pymoonstone.assets.shop_data import parse_stock_rules
 from pymoonstone.sim.turn_rules import GiftRules, MapDragonRules, TextLine, TurnRules
 
 if TYPE_CHECKING:
@@ -139,4 +140,5 @@ def parse_turn_rules(executable: DecodedHunkExecutable) -> TurnRules:
             (77, 1, 20),
             (96, 4, 5),
         ),
+        stock=parse_stock_rules(executable),
     )

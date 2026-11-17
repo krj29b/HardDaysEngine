@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 
+from pymoonstone.sim.shop_types import ShopRules
+
 
 @dataclass(slots=True, frozen=True)
 class SheetRules:
@@ -16,6 +18,7 @@ class SheetRules:
     hawk_limit: int
     protection_limit: int
     armour_hp: bytes
+    shop: ShopRules | None = None
 
 
 @dataclass(slots=True, frozen=True)

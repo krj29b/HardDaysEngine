@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from pymoonstone.sim import sheet_actions as actions
+from pymoonstone.sim.m68k import s16
 from pymoonstone.sim.sheet_layout import button, rebuild
+from pymoonstone.sim.shops import market, smith
 
 if TYPE_CHECKING:
     from pymoonstone.sim.overworld import OverworldState
@@ -32,6 +34,13 @@ def click(state: SheetState, rules: SheetRules, world: OverworldState, region: S
     else:
         _dispatch(state, rules, world, region)
     redraw(state, rules, world)
+    if (
+        state.number == 6
+        and region.type in (1, 5)
+        and rules.shop is not None
+        and s16(state.pointer_x) < s16(rules.shop.split_x)
+    ):
+        state.sounds.append("sell")
 
 
 def _dispatch(
@@ -39,8 +48,8 @@ def _dispatch(
 ) -> None:
     _, flags = button(state, rules, world.actors[state.knight - 1], region)
     kind, field = region.type, region.field
-    if state.number in (5, 6):
-        raise ValueError("town transaction handlers are not installed")
+    if _shop_dispatch(state, rules, world, region):
+        return
     if kind == 12:
         actions.drop_item(state, world, field)
     elif kind == 5 and flags & 16:
@@ -49,6 +58,18 @@ def _dispatch(
         _stat_or_daggers(state, rules, world, field, flags)
     elif flags & 32:
         _take(state, rules, world, region)
+
+
+def _shop_dispatch(
+    state: SheetState, rules: SheetRules, world: OverworldState, region: SheetRegion
+) -> bool:
+    if region.type != 10 and not (state.number == 6 and region.type in (1, 5)):
+        return False
+    if rules.shop is None:
+        raise ValueError("shop transaction requires decoded rules")
+    action = smith if region.type == 10 else market
+    action(state, rules.shop, world, region)
+    return True
 
 
 def _stat_or_daggers(

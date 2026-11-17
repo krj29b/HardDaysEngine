@@ -73,6 +73,7 @@ from pymoonstone.sim.overworld import (
 from pymoonstone.sim.palette_fx import PaletteFxState, pack_rgb12
 from pymoonstone.sim.rewards import transfer_loot
 from pymoonstone.sim.rng import DEFAULT_SEED, Rng
+from pymoonstone.sim.stock import initialize as initialize_stock
 from pymoonstone.sim.towns import TownAction
 from pymoonstone.sim.turns import TurnResult, advance as advance_turn
 from pymoonstone.sim.types import KnightId
@@ -445,6 +446,10 @@ class GameSession:
         self.overworld.ai_rules = self.asset_bundle.get_ai_map_rules()
         for offset, size, value in self.overworld.turn_rules.dragon_defaults:
             self.dragon_actor.write(offset, size, value)
+        if self.overworld.turn_rules.stock is not None:
+            initialize_stock(
+                self.overworld, self.overworld.turn_rules.stock, self.overworld.turn_rules.gifts
+            )
         for kid in KnightId:
             self._sync_legacy_actor(kid)
         self._start_map_colors()

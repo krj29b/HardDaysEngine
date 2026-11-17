@@ -3900,3 +3900,74 @@ loading-text prologue and final every-button-to-screen acceptance are
 T11.16b2, after those children exist. No invented service screens replace them.
 Stonehenge no longer calls the deleted all-moonstones ritual model; it remains
 explicitly unavailable until its original offer/ritual caller lands in T11.19.
+
+
+### 12.29 Smith/market data and startup inventory boundary (T11.17)
+
+Read human smith prices from hunk0 checked compare/debit pairs: armour
+$C2C4/$C2CE, $C2F8/$C302, $C32C/$C336; swords $C360/$C376,
+$C394/$C3AA; daggers $C3C0/$C3D0. Each pair must agree and address
+actor gold (+74). Armour stores at $C2D4/$C308/$C33C address +92;
+the HP gains at $C2DC/$C310/$C344 address +80. Sword compare/store
+pairs $C36A/$C37C and $C39E/$C3B0 address +88 and must agree.
+The dagger cap is the checked byte compare at $C3C8. Dagger count comparisons
+are signed bytes, sword comparisons signed longs, gold comparisons signed words;
+updates wrap to the stored width. Armour selection uses the lowest set mask bit.
+Do not apply the reference port's configurable zero-price refusal to original
+operands: an affordable zero-price operand remains a purchase.
+
+The market initializer is the checked relocated LEA at $CBF4, followed by
+12 immediate word writes to displacements 0,2,...,22. Preserve all prices,
+including key/moonstone slots. The market click LEA at $C3F6 must name that
+same allocation. The stock address at $4DBC/$4DDC and $9AEE must agree.
+The signed pointer split is the checked compare at $C3FC; the sell right shift
+is the checked LSR at $C48C. Read the sell cap and clamp from $C492/$C49A
+and require agreement. Buy sounds precede affordability; sell sounds follow
+redraw. Neither purchase nor sale increments the shared take-change counter.
+Stat purchases continue on sheets 5/6, because dispatch is by region type.
+
+The smith panel uses §12.3 positions shifted by 150 for its right panel.
+Button indices for mail/plate/battle are 7/8/9, swords 11/12, dagger 5.
+The market right panel draws stock inventory plus the sharp-sword icon at
+(193,95). The left worn-sword icon remains type 2, field +88; do not invent a sell
+region for it. The slot-4 sale handler still preserves its documented fallback
+when invoked, although the ordinary worn-sword region does not call it.
+Counted stock is finite. The pointer x, rather than the region side, selects
+buy/sell. Mask buys OR into the owner and XOR out of stock, sales reverse
+those operations. Gold addition wraps before the signed sell-cap test.
+For counted buys other than rings, omit the original invalid inventory-address
+HP write (§12.11); the ensuing sheet redraw still recalculates the displayed
+knight normally. Buying a sharp-sword count therefore equips it on redraw.
+
+Campaign startup now completes the inventory setup of §11.3, once after
+installing decoded defaults and before any gameplay draw. It uses the same
+Rng and GiftState as turns and sheets. First four hoard item calls ($4D9C
+through $4DAE), then a hoard gold call ($4DB6); six market item calls from
+the checked MOVEQ/DBRA loop at $4DCA..$4DD8, then the extra count at
+$4DE2 (slot displacement checked). Inventory-only gifts update last-gift
+memory and reject duplicate sharp swords, without actor side effects.
+A single rejection-sampled key draw ($4E48 mask, $4E4E limit) supplies
+one shared index for all four six-lair groups, with masks from the stores at
+$4E62/$4E72/$4E82/$4E92. Read the four lair loot bands via LEA $4F1A;
+run their gold/item choices in lair order (kind 4 gives no loot).
+Hoard item calls use the actor-target path, including ring HP and sharp-sword
+side effects; stock and lair calls use the inventory-only path. All stock, loot and last-gift state
+enter the existing world hash. Reset reconstructs them; opening a market never
+rolls or replenishes stock. This closes the initialization follow-up recorded
+by T11.12/13, and preserves the PRNG order before market and later gameplay.
+
+
+### 11.21 Bottom-edge map grid reads (T11.17 verification correction)
+
+The corrected startup random sequence reaches a legal computer position
+(305,190), whose frame-0 bottom edge yields tile index 1038. The original
+signed-index byte read has no 1000-cell bounds test. Keep the nominal 40x25
+terrain and region arrays, and also load their immediately following bytes
+from the same hunk. Bound this extension by the largest tile reachable at
+(310,190) using the actual decoded frame-0 size (for the supported image,
+one additional 40-cell row). Lookup first addresses the nominal grid, then
+this retained suffix; negative indices or reads beyond the suffix still raise.
+Do not clamp the knight, tile or table values and do not invent padding.
+This corrects the earlier §11.18 model of a 1000-byte allocation without
+changing movement, clipping, PRNG calls or map scheduling. Synthetic rules may
+omit the suffix and continue to reject accesses outside their supplied data.

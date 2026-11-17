@@ -286,8 +286,8 @@ Rules for the whole phase:
   cutover, shared-sheet returns, spent exit and obsolete-model removal) and
   **T11.16b2** (original loading-text prologue and complete child-screen acceptance
   after T11.17/18). T11.18 depends on b1, avoiding a circular dependency on its
-  own caller acceptance. Until those child tasks land, service requests report
-  unavailable and sheet transactions retain their explicit T11.17 boundary.
+  own caller acceptance. Service requests report unavailable until T11.18;
+  T11.17 supplies the original transactions on shared sheets 5 and 6.
   Final parent acceptance still requires every button to open its real screen.
 - **T11.17 Smith and market (sheets 5 and 6):** fixed-price smith, market stock and price list,
   buy and sell-back, gold cap, including the documented quirks. *Accept:* prices and caps come from

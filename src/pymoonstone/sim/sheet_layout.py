@@ -272,10 +272,39 @@ def rebuild(state: SheetState, rules: SheetRules, world: OverworldState) -> None
 
 
 def _right(state: SheetState, rules: SheetRules, world: OverworldState) -> None:
-    if state.number in (2, 10):
+    if state.number == 5:
+        smith_panel(state, rules)
+    elif state.number == 6:
+        stock = world.market
+        if stock.byte(4):
+            row(state, rules, 25, 193, 95, 1, 0, SheetRegion(0, 0, 0, 0, 13, 1, 1, field=4))
+        inventory(state, rules, stock, 150, 1)
+    elif state.number in (2, 10):
         loot_panel(state, rules, world)
     elif state.number in (1, 8, 11):
         knight_panel(state, rules, world, state.other, 150, 1)
         if state.number in (8, 11):
             state.icons.append(SheetIcon(44, 146, 71))
             state.regions.append(SheetRegion(146, 71, 20, 20, id=8))
+
+
+def smith_panel(state: SheetState, rules: SheetRules) -> None:
+    """Fixed offers at the original panel-relative coordinates (§12.3/29)."""
+    for frame, x, y, button, mask, field in (
+        (28, 23, 145, 7, 1, 92),
+        (29, 64, 145, 8, 2, 92),
+        (30, 106, 144, 9, 4, 92),
+        (23, 50, 107, 11, 1, 88),
+        (24, 47, 125, 12, 2, 88),
+    ):
+        row(
+            state,
+            rules,
+            frame,
+            x + 150,
+            y,
+            1,
+            0,
+            SheetRegion(0, 0, 0, 0, button, 1, 10, mask, field),
+        )
+    row(state, rules, 21, 182, 89, 13, 9, SheetRegion(0, 0, 0, 0, 5, 1, 10, field=76))

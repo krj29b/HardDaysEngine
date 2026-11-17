@@ -575,3 +575,44 @@ held-direction navigation, turn exhaustion, foreign-controller isolation and
 replay hashes. GL tests compare every town pixel against the loaded picture plus
 hardware-pointer indices and verify render purity. Contact-sheet captures label
 service attempts without presenting them as implemented service screens.
+
+
+## ADR-032: Human shop rules and one-time campaign stock use decoded executable data
+**Status:** ACCEPTED (2026-11-18, T11.17; follows ADR-029 / ADR-031)
+**Context:** Shared sheets 5/6 had no right-panel offers or transaction handlers,
+and no market inventory was initialized. Market rolls follow the hoard rolls
+and precede lair loot; adding isolated stock rolls would shift gameplay randomness
+away from the original. The initialization follow-up was recorded by T11.12/13.
+**Decision:** assets/shop_data.py reads checked comparison/debit pairs, equipment
+stores, HP gains, dagger cap, all twelve price stores, sell cap and pointer split
+into immutable ShopRules. StockRules captures the original startup counts,
+extra stock, shared key masks and lair loot bands. sim/shops.py implements human
+transactions; the existing shared-sheet dispatcher and panel builder consume
+these records. sim/stock.py completes the ordered hoard/market/key/lair rolls
+once during host campaign installation, using the existing Rng/GiftState.
+The world owns finite market inventory, which is already covered by the host
+hash. Shop opening and rendering do not roll or replenish stock; reset rebuilds
+it. Hoard gifts retain actor effects; inventory-only gifts share the same
+rejection memory without those effects. No second shop state machine is added.
+**Consequences:** Preserve signed byte/word/long comparisons, wrapped additions,
+armour downgrades, lowest mask bit, finite stock, mask XOR/OR, ring HP effects,
+stat purchases on both sheets, and sound-event ordering. The original invalid
+inventory-address HP write remains omitted as specified in §12.11. Redraw
+recalculates the displayed knight, so bought sharp swords equip normally.
+The ordinary left worn-sword region stays type 2; no invented sell region is
+added. No zero-price policy from the reference port's mod system is imported.
+
+The corrected startup stream exposed a legal (305,190) map position indexing
+1038 in the original signed byte lookup. §11.21 corrects the nominal-grid-only
+allocation model: retain the bounded adjacent executable suffix reachable by
+the decoded sprite bottom edge, while keeping both nominal 1000-byte grids.
+Negative indices and reads beyond supplied suffixes still raise. This preserves
+original clipping, table values and draws, and fixes the existing natural
+multi-day replay test without changing its controller, seed or expectations.
+
+Synthetic tests use deliberately different prices/caps and cover transactions,
+byte masks, signed boundaries, depletion, sparse price writes and malformed
+instruction pairs. Independent real-disk table/RNG oracles verify startup for
+all four seed selections; host checks cover both smith callers, natural stock
+purchase/sale, no replenishment, reset and hashes. GL checks verify render
+purity and the shop audit contact sheet is reviewed. No game data is committed.
