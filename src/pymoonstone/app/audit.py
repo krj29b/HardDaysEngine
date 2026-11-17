@@ -18,10 +18,12 @@ from pymoonstone.app.fight_audit import (
     TROGG_ARENAS,
     build_caster_audit,
     build_fight_audit,
+    build_flyer_audit,
     build_snatcher_audit,
     caster_pose_frames,
     fight_audit_frames,
     fight_host_input,
+    flyer_pose_frames,
     snatcher_pose_frames,
 )
 from pymoonstone.app.fight_runtime import FightLoader
@@ -261,7 +263,26 @@ def _snatcher_shots(rig: AuditRig) -> Iterator[AuditShot]:
     raise RuntimeError("idle Mudmen audit did not reach an outcome")
 
 
+def _flyer_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    bundle = rig.fight_assets()
+    for label, scene in flyer_pose_frames(bundle):
+        yield rig.capture_fight(scene, f"flyer_pose_{label}")
+    for label, scene in fight_audit_frames(build_flyer_audit(bundle)):
+        yield rig.capture_fight(scene, f"flyer_seeded_{label}")
+    audit = build_flyer_audit(bundle)
+    audit.scene.fight.actor(1).hp = 10
+    for frame in range(300):
+        audit.scene.advance(frame * 6)
+        if frame in (20, 40, 60):
+            yield rig.capture_fight(audit.scene, f"flyer_idle_loss_frame{frame + 1}")
+        if not audit.scene.fight.fight_active:
+            yield rig.capture_fight(audit.scene, f"flyer_idle_loss_outcome{frame + 1}")
+            return
+    raise RuntimeError("idle Flyer audit did not reach an outcome")
+
+
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
+    "flyer": _flyer_shots,
     "mudmen": _snatcher_shots,
     "intro": _intro_shots,
     "menu_map": _menu_and_map_shots,

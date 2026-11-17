@@ -20,7 +20,7 @@ from pymoonstone.assets.cel import CelFrame, CelFrameMeta, DecodedCel
 from pymoonstone.assets.fight_program import cel_shape
 from pymoonstone.assets.palette import default_combat_palette
 from pymoonstone.render.scene import SceneRenderer, default_bitmap_font
-from pymoonstone.sim.fight import END_FIGHT, Fight, FightConstants, FrameOutput
+from pymoonstone.sim.fight import END_FIGHT, Fight, FightConstants, FlyerCells, FrameOutput
 from pymoonstone.sim.fight_script import ScriptImage, TickOutput
 from pymoonstone.sim.overworld import EncounterTrigger, MoonPhase, TriggerKind
 from pymoonstone.sim.types import KnightId
@@ -45,6 +45,7 @@ def _session(*, audio: AudioEngine | None = None) -> GameSession:
     session = GameSession(start_scene=GameScene.OVERWORLD, audio=audio)
     session.asset_bundle = Mock(spec=GameAssetBundle)
     loader = Mock(spec=FightLoader)
+    loader.flyer = FlyerCells()
 
     def create(
         _arena: ArenaDef,
@@ -76,6 +77,7 @@ def _session(*, audio: AudioEngine | None = None) -> GameSession:
             rng=rng,
         )
         fight.first, fight.fight_active = first, True
+        fight.flyer = loader.flyer
         fight.inventories = inventories
         fight.actor(first).input_port = 1
         fight.start_job(2, first, 1, (50, 0, 80), 1, 0x28)

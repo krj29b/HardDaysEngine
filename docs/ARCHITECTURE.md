@@ -2054,6 +2054,54 @@ modulo-four sound counter. They join the existing `$049E` sound picker and remai
 deferred, including draws and counter state, to T11.23. The handler itself draws
 no random numbers; its movement and script choices are fully deterministic.
 
+### 10.26 Flyer (`T11.10d`)
+
+Source: the supported `mog` code hunk, `$5A76..$5C1C`, checked against
+moonstone-ace's classic Flyer behavior (later party-target selection is excluded).
+The four step words follow the alternation word addressed by `EORI.W` at `$5AE6`.
+All tunables, step words and fixed scripts are decoded from the user's executable.
+
+The target is the first fighter. Every call starts with idle as next script,
+input cleared and action set to `$20` (heavy). An attacker whose type is not `$00`
+takes priority: subtract its contact damage with word wrapping, then use its
+action as a byte offset into this Flyer's hurt table. Another Flyer is ignored,
+falling through to the hit branch. A hit on a non-Flyer selects `after_hit_script`
+unless the victim has no hit target, has signed HP <= 0 and demo is off. In that
+case kill the **first fighter's** job, mark the first fighter dead, end the fight,
+and choose one of two fixed finishing scripts according to whether this Flyer
+and the hit victim have equal facing bytes. Hits on Flyers fall through to motion.
+
+Motion compares x as a signed word. Facing 3 turns only at x < 0, places x at
+-50 and sets facing 1. All other facings turn at x >= 340, place x at 380 and set
+facing 3. A turn XORs the shared alternation word with 1; nonzero copies the
+target's depth, zero adds `(beam_word & 7) << 2` to it (word wrapping). Then draw
+the original PRNG exactly once: store `(draw & 15) | 5` as a byte timer and
+decrement it once. A nonzero result returns idle. The timer is **not** counted
+down on subsequent calls away from an edge, so this is one idle script, not a
+multi-frame wait. There is no random draw or lane update away from a turn.
+
+Otherwise increment animation phase as a byte; reset it only when it equals 4.
+Sign-extend phase to a word to select the walk script at phase * 4 and the step
+word at phase * 2. Negate the step when facing bit 1 is set, add it to x with word
+wrapping and return the selected walk script. No approach, movement probe or
+arena clipping is applied. Invalid step phases raise instead of reading unrelated
+code bytes; valid actors only use the four decoded phases.
+
+**Hardware approximation:** `$DFF006` is a raster-position register; its horizontal
+low bits depend on CPU instruction timing that this 50 Hz simulation does not
+emulate. `Fight.step(vbl)` supplies `beam_word = u16(vbl)` before the handler pass.
+Only the Flyer's lane variation reads this deterministic surrogate. It consumes no
+extra PRNG draw, performs no I/O and cannot depend on rendering or wall time. This
+explicit deviation follows the integer timing contract (§7 / ADR-005).
+
+The alternation word is persistent executable state, not reset by arena setup.
+`FightLoader` retains one mutable `FlyerCells` initialized from the relocated
+word; its fights share it. Both the runtime snapshot and the host hash (even
+between encounters) include the word; runtime snapshots also include beam_word.
+The decoder verifies type `$00` in the handler table, helper destinations and
+entry instructions, the raster read, operand instruction/displacement pairs,
+script relocations, step-table extent and adjacency to the alternation word.
+
 ## 11. Overworld and Turns (`T11.4`)
 
 The overworld is one screen: the map picture with small sprites on it. Knights take turns. The

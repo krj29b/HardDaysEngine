@@ -841,6 +841,7 @@ class GameSession:
             "knights": knights_payload,
             "encounter": encounter_payload,
             "fight_lanes": self.spawn_lanes.counter,
+            "flyer_toggle": self.fight_loader.flyer.toggle if self.fight_loader else 0,
             "lair_counts": self.lair_counts,
             "bad_luck": self.bad_luck,
             "defeats": self.last_defeat_mask,

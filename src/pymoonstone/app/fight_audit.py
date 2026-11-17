@@ -237,23 +237,30 @@ def caster_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightScen
         yield from _pose_frames(build_caster_audit(bundle), name, script)
 
 
-def _pose_frames(audit: FightAudit, name: str, script: int) -> Iterator[tuple[str, FightScene]]:
+def _pose_frames(
+    audit: FightAudit,
+    name: str,
+    script: int,
+    samples: tuple[int, ...] = (0, 3, 7),
+) -> Iterator[tuple[str, FightScene]]:
     fight = audit.scene.fight
     me = fight.actor(audit.opponent)
     me.hp = 0xFFFF if name == "death" else me.hp
     job = fight.find_job(audit.opponent)
     if job is None:
-        raise ValueError("Ratmen pose preview has no creature job")
+        raise ValueError("pose preview has no creature job")
     job.paused = 0
     job.x, job.height, job.depth = 150, 0, 120
     me.x, me.height, me.y = 150, 0, 120
     fight.restart_job(audit.opponent, script)
     # Step the script engine directly to retain the selected pose through its end.
-    for frame in range(12):
+    for frame in range(max(12, max(samples) + 1)):
         fight.engine.vbl = frame * 6
         output = fight.engine.tick()
         audit.scene.canvas.accept(output.draws)
-        if frame in (0, 3, 7) and any(d.cel.startswith(("Ratmen", "Mudmen")) for d in output.draws):
+        if frame in samples and any(
+            d.cel.startswith(("Ratmen", "Mudmen", "be")) for d in output.draws
+        ):
             yield f"{name}_frame{frame + 1}", audit.scene
 
 
@@ -291,6 +298,43 @@ def snatcher_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightSc
         ("death", scripts.hurt),
     ):
         yield from _pose_frames(build_snatcher_audit(bundle), name, script)
+
+
+def build_flyer_audit(bundle: GameAssetBundle) -> FightAudit:
+    """Single Flyer with original setup/pokes and explicit audit equipment (§10.26)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "flyer")
+    arena = replace(arena, total=1, max_alive=1, first_wave=arena.first_wave[:1])
+    knights = [Actor() for _ in range(4)]
+    knight = knights[0]
+    knight.hp = knight.hp_max = 20
+    knight.strength, knight.sword, knight.inventory, knight.daggers = 3, 0x19, 1, 99
+    runtime = loader.creature(
+        arena, "fo1.t", knights, Actor(), {1: Inventory()}, Rng(0x2468ACE1), 1
+    )
+    knight.hp = knight.hp_max = 200
+    opponent = next(j.owner for j in runtime.fight.engine.jobs if j.type == 0)
+    return FightAudit(runtime.scene, loader.knight_rules, opponent)
+
+
+def flyer_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightScene]]:
+    """Flyer script previews, distinct from natural handler execution (§10.26)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "flyer")
+    hurt = arena.creature.hurt_scripts[8 // 4]
+    for name, script in (
+        ("idle", arena.creature.idle_script),
+        ("walk", next(s for s in arena.creature.walk_scripts if s)),
+        ("attack", arena.creature.after_hit_script),
+        ("hurt", hurt),
+        ("death", hurt),
+    ):
+        samples = (0, 8, 10, 12) if name == "death" else (0, 3, 7)
+        yield from _pose_frames(build_flyer_audit(bundle), name, script, samples)
 
 
 def fight_audit_frames(audit: FightAudit) -> Iterator[tuple[str, FightScene]]:

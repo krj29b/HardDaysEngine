@@ -155,6 +155,13 @@ class CasterCells:
 
 
 @dataclass(slots=True)
+class FlyerCells:
+    """The persistent executable alternation word (§10.26)."""
+
+    toggle: int = 0
+
+
+@dataclass(slots=True)
 class FrameOutput:
     """What one :meth:`Fight.step` produced.
 
@@ -235,6 +242,8 @@ class Fight:
     approach: ApproachCells = field(default_factory=ApproachCells)
     caster: CasterCells = field(default_factory=CasterCells)
     snatch_flags: int = 0
+    flyer: FlyerCells = field(default_factory=FlyerCells)
+    beam_word: int = 0
     flights: FlightState = field(default_factory=FlightState)
 
     def __post_init__(self) -> None:
@@ -394,6 +403,7 @@ class Fight:
         """Job pass, engine tick and contact pass of one fight frame (§10.7, items 1, 2, 4)."""
         self.skipped = []
         self.sounds = []
+        self.beam_word = u16(vbl)
         self.job_pass()
         self.engine.vbl = vbl
         self.engine.current_knight = self.first

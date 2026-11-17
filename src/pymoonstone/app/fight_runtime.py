@@ -26,13 +26,15 @@ from pymoonstone.assets.fight_program import (
 )
 from pymoonstone.assets.fight_setup import parse_fight_setup
 from pymoonstone.assets.fighter_rules import parse_knight_rules
+from pymoonstone.assets.flyer_rules import parse_flyer_rules
 from pymoonstone.assets.hunk import parse_hunk_executable
 from pymoonstone.assets.mog_code import MogCode
 from pymoonstone.assets.snatcher_rules import parse_snatcher_rules
 from pymoonstone.render.scene import palette_fx_to_rgb
-from pymoonstone.sim.fight import Fight, TableKeys, Wall, pause_all
+from pymoonstone.sim.fight import Fight, FlyerCells, TableKeys, Wall, pause_all
 from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
 from pymoonstone.sim.fight_ai.caster import CASTER_TYPE, install_caster
+from pymoonstone.sim.fight_ai.flyer import FLYER_TYPE, install_flyer
 from pymoonstone.sim.fight_ai.snatcher import SNATCHER_TYPE, install_snatcher
 from pymoonstone.sim.fight_setup import (
     FightSetupRules,
@@ -58,7 +60,7 @@ if TYPE_CHECKING:
 
 FIGHT_VBLS = 6
 _REGIONS = (4, 0, 8, 12)
-_SUPPORTED_TYPES = (*BRAWLER_TYPES, CASTER_TYPE, SNATCHER_TYPE)
+_SUPPORTED_TYPES = (*BRAWLER_TYPES, CASTER_TYPE, SNATCHER_TYPE, FLYER_TYPE)
 
 
 class FightUnavailableError(ValueError):
@@ -191,6 +193,8 @@ class FightRuntime:
             "approach": asdict(f.approach),
             "caster": asdict(f.caster),
             "snatch_flags": f.snatch_flags,
+            "flyer": asdict(f.flyer),
+            "beam_word": f.beam_word,
             "flights": asdict(f.flights),
             "cells": [
                 f.first,
@@ -234,6 +238,8 @@ class FightLoader:
         self.brawler_rules = parse_brawler_rules(executable)
         self.caster_rules = parse_caster_rules(executable)
         self.snatcher_rules = parse_snatcher_rules(executable)
+        self.flyer_rules = parse_flyer_rules(executable)
+        self.flyer = FlyerCells(self.flyer_rules.initial_toggle)
         self.setup_rules = parse_fight_setup(executable)
 
     def arena_for(self, handler_offset: int) -> ArenaDef:
@@ -289,6 +295,8 @@ class FightLoader:
         install_brawler(f, self.brawler_rules, self.knight_rules)
         install_caster(f, self.caster_rules, self.knight_rules)
         install_snatcher(f, self.snatcher_rules, self.knight_rules)
+        install_flyer(f, self.flyer_rules, self.knight_rules)
+        f.flyer = self.flyer
         keys = f.register_tables(script_tables(self.defs.knight))
         for actor in knights:
             keys.assign(actor)

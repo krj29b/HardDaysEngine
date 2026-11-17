@@ -265,3 +265,22 @@ The reference port's later cooperative-player changes are excluded.
 handler/script execution. Separately labelled pose previews cover idle, walk, attack,
 hurt and death on the Mudmen audit sheet. Newly reached hunk-40 sound pickers are
 identified and remain deferred, including their PRNG draws, with sound wiring T11.23.
+
+## ADR-019: Flyer alternation persists; raster variation uses deterministic ticks
+**Status:** ACCEPTED (2026-11-17, T11.10d; follows ADR-005 / ADR-013)
+**Context:** The Flyer uses an alternation word stored beside its step table, and
+reads low bits of the Amiga raster register to vary every other return lane. CPU
+instruction timing and the raster hardware are outside the fixed 50 Hz simulation.
+**Decision:** `assets/flyer_rules.py` decodes checked operands, relocated tables and
+finishing scripts. `sim/fight_ai/flyer.py` uses the original PRNG once per edge turn,
+the existing contact damage and fight outcomes, and preserves the single idle-script
+pause quirk. `FightLoader` retains the decoded `FlyerCells` across fights; runtime
+snapshots and the host hash include it even between encounters. Before handlers,
+`Fight.step(vbl)` sets `beam_word = u16(vbl)` as the explicit deterministic raster
+surrogate (§10.26). This does not consume a random draw or consult host time.
+**Consequences:** Lane variation is reproducible but does not emulate cycle-exact
+raster timing. Synthetic tests check draw count, shared state, boundaries, phase
+order, hurt/finish priority and demo exclusions; real-disk tests check natural
+win/death, idle loss, state hashes and persistence across encounters. The Flyer audit
+separates script-pose previews from natural handler traces and includes late death
+frames. Sound pickers remain deferred to T11.23 as for the other handlers.
