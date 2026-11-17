@@ -31,6 +31,7 @@ from pymoonstone.app.fight_audit import (
     drake_pose_frames,
     fight_audit_frames,
     fight_host_input,
+    fight_host_melee_input,
     flyer_pose_frames,
     guardian_pose_frames,
     snatcher_pose_frames,
@@ -475,7 +476,56 @@ def _computer_knight_shots(rig: AuditRig) -> Iterator[AuditShot]:
     raise RuntimeError("idle computer knight audit did not reach an outcome")
 
 
+def _sheet_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    """Shared sheets with explicit inventory fixtures and real assets (§12.26)."""
+    for kid in KnightId:
+        session = rig.new_session((kid,))
+        session.scene = GameScene.OVERWORLD
+        world = session.overworld
+        actor = world.current_actor
+        actor.progress, actor.gold, actor.daggers = 6, 73, 5
+        world.inventories[actor.inventory].counts[:] = [2] * 10 + [15, 15]
+        session._open_sheet(9)
+        _step(session, 24)
+        yield rig.capture(session, f"sheet9_{kid.name.lower()}_inventory_fixture")
+    session = rig.new_session()
+    world = session.overworld
+    world.lairs[0].gold = 43
+    world.lairs[0].loot.counts[:] = [2] * 10 + [15, 15]
+    session._open_sheet(2, lair=0)
+    _step(session, 24)
+    yield rig.capture(session, "sheet2_loot_fixture")
+    world.travel = True
+    session._open_sheet(2, lair=0)
+    _step(session, 24)
+    yield rig.capture(session, "sheet2_read_only_fixture")
+    world.travel = False
+    session._open_sheet(8)
+    _step(session, 24)
+    yield rig.capture(session, "sheet8_acquisition_fixture")
+    session._open_sheet(11)
+    _step(session, 24)
+    yield rig.capture(session, "sheet11_wyrm_fixture")
+    session = rig.new_session((KnightId.BLUE,))
+    legacy = session.knight_combat[KnightId.BLUE]
+    legacy.hp = legacy.max_hp = 200
+    legacy.strength, legacy.sword_tier, legacy.daggers = 3, 4, 5
+    session.overworld.lairs[1].creatures_left = 1
+    session.overworld.lairs[1].gold = 7
+    session.overworld.lairs[1].loot.counts[0] = 1
+    session._dispatch_lair(1)
+    for _ in range(18000):
+        session.step_tick(fight_host_melee_input(session))
+        if session.scene != GameScene.COMBAT:
+            break
+    if session.scene != GameScene.STATUS or session.last_defeat_mask:
+        raise RuntimeError("sheet audit did not win the naturally spawned Trogg lair")
+    _step(session, 24)
+    yield rig.capture(session, "sheet2_natural_lair_win_equipment_fixture")
+
+
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
+    "sheets": _sheet_shots,
     "computer_knight": _computer_knight_shots,
     "dragon": _dragon_shots,
     "guardian": _guardian_shots,

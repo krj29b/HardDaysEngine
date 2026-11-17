@@ -495,3 +495,30 @@ presenter, callers and contact-sheet acceptance (b). Parent completion requires
 both. This follows the existing layer boundaries and introduces no parallel
 sheet model. No original strings, extracted tables or generated images are added
 to source control. Specification §12.25 records the initialization boundary.
+
+## ADR-029: Shared sheets own their pointer, dispatch state and ordered draw lists
+**Status:** ACCEPTED (2026-11-17, T11.15b; follows ADR-025 / ADR-028)
+**Context:** Status was an invented text screen, and lair wins and travel inspection
+had no shared loot caller. The original loop couples hit regions to the drawn icons.
+**Decision:** `sim/sheets.py` dispatches original sheet actions over persistent
+campaign actors and inventories. Frozen rules and geometry live in `sheet_types.py`.
+`sheet_layout.py` rebuilds ordered icons, text and regions during updates, while
+`sheet_actions.py` handles transfers and item effects. `app/sheet_screen.py` loads
+original cels, text/palette tables and checked transaction operands and renders
+stored output. The host uses STATUS for shared sheets and hashes their mutable
+state, including the retained last-item cell. Status preserves existing Dragon
+jobs. Travel inspection restores the saved map position on close. Lair outcomes
+open loot or status, and emptied loot is tidied before returning to the map.
+**Consequences:** Held fire operates on live regions every PAL tick, and exhausted
+items immediately lose their regions. Exact caps, wrapping, sparse button tables,
+the byte-indexed armour transfer and last-row moonstone spacing remain specified
+quirks. The obsolete status renderer and its metric assertions are removed.
+Real-disk tests check rule operands independently, original sheet actions, a
+natural Trogg lair win, caller settlement, replay hashes and render purity. The
+natural audit uses ordinary heavy-sword inputs with explicit equipment fixtures.
+Original wave count write-back remains unchanged, including its word underflow.
+Re-entry uses the engine's signed exhaustion test so a wrapped terminal count
+continues to open remaining loot.
+Town transactions and their callers remain T11.16/17, place-specific callers
+remain T11.18–21, and sheet sound playback remains T11.23. New-game inventory
+rolls retain the existing initialization follow-up recorded by T11.12/13.

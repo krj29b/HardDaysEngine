@@ -1,4 +1,4 @@
-"""Interactive town/location menus, status sheet, and New Day banner (T9.3)."""
+"""Interactive town/location menus (T9.3)."""
 
 from __future__ import annotations
 
@@ -619,32 +619,3 @@ def render_location_menu(
 
     if state.status_message:
         font.draw_text(canvas, state.status_message[:36], 8, 229, color_index=fg)
-
-
-def render_status_screen(
-    scene_renderer: SceneRenderTarget,
-    knight: KnightState,
-    overworld: OverworldState,
-    font: FontTarget,
-    *,
-    bundle: PictureBundle | None = None,
-) -> None:
-    """Render the knight character status sheet on ``ch.piv`` (or solid fallback)."""
-    fg, _ = _compose_backdrop(scene_renderer, bundle, ("ch.piv",))
-    canvas = scene_renderer.canvas
-    ow_knight = overworld.knights.get(knight.knight_id)
-    keys_mask = ow_knight.keys_mask if ow_knight is not None else knight.keys
-    stones_mask = ow_knight.moonstones_mask if ow_knight is not None else knight.moonstones
-    phase_label = overworld.moon_phase.name.replace("_", " ")
-
-    font.draw_text(canvas, f"KNIGHT: {knight.knight_id.name}", 24, 40, color_index=fg)
-    font.draw_text(canvas, f"HP: {knight.hp}/{knight.max_hp}", 24, 60, color_index=fg)
-    font.draw_text(
-        canvas, f"STAMINA: {knight.stamina}/{knight.max_stamina}", 24, 76, color_index=fg
-    )
-    font.draw_text(canvas, f"LIVES: {knight.lives}", 24, 92, color_index=fg)
-    font.draw_text(canvas, f"GOLD: {knight.gold}", 24, 108, color_index=fg)
-    font.draw_text(canvas, f"XP: {knight.xp}", 24, 124, color_index=fg)
-    font.draw_text(canvas, f"KEYS MASK: {keys_mask:04b}", 24, 144, color_index=fg)
-    font.draw_text(canvas, f"MOONSTONES MASK: {stones_mask:04b}", 24, 160, color_index=fg)
-    font.draw_text(canvas, f"DAY {overworld.day}: {phase_label}", 24, 184, color_index=fg)

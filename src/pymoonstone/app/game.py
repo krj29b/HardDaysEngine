@@ -28,7 +28,6 @@ from pymoonstone.app.location_screens import (
     LocationKind,
     LocationMenuState,
     render_location_menu,
-    render_status_screen,
     step_location_menu,
 )
 from pymoonstone.app.loop import Accumulator50Hz
@@ -38,6 +37,7 @@ from pymoonstone.app.scene_assets import (
     GameAssetBundle,
     build_intro_cinematic_frame,
 )
+from pymoonstone.app.sheet_screen import SheetScreen
 from pymoonstone.assets.adf import DiskSet
 from pymoonstone.assets.palette import (
     RGBColor,
@@ -180,8 +180,6 @@ class GameSession:
         self._menu_prev_dx: int = 0
         self._menu_prev_dy: int = 0
         self._menu_prev_fire: bool = False
-        self._ow_prev_fire: bool = False
-        self._ow_prev_secondary: bool = False
         self._end_prev_fire: bool = False
         self.audio = audio
         self.disk_set = disk_set
@@ -214,6 +212,8 @@ class GameSession:
         self._map_key = 0
         self.map_runtime: MapRuntime | None = None
         self._calendar_phase = 0
+        self.sheet_screen: SheetScreen | None = None
+        self.last_sheet_item = 65535
         if self.asset_bundle is not None:
             self._ensure_map()
 
@@ -229,11 +229,13 @@ class GameSession:
         self.knight_combat = {kid: KnightState(knight_id=kid) for kid in KnightId}
         self.active_encounter = None
         self.location_menu = None
+        self.sheet_screen = None
+        self.last_sheet_item = 65535
         self.location_knight_id = roster[0]
         self.practice_mode = False
         self.actors = [Actor(kind=_KNIGHT_KINDS[kid]) for kid in KnightId]
         self.dragon_actor = Actor()
-        self.inventories = {handle: Inventory() for handle in range(1, 5)}
+        self.inventories = {handle: Inventory() for handle in range(1, 6)}
         self.fight_rng = Rng(self.seed)
         self.overworld = OverworldState(
             self.actors, self.dragon_actor, self.inventories, self.fight_rng, roster
@@ -568,9 +570,7 @@ class GameSession:
         if not world.menu and key == ord("Q"):
             self._enter_game_over()
         elif not world.menu and key == ord(" "):
-            self._sync_legacy_actor(world.current_knight_id)
-            self.scene = GameScene.STATUS
-            world.colors.active = False
+            self._open_sheet(9)
         elif row is not None:
             self._dispatch_arrival(row)
         elif world.dragon_encounter:
@@ -660,8 +660,8 @@ class GameSession:
     def _dispatch_lair(self, index: int) -> None:
         world, kid = self.overworld, self.overworld.current_knight_id
         lair = world.lairs[index]
-        if world.travel:
-            self.last_status = "LAIR LOOT VIEW UNAVAILABLE"
+        if world.travel or s16(lair.creatures_left) <= 0:
+            self._open_sheet(2, lair=index)
             return
         if self.fight_loader is None and self.asset_bundle is not None:
             self.fight_loader = FightLoader(self.asset_bundle)
@@ -746,14 +746,49 @@ class GameSession:
             self.last_status = f"DAY {self.overworld.day}"
 
     def _step_status(self, frame: InputFrame) -> None:
-        inp = self._player_input(frame, self.overworld.current_knight_id)
-        fire_edge = inp.fire and not self._ow_prev_fire
-        secondary_edge = inp.secondary and not self._ow_prev_secondary
-        self._ow_prev_fire = inp.fire
-        self._ow_prev_secondary = inp.secondary
-        if inp.confirm or fire_edge or secondary_edge:
-            self._reenter_map()
-            self.last_status = f"DAY {self.overworld.day}"
+        screen = self.sheet_screen
+        if screen is None:
+            self._open_sheet(9)
+            return
+        kid = KnightId(screen.state.knight - 1)
+        done = screen.step(self.overworld, self._player_input(frame, kid))
+        self.bad_luck |= screen.state.bad_luck
+        for knight in KnightId:
+            self._sync_legacy_actor(knight)
+        if done:
+            self._close_sheet()
+
+    def _open_sheet(self, number: int, *, lair: int = -1, other: int = 0) -> None:
+        if self.asset_bundle is None:
+            self.scene = GameScene.OVERWORLD
+            self.last_status = "ORIGINAL DISKS REQUIRED FOR SHEETS"
+            return
+        self.overworld.colors.active = False
+        self.sheet_screen = SheetScreen(
+            self.asset_bundle,
+            self.overworld,
+            number,
+            knight=int(self.overworld.current_knight_id) + 1,
+            lair=lair,
+            other=other,
+        )
+        self.sheet_screen.state.last_item = self.last_sheet_item
+        self.scene = GameScene.STATUS
+        self._begin_fade_in(palette_fx_to_rgb(self.sheet_screen.palette(self.overworld)))
+
+    def _close_sheet(self) -> None:
+        screen = self.sheet_screen
+        if screen is None:
+            raise ValueError("no shared sheet to close")
+        self.last_sheet_item = screen.state.last_item
+        if screen.state.lair >= 0:
+            if screen.state.read_only:
+                self.overworld.restore_position()
+            else:
+                self.overworld.lairs[screen.state.lair].tidy()
+        self.sheet_screen = None
+        self._reenter_map()
+        self.last_status = f"DAY {self.overworld.day}"
 
     def _step_new_day(self, primary: PlayerInput) -> None:
         if self.palette_fx.is_fading:
@@ -944,6 +979,9 @@ class GameSession:
             return
         self.active_encounter = None
         self.overworld.spent = self.overworld.budget
+        if active.trigger.kind == TriggerKind.LAIR_BOSS and self.overworld.lairs:
+            self._open_sheet(2 if won else 9, lair=active.trigger.lair_index if won else -1)
+            return
         if self.overworld.turn_rules is None and all(
             not k.alive for k in self.overworld.knights.values()
         ):
@@ -1012,6 +1050,8 @@ class GameSession:
             "world": world,
             "map_key": self._map_key,
             "calendar_phase": self._calendar_phase,
+            "sheet": asdict(self.sheet_screen.state) if self.sheet_screen else None,
+            "last_sheet_item": self.last_sheet_item,
             "palette": self.palette_fx.snapshot(),
             "pending_fade": self._pending_fade_in,
             "map_jobs": self.map_runtime.snapshot() if self.map_runtime else None,
@@ -1182,14 +1222,7 @@ class GameSession:
         elif self.scene == GameScene.LOCATION:
             self._render_location_scene(scene_renderer, font)
         elif self.scene == GameScene.STATUS:
-            kid = self.overworld.current_knight_id
-            render_status_screen(
-                scene_renderer,
-                self.knight_combat[kid],
-                self.overworld,
-                font,
-                bundle=self.asset_bundle,
-            )
+            self._render_sheet_scene(scene_renderer)
         elif self.scene == GameScene.NEW_DAY:
             self._render_new_day(scene_renderer, font)
         else:
@@ -1198,6 +1231,11 @@ class GameSession:
         if self.palette_fx.is_fading or self.palette_fx.is_flashing:
             scene_renderer.set_palette_fx(self.palette_fx.current_palette())
         scene_renderer.flush_to_fbo()
+
+    def _render_sheet_scene(self, renderer: SceneRenderer) -> None:
+        if self.sheet_screen is None:
+            raise ValueError("status scene has no shared sheet")
+        self.sheet_screen.render(renderer, self.overworld)
 
 
 def run_headless_session(

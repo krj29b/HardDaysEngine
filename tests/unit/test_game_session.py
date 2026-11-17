@@ -283,9 +283,8 @@ def test_status_and_proximity_location_transitions() -> None:
     session.overworld.install(RULES, KINDS, 1)
     session.step_tick(_frame_p1(secondary=True))
     session.step_tick(_frame_p1(secondary=True))
-    assert session.scene == GameScene.STATUS
-    session.step_tick(_frame_p1(confirm=True))
     assert session.scene == GameScene.OVERWORLD
+    assert session.last_status == "ORIGINAL DISKS REQUIRED FOR SHEETS"
     actor = session.overworld.current_actor
     actor.map_x = actor.map_y = 50
     scan(session.overworld)

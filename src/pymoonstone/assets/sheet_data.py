@@ -6,8 +6,10 @@ import struct
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pymoonstone.assets.ai_map_rules import parse_ai_map_rules
 from pymoonstone.assets.fight_palette import MogVersionError
 from pymoonstone.assets.mog_code import MogCode, Pointer, StoreRun
+from pymoonstone.sim.sheet_types import SheetRules
 
 if TYPE_CHECKING:
     from pymoonstone.assets.hunk import DecodedHunkExecutable
@@ -89,3 +91,27 @@ def parse_sheet_data(executable: DecodedHunkExecutable) -> SheetData:
         for first in (0xAE88, 0xAE9C, 0xAEC4, 0xAEB0, 0xAECE)
     )
     return SheetData(_buttons(mog), (_panel(mog, 0xAF32), _panel(mog, 0xAF4A)), colors, pairs)
+
+
+def parse_sheet_rules(
+    executable: DecodedHunkExecutable, data: SheetData, sizes: tuple[tuple[int, int], ...]
+) -> SheetRules:
+    """Read transaction operands and the original byte-indexed armour table (§12.26)."""
+    mog = MogCode(executable)
+    table = mog.lea(0xC19A, 0x4BF9, "sheet armour transfer")
+    if table.hunk != 0:
+        raise MogVersionError("mog: sheet armour table is outside code")
+    ai = parse_ai_map_rules(executable)
+    return SheetRules(
+        data.buttons,
+        sizes,
+        tuple(tuple((p.frame, p.x, p.y, p.orientation) for p in panel) for panel in data.panels),
+        ai.stat_price,
+        mog.operand(0xC264, 0x0C68, "sheet gold cap", displacement=74),
+        ai.rest_cap_test,
+        ai.rest_cap,
+        mog.operand(0xBEC8, 0xB07C, "haste threshold"),
+        mog.operand(0xBF4C, 0xB07C, "hawk threshold"),
+        mog.operand(0xBFB6, 0xB07C, "protection threshold"),
+        mog.code[table.offset : table.offset + 8],
+    )

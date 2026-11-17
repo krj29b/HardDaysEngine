@@ -14,7 +14,6 @@ from pymoonstone.app.location_screens import (
     location_backdrop_names,
     menu_options_for_location,
     render_location_menu,
-    render_status_screen,
     step_location_menu,
     visit_shop,
 )
@@ -317,7 +316,7 @@ def test_waterdeep_all_services_training_and_stonehenge_ritual() -> None:
     assert ow.game_over is True
 
 
-def test_render_location_and_status_screens() -> None:
+def test_render_location_screen() -> None:
     ow = _make_overworld()
     ow.knights[KnightId.RED].keys_mask = 0b0101
     ow.knights[KnightId.RED].moonstones_mask = 0b0011
@@ -341,29 +340,6 @@ def test_render_location_and_status_screens() -> None:
     assert "hea.piv" in bundle.requested[-1]
     assert int(renderer.canvas[28, 0]) == 7
     assert any("HEALER" in line for line in loc_font.lines)
-
-    # Status screen renders all required metrics on ch.piv.
-    status_font = _RecordingFont()
-    render_status_screen(
-        renderer,
-        knight,
-        ow,
-        status_font,
-        bundle=bundle,
-    )
-    assert bundle.requested[-1] == ("ch.piv",)
-    assert int(renderer.canvas[28, 0]) == 5
-    joined = "\n".join(status_font.lines)
-    assert "RED" in joined
-    assert "77/100" in joined
-    assert "70/100" in joined
-    assert "LIVES: 2" in joined
-    assert "GOLD: 345" in joined
-    assert "XP: 200" in joined
-    assert "0101" in joined
-    assert "0011" in joined
-    assert "DAY 15" in joined
-    assert "FULL MOON" in joined
 
 
 def test_town_scroll_rendering_avoids_overlapping_text_and_aligns_highlight() -> None:

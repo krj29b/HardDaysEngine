@@ -589,6 +589,15 @@ def fight_audit_frames(audit: FightAudit) -> Iterator[tuple[str, FightScene]]:
 
 def fight_host_input(session: GameSession) -> InputFrame:
     """Audit-only bot inputs for the campaign host, including replacement Trogg waves."""
+    return _host_input(session, melee=False)
+
+
+def fight_host_melee_input(session: GameSession) -> InputFrame:
+    """Ordinary heavy-sword audit inputs for a naturally spawned lair wave."""
+    return _host_input(session, melee=True)
+
+
+def _host_input(session: GameSession, *, melee: bool) -> InputFrame:
     active, loader = session.active_encounter, session.fight_loader
     if active is None or loader is None:
         raise ValueError("fight host audit requires an active, loaded fight")
@@ -607,7 +616,7 @@ def fight_host_input(session: GameSession) -> InputFrame:
             targets, key=lambda handle: abs(s16(runtime.fight.actor(handle).x) - s16(first.x))
         )
         audit = FightAudit(runtime.scene, loader.knight_rules, target, runtime.first)
-        word = audit.input_word()
+        word = _guardian_input(audit) if melee else audit.input_word()
     inp = PlayerInput(
         dx=int(bool(word & RIGHT)) - int(bool(word & LEFT)),
         dy=int(bool(word & DOWN)) - int(bool(word & UP)),

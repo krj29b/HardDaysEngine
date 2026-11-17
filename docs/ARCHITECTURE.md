@@ -3788,3 +3788,38 @@ Class colour pairs are checked MOVE.W-to-postincrement operands at $AE88,
 $AE9C, $AEC4, $AEB0 and $AECE, each followed four bytes later by its shade.
 This order produces class rows 0..4. The presenter substitutes the first pair
 at palette entries 28..29 and, for a second knight, the second pair at 30..31.
+
+### 12.26 Shared sheet implementation boundary (T11.15b)
+
+The app owns decoded cels, palette and immutable sheet rules. Simulation owns
+the sheet number, owner/opponent handles, pointer position, last item, change
+counter, done/hand-over flags and ordered icon, text and hit-region lists.
+Opening and every action rebuild those lists and recalculate displayed actors.
+Rendering consumes them without changing simulation or drawing random numbers.
+Joystick movement is two pixels per PAL tick with the bounds of §12.2. Held
+fire dispatches each tick while over a live region. A rebuild immediately
+removes regions for exhausted items. No extra repeat delay is introduced.
+
+The common status scene hosts sheets. Space opens sheet9. A lair win opens
+sheet2 before returning to the map. Travel inspection opens sheet2 read-only
+and restores the saved position on closing. Empty cleared lairs open their loot
+without another fight, using the engine's signed nonpositive exhaustion test.
+The stored count remains the original raw word, including underflow on simultaneous
+last deaths. Closing a normal loot sheet tidies that lair. Unknown
+sheet numbers use the original plain, narrow left panel. Sheets5/6 receive
+their transaction handlers in T11.17, and their callers arrive with T11.16.
+Protection-dialog and place-specific callers remain their scheduled tasks.
+
+Scrolls8/11 reuse the loop and cycle opponents in original record order.
+The previous sheet is retained for Acquisition, and closing Wyrm writes its
+selected opponent into the dragon's target. All mutable sheet cells and outputs
+are included in the host hash. The existing original PRNG and map-mode helpers
+implement item effects. Sheet sound events are retained in order for T11.23.
+Sound playback does not drive rules or consume simulation randomness here.
+
+Additional checked operands are read from hunk0 for the exact gold cap ($C264),
+gamble thresholds ($BEC8/$BF4C/$BFB6) and rest caps ($BEA6/$BEAE). The armour
+transfer's byte-indexed word table is reached through the checked LEA at $C19A.
+The stat price uses the existing checked map-AI decoder. Out-of-range sprite,
+button and armour-table accesses raise instead of substituting assets or reading
+unmodeled memory. No game tables are copied into source.
