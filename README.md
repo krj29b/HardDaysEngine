@@ -66,3 +66,5 @@ See [AGENTS.md](AGENTS.md) for contributor/agent rules and [docs/ARCHITECTURE.md
 MIT License — see [LICENSE](LICENSE).
 
 *Moonstone: A Hard Days Knight* is (c) 1991 Mindscape / Rob Anderson. This license covers the `pymoonstone` source code only, not the original game or any data extracted from it. External reference projects (`moonstone-ace` and `openmoonstone`) are not included in this repository and were consulted as specifications only (see [docs/DECISIONS.md](docs/DECISIONS.md), ADR-001).
+
+This is an independent, unofficial fan project. It is not affiliated with, endorsed by, or sponsored by Mindscape, Rob Anderson, or any current rights holder of *Moonstone*. All trademarks belong to their respective owners; the game's title is used only to describe compatibility. You must own the original game to use this software.

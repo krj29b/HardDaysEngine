@@ -567,7 +567,7 @@ using data tables in Hunk 2 (`S_2`, `12,288` bytes) and the `.stile` vertical sc
   8. Scene `002D` (`bg2a.piv` + `S_2[4932]` + `ov1.cel` phase 2, speed `6`): Knight drawing broadsword before Stonehenge.
   9. Scene `002F` (`bg3.piv` + `S_2[6996, 7034, 6958, 7554, 7942, 8568, 8582]`, speed `8`): Knight entering the Stonehenge circle.
   10. Scene `002E` (`bg5a.piv` + `S_2[1022]`, speed `6`): High Druid dubbing the kneeling knight.
-  11. Caption `00AA` (`message.piv` + `S_2[120]` text list): *"The druids sent their best knights to Stonehenge so they may be dubbed into the Quest for the MOONSTONE"*.
+  11. Caption `00AA` (`message.piv` + `S_2[120]` text list): a one-line caption telling the player that the druids have summoned their finest knights to Stonehenge to be dubbed for the quest.
 
 ---
 
