@@ -18,9 +18,11 @@ from pymoonstone.app.fight_audit import (
     TROGG_ARENAS,
     build_caster_audit,
     build_fight_audit,
+    build_snatcher_audit,
     caster_pose_frames,
     fight_audit_frames,
     fight_host_input,
+    snatcher_pose_frames,
 )
 from pymoonstone.app.fight_runtime import FightLoader
 from pymoonstone.app.game import GameScene, GameSession
@@ -242,7 +244,25 @@ def _caster_shots(rig: AuditRig) -> Iterator[AuditShot]:
         yield rig.capture_fight(scene, f"ratmen_seeded_{label}")
 
 
+def _snatcher_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    bundle = rig.fight_assets()
+    for label, scene in snatcher_pose_frames(bundle):
+        yield rig.capture_fight(scene, f"mudmen_pose_{label}")
+    for label, scene in fight_audit_frames(build_snatcher_audit(bundle)):
+        yield rig.capture_fight(scene, f"mudmen_seeded_{label}")
+    audit = build_snatcher_audit(bundle)
+    for frame in range(300):
+        audit.scene.advance(frame * 6)
+        if frame in (5, 12, 20):
+            yield rig.capture_fight(audit.scene, f"mudmen_idle_loss_frame{frame + 1}")
+        if not audit.scene.fight.fight_active:
+            yield rig.capture_fight(audit.scene, f"mudmen_idle_loss_outcome{frame + 1}")
+            return
+    raise RuntimeError("idle Mudmen audit did not reach an outcome")
+
+
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
+    "mudmen": _snatcher_shots,
     "intro": _intro_shots,
     "menu_map": _menu_and_map_shots,
     "places": _place_shots,

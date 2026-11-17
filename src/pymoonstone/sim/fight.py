@@ -234,6 +234,7 @@ class Fight:
     gloated: bool = False
     approach: ApproachCells = field(default_factory=ApproachCells)
     caster: CasterCells = field(default_factory=CasterCells)
+    snatch_flags: int = 0
     flights: FlightState = field(default_factory=FlightState)
 
     def __post_init__(self) -> None:

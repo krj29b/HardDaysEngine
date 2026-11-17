@@ -2000,6 +2000,60 @@ meeting and temple sheets; this task does not substitute invented loot or invent
 Lair remaining counts and the lane cursor persist in the session and its hash, ready for
 the original overworld state of T11.12. Unsupported creature handlers remain unavailable.
 
+### 10.25 Mudmen snatcher (`T11.10c`)
+
+Source: the original `mog` hunk 40, offsets `$0000..$0408`, checked against the
+classic (single-target) behavior described by moonstone-ace's snatcher handler. Its
+later cooperative-player extensions are excluded. Values below describe operands;
+the implementation reads them and all script addresses from the user's executable.
+
+The target is always the first fighter. Each call starts with the idle script and
+clears input. An attacker takes priority: subtract its contact damage, set animation
+timer to 20, and choose the fixed hurt script. A hit target instead has its job's
+pause bit toggled; select the carry script, set shared and local carry bit 0, timer 40.
+
+Shared flags are tested in order: gone (bit 2), carrying (0), freed (1), released (6).
+Gone returns idle. Carrying affects only a Mudman with its own carry bit: decrement
+the byte timer; while nonzero, port 1 fire plus down selects release and replaces
+carry with release in both flags, otherwise repeat carry. On expiry clear shared
+carry, set shared/local freed, mark the first fighter dead, and fall into freed.
+Freed selects the swallow script, kills the target job, and clears both freed bits
+only when the local freed bit is set. Released clears both release bits, toggles
+the target pause, subtracts one HP from the Mudman and selects hurt. The original
+attempts to restart the target with owner/script registers reversed; it finds no
+job. Preserve that ineffective restart rather than inventing a recovery script.
+
+With none of those shared flags, an unseen Mudman decrements its byte timer. Zero
+returns idle; any other result copies target x/depth, appears 75 pixels to its
+right facing 3 when target x is below 160 (signed), otherwise 75 to its left facing
+1. Choose appear, set local shown (bit 3) and grab-ready (bit 4). Grab-ready tests
+depth and the inclusive x distance 20..80: toggle target pause, mark it dead, choose
+the sink script and set shared gone. Otherwise clear grab-ready and choose emerge.
+
+Normal approach uses §10.20's approach helper. With its flag set and near clear,
+walk; with near set recompute absolute x distance. Distances at most 50 walk;
+below 75 choose strike and replace local flags with shown/grab-ready; below 100
+choose reach only if depth is near; all other cases walk. Depth-near is the signed
+absolute depth difference compared with the actor's depth reach (§10.19).
+
+Walking advances phase first through block 0 (+1, §10.20); right/left reads the
+eight-word x-step table via the relocated LEA in hunk 40, up/down chooses -2/+2.
+Use the shared movement scratch (including an untouched component), apply the
+movement mask, clear components with no surviving direction bit, add wrapped
+word coordinates and select the phase's walk script. If both components are zero,
+reset phase and select idle. No arena clipping is added.
+
+The decoder checks the handler-table entry for type `$04` points at hunk 40 offset
+0, each operand's instruction/displacement, script relocations to hunk 4, both
+step-table pointers and helper call destinations. Shared snatch flags belong to
+the fight and its replay snapshot, initially zero for each encounter.
+
+The appearance script reaches two additional checked sound routines in hunk 40:
+`$0428` picks one of four sound pairs with a PRNG draw, and `$04BC` advances a
+modulo-four sound counter. They join the existing `$049E` sound picker and remain
+deferred, including draws and counter state, to T11.23. The handler itself draws
+no random numbers; its movement and script choices are fully deterministic.
+
 ## 11. Overworld and Turns (`T11.4`)
 
 The overworld is one screen: the map picture with small sprites on it. Knights take turns. The

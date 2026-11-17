@@ -249,3 +249,19 @@ progress on a lair win and clears bad luck. No substitute loot or inventory rewa
 remain T11.12 / T11.13. Missing creature handlers still report unavailable. This completes the
 fight-host work deferred by ADR-015 without changing the layer boundaries or introducing another
 combat model. Specification §10.24 records word wrapping, warning ownership and timer ordering.
+
+## ADR-018: Mudmen share encounter flags and retain classic grab quirks
+**Status:** ACCEPTED (2026-11-17, T11.10c; follows ADR-013)
+**Context:** The Mudmen handler lives in executable hunk 40 and coordinates all Mudmen
+through one byte, while per-creature flags and timers stay in the actor record.
+**Decision:** `assets/snatcher_rules.py` reads its checked operands, relocated scripts
+and step table into frozen rule records. `sim/fight_ai/snatcher.py` uses the existing
+approach, movement, contact-damage and job helpers. `Fight.snatch_flags` is initialized
+per encounter and included in runtime snapshots. The host registers type `$04`.
+The classic first-fighter target, second-port escape input, timer underflow, local
+carry-bit retention and ineffective reversed-register restart are preserved (§10.25).
+The reference port's later cooperative-player changes are excluded.
+**Consequences:** Seeded real-disk win/loss and full-state replay exercise natural
+handler/script execution. Separately labelled pose previews cover idle, walk, attack,
+hurt and death on the Mudmen audit sheet. Newly reached hunk-40 sound pickers are
+identified and remain deferred, including their PRNG draws, with sound wiring T11.23.

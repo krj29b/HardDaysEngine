@@ -33,6 +33,7 @@ from pymoonstone.sim.actor import Actor
 from pymoonstone.sim.fight import Fight
 from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
 from pymoonstone.sim.fight_ai.caster import CASTER_TYPE
+from pymoonstone.sim.fight_ai.snatcher import SNATCHER_TYPE
 from pymoonstone.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
 from pymoonstone.sim.fight_routines import DAGGER_TYPE
 from pymoonstone.sim.fighters import KNIGHT_TYPE, install_knight_control
@@ -74,11 +75,15 @@ class FightAudit:
     rules: KnightRules
     opponent: int
     first: int = 1
+    input_frames: int = 0
 
     def input_word(self) -> int:
         """Audit-only joystick bot: align, face, strike or throw one dagger at a time."""
         fight = self.scene.fight
         knight, trogg = fight.actor(self.first), fight.actor(self.opponent)
+        if trogg.type == SNATCHER_TYPE:
+            self.input_frames += 1
+            return UP if self.input_frames <= 20 else FIRE | LEFT | DOWN
         if trogg.type == CASTER_TYPE:
             return _caster_input(self)
         dy = s16(trogg.y) - s16(knight.y)
@@ -248,8 +253,44 @@ def _pose_frames(audit: FightAudit, name: str, script: int) -> Iterator[tuple[st
         fight.engine.vbl = frame * 6
         output = fight.engine.tick()
         audit.scene.canvas.accept(output.draws)
-        if frame in (0, 3, 7) and any(d.cel.startswith("Ratmen") for d in output.draws):
+        if frame in (0, 3, 7) and any(d.cel.startswith(("Ratmen", "Mudmen")) for d in output.draws):
             yield f"{name}_frame{frame + 1}", audit.scene
+
+
+def build_snatcher_audit(bundle: GameAssetBundle) -> FightAudit:
+    """One original Mudman, with an explicit equipped-knight audit fixture (§10.25)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "mudmen")
+    arena = replace(arena, total=1, max_alive=1, first_wave=arena.first_wave[:1])
+    knights = [Actor() for _ in range(4)]
+    knight = knights[0]
+    knight.hp = knight.hp_max = 20
+    knight.strength, knight.sword, knight.inventory = 3, 0x19, 1
+    runtime = loader.creature(
+        arena, "sw1.t", knights, Actor(), {1: Inventory()}, Rng(0x2468ACE1), 1
+    )
+    knight.hp = knight.hp_max = 200
+    opponent = next(j.owner for j in runtime.fight.engine.jobs if j.type == SNATCHER_TYPE)
+    return FightAudit(runtime.scene, loader.knight_rules, opponent)
+
+
+def snatcher_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightScene]]:
+    """Mudmen script previews, separately labelled from natural outcome frames (§10.25)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "mudmen")
+    scripts = loader.snatcher_rules.scripts
+    for name, script in (
+        ("idle", arena.creature.idle_script),
+        ("walk", next(s for s in arena.creature.walk_scripts if s)),
+        ("attack", scripts.reach),
+        ("hurt", scripts.hurt),
+        ("death", scripts.hurt),
+    ):
+        yield from _pose_frames(build_snatcher_audit(bundle), name, script)
 
 
 def fight_audit_frames(audit: FightAudit) -> Iterator[tuple[str, FightScene]]:
