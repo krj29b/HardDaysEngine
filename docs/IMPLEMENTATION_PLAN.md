@@ -282,6 +282,13 @@ Rules for the whole phase:
   real-disk contact-sheet acceptance. Subtask a must independently verify all
   five button records, pointer starts, original picture/name strings and the
   Space-key sheet selection. Parent acceptance still requires subtask b.
+  Subtask b is further split into **T11.16b1** (original presenter, host caller
+  cutover, shared-sheet returns, spent exit and obsolete-model removal) and
+  **T11.16b2** (original loading-text prologue and complete child-screen acceptance
+  after T11.17/18). T11.18 depends on b1, avoiding a circular dependency on its
+  own caller acceptance. Until those child tasks land, service requests report
+  unavailable and sheet transactions retain their explicit T11.17 boundary.
+  Final parent acceptance still requires every button to open its real screen.
 - **T11.17 Smith and market (sheets 5 and 6):** fixed-price smith, market stock and price list,
   buy and sell-back, gold cap, including the documented quirks. *Accept:* prices and caps come from
   `mog`; buying and selling change gold and inventory exactly as specified.

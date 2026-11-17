@@ -19,7 +19,6 @@ from pymoonstone.app.input import (
     save_replay,
 )
 from pymoonstone.app.intro_player import assemble_stile_panorama
-from pymoonstone.app.location_screens import LocationKind
 from pymoonstone.cli.main import main
 from pymoonstone.sim.overworld import scan
 from pymoonstone.sim.types import KnightId
@@ -290,9 +289,9 @@ def test_status_and_proximity_location_transitions() -> None:
     scan(session.overworld)
     session.step_tick(_frame_p1(confirm=True))
     session.step_tick(_frame_p1(confirm=True))
-    assert session.scene == GameScene.LOCATION
-    assert session.location_menu is not None
-    assert session.location_menu.location == LocationKind.HIGHWOOD
+    assert session.scene == GameScene.OVERWORLD
+    assert session.town_screen is None
+    assert session.last_status == "ORIGINAL DISKS REQUIRED FOR TOWNS"
     assert session.overworld.day == 0
 
 

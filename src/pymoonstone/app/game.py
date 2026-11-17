@@ -24,12 +24,6 @@ from pymoonstone.app.input import (
     load_replay,
     save_replay,
 )
-from pymoonstone.app.location_screens import (
-    LocationKind,
-    LocationMenuState,
-    render_location_menu,
-    step_location_menu,
-)
 from pymoonstone.app.loop import Accumulator50Hz
 from pymoonstone.app.map_runtime import MapRuntime
 from pymoonstone.app.map_scene import compose_map, draw_calendar_screen, draw_map_menu
@@ -38,6 +32,7 @@ from pymoonstone.app.scene_assets import (
     build_intro_cinematic_frame,
 )
 from pymoonstone.app.sheet_screen import SheetScreen
+from pymoonstone.app.town_screen import TownScreen
 from pymoonstone.assets.adf import DiskSet
 from pymoonstone.assets.palette import (
     RGBColor,
@@ -63,9 +58,6 @@ from pymoonstone.sim.fight_moves import FIRE
 from pymoonstone.sim.fight_setup import SpawnLanes, settle_defeats
 from pymoonstone.sim.inventory import Inventory
 from pymoonstone.sim.location_state import KnightState
-from pymoonstone.sim.locations import (
-    perform_stonehenge_ritual,
-)
 from pymoonstone.sim.m68k import s8, s16, u8, u16
 from pymoonstone.sim.map_dragon import (
     automatic_loss,
@@ -81,6 +73,7 @@ from pymoonstone.sim.overworld import (
 from pymoonstone.sim.palette_fx import PaletteFxState, pack_rgb12
 from pymoonstone.sim.rewards import transfer_loot
 from pymoonstone.sim.rng import DEFAULT_SEED, Rng
+from pymoonstone.sim.towns import TownAction
 from pymoonstone.sim.turns import TurnResult, advance as advance_turn
 from pymoonstone.sim.types import KnightId
 
@@ -202,8 +195,7 @@ class GameSession:
         self.bad_luck: int = 0
         self.last_defeat_mask: int = 0
         self.active_encounter: ActiveEncounter | None = None
-        self.location_menu: LocationMenuState | None = None
-        self.location_knight_id: KnightId = roster[0]
+        self.town_screen: TownScreen | None = None
         self.palette_fx: PaletteFxState = PaletteFxState(
             _palette_to_rgb12(default_combat_palette())
         )
@@ -228,10 +220,9 @@ class GameSession:
         self.selected_player_count = len(roster)
         self.knight_combat = {kid: KnightState(knight_id=kid) for kid in KnightId}
         self.active_encounter = None
-        self.location_menu = None
+        self.town_screen = None
         self.sheet_screen = None
         self.last_sheet_item = 65535
-        self.location_knight_id = roster[0]
         self.practice_mode = False
         self.actors = [Actor(kind=_KNIGHT_KINDS[kid]) for kid in KnightId]
         self.dragon_actor = Actor()
@@ -647,9 +638,7 @@ class GameSession:
                 kid,
             )
         elif row.kind in (25, 26):
-            self._open_location(
-                kid, LocationKind.HIGHWOOD if row.kind == 25 else LocationKind.WATERDEEP
-            )
+            self._open_town(kid, waterdeep=row.kind == 26)
         elif row.kind == 27:
             self._open_stonehenge_or_victory(kid)
         else:
@@ -679,28 +668,24 @@ class GameSession:
         )
         self._start_combat(trigger, kid)
 
-    def _open_location(self, knight_id: KnightId, location: LocationKind) -> None:
-        if self.overworld.rules is not None:
-            self.overworld.setup_turn()
-            self._sync_legacy_actor(knight_id)
+    def _open_town(self, knight_id: KnightId, *, waterdeep: bool) -> None:
+        """Run the visit prologue and load the original town (§12.13/15)."""
+        if self.asset_bundle is None:
+            self.last_status = "ORIGINAL DISKS REQUIRED FOR TOWNS"
+            return
+        screen = TownScreen(self.asset_bundle, waterdeep=waterdeep, knight=int(knight_id) + 1)
+        self.overworld.setup_turn()
         self.overworld.colors.active = False
         self._clear_map_jobs()
-        self.location_knight_id = knight_id
-        self.location_menu = LocationMenuState(location=location)
+        self._map_key = 0
+        self.town_screen = screen
         self.scene = GameScene.LOCATION
-        self.last_status = location.name
+        self.last_status = screen.data.name
+        self._begin_fade_in(screen.picture.palette)
 
     def _open_stonehenge_or_victory(self, knight_id: KnightId) -> None:
-        if self.overworld.knights[knight_id].has_all_moonstones:
-            ritual = perform_stonehenge_ritual(
-                self.overworld,
-                knight_id,
-                knight_combat=self.knight_combat[knight_id],
-            )
-            if ritual.victory:
-                self._enter_victory(f"{knight_id.name} WINS")
-                return
-        self._open_location(knight_id, LocationKind.STONEHENGE)
+        """Keep the original ritual caller explicit until T11.19 installs it."""
+        self.last_status = f"{knight_id.name}: STONEHENGE UNAVAILABLE (T11.19)"
 
     def _handle_overworld_triggers(
         self,
@@ -712,8 +697,7 @@ class GameSession:
                 self._enter_victory(f"{knight_id.name} WINS")
                 return
             if trig.kind == TriggerKind.TOWN_VISIT:
-                loc_kind = LocationKind.WATERDEEP if trig.node_id == 26 else LocationKind.HIGHWOOD
-                self._open_location(knight_id, loc_kind)
+                self._open_town(knight_id, waterdeep=trig.node_id == 26)
                 return
             if trig.kind == TriggerKind.STONEHENGE_RITUAL:
                 self._open_stonehenge_or_victory(knight_id)
@@ -728,22 +712,31 @@ class GameSession:
                 return
 
     def _step_location(self, frame: InputFrame) -> None:
-        if self.location_menu is None:
-            self.scene = GameScene.OVERWORLD
-            return
-        kid = self.location_knight_id
-        inp = self._player_input(frame, kid)
-        res = step_location_menu(self.location_menu, inp, self.knight_combat[kid], self.overworld)
-        if self.overworld.rules is not None:
-            self._prepare_fight_knight(kid)
-        if res.victory:
-            self.location_menu = None
-            self._enter_victory(f"{kid.name} WINS")
-            return
-        if res.left_location:
-            self.location_menu = None
+        screen = self.town_screen
+        if screen is None:
+            raise ValueError("town scene has no original town screen")
+        kid = KnightId(screen.state.knight - 1)
+        action = screen.step(self._player_input(frame, kid), frame.key)
+        if action == TownAction.EXIT:
+            self.overworld.spent = self.overworld.budget
+            self.town_screen = None
             self._reenter_map()
-            self.last_status = f"DAY {self.overworld.day}"
+        elif action in (TownAction.SMITH, TownAction.MARKET, TownAction.STATUS):
+            number = {
+                TownAction.SMITH: 5,
+                TownAction.MARKET: 6,
+                TownAction.STATUS: screen.data.space_sheet,
+            }[action]
+            self._open_sheet(number)
+        elif action != TownAction.NONE:
+            self._open_town_service(action)
+
+    def _open_town_service(self, action: TownAction) -> None:
+        """Expose the original service call without invented transactions (T11.18)."""
+        if self.town_screen is None:
+            raise ValueError("service call requires its parent town")
+        self.last_status = f"{action.name} UNAVAILABLE (T11.18)"
+        self.town_screen.resume()
 
     def _step_status(self, frame: InputFrame) -> None:
         screen = self.sheet_screen
@@ -787,6 +780,12 @@ class GameSession:
             else:
                 self.overworld.lairs[screen.state.lair].tidy()
         self.sheet_screen = None
+        if self.town_screen is not None:
+            self.town_screen.resume()
+            self.scene = GameScene.LOCATION
+            self.last_status = self.town_screen.data.name
+            self._begin_fade_in(self.town_screen.picture.palette)
+            return
         self._reenter_map()
         self.last_status = f"DAY {self.overworld.day}"
 
@@ -1050,6 +1049,7 @@ class GameSession:
             "world": world,
             "map_key": self._map_key,
             "calendar_phase": self._calendar_phase,
+            "town": asdict(self.town_screen.state) if self.town_screen else None,
             "sheet": asdict(self.sheet_screen.state) if self.sheet_screen else None,
             "last_sheet_item": self.last_sheet_item,
             "palette": self.palette_fx.snapshot(),
@@ -1168,18 +1168,10 @@ class GameSession:
         if world.menu:
             draw_map_menu(scene_renderer.canvas, cel, world, self.asset_bundle)
 
-    def _render_location_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
-        if self.location_menu is not None:
-            render_location_menu(
-                scene_renderer,
-                self.location_menu,
-                self.knight_combat[self.location_knight_id],
-                self.overworld,
-                font,
-                bundle=self.asset_bundle,
-            )
-        else:
-            self._compose_picture_or_solid(scene_renderer, "ch.piv")
+    def _render_location_scene(self, scene_renderer: SceneRenderer) -> None:
+        if self.town_screen is None:
+            raise ValueError("town scene has no original town screen")
+        self.town_screen.render(scene_renderer)
 
     def _render_end_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         if self.scene == GameScene.GAME_OVER and self.overworld.turn_rules is not None:
@@ -1220,7 +1212,7 @@ class GameSession:
         elif self.scene == GameScene.COMBAT:
             self._render_combat_scene(scene_renderer, font)
         elif self.scene == GameScene.LOCATION:
-            self._render_location_scene(scene_renderer, font)
+            self._render_location_scene(scene_renderer)
         elif self.scene == GameScene.STATUS:
             self._render_sheet_scene(scene_renderer)
         elif self.scene == GameScene.NEW_DAY:

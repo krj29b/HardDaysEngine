@@ -9,7 +9,6 @@ import numpy as np
 
 from pymoonstone.app.game import GameScene, GameSession
 from pymoonstone.app.input import InputFrame, PlayerInput
-from pymoonstone.app.location_screens import LocationKind
 from pymoonstone.assets.cel import CelFrame, CelFrameMeta, DecodedCel
 from pymoonstone.assets.palette import RGBColor, default_combat_palette
 from pymoonstone.assets.picture import DecodedPicture
@@ -125,38 +124,6 @@ class _StubSceneBundle:
 
 def _render_stub(session: GameSession, renderer: _StubSceneRenderer) -> None:
     session.render_to_scene(cast("SceneRenderer", renderer), default_bitmap_font())
-
-
-def test_waterdeep_sublocation_preserves_waterdeep_backdrop() -> None:
-    class _TownBundle:
-        def __init__(self) -> None:
-            self.requested: list[tuple[str, ...]] = []
-            self._wd = _make_picture(4)
-            self._hw = _make_picture(7)
-
-        def get_picture(self, *names: str) -> DecodedPicture | None:
-            self.requested.append(names)
-            for name in names:
-                if name.casefold() == "waterdeep.piv":
-                    return self._wd
-                if name.casefold() == "highwood.piv":
-                    return self._hw
-            return None
-
-    bundle = _TownBundle()
-    session = GameSession(players=(KnightId.RED,), start_scene=GameScene.OVERWORLD)
-    session.asset_bundle = cast("GameAssetBundle", bundle)
-    session._open_location(KnightId.RED, LocationKind.WATERDEEP)
-    # Confirm cursor 0 -> enters MERCHANT (LocationKind.SHOP) inside WATERDEEP.
-    session.step_tick(_p1_frame(confirm=True))
-    assert session.location_menu is not None
-    assert session.location_menu.location == LocationKind.SHOP
-    assert session.location_menu.parent_location == LocationKind.WATERDEEP
-
-    renderer = _StubSceneRenderer()
-    _render_stub(session, renderer)
-    assert bundle.requested
-    assert bundle.requested[-1][0] == "WaterDeep.PIV"
 
 
 def test_pixel_map_render_does_not_step_palette_or_simulation() -> None:

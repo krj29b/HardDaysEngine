@@ -547,3 +547,31 @@ and locations.py with obsolete tests, wire sheets/services and spent exit, hash
 mutable town state, and review the real-disk contact sheet. T11.16 remains open;
 T11.17/18 still implement original transactions and services. T11.16a has no
 presentation change and therefore needs no contact sheet.
+
+
+## ADR-031: Original town caller cutover precedes child-screen acceptance
+**Status:** ACCEPTED (2026-11-18, T11.16b1; follows ADR-029 / ADR-030)
+**Context:** The old location model has invented transactions and ritual rules.
+The decoded town layouts are available, while original transactions and service
+screens are explicitly scheduled in T11.17 and T11.18. Requiring their complete
+screens in T11.16b would make T11.18 depend on its own caller acceptance.
+**Decision:** Split T11.16b into b1 (presenter and host cutover) and b2 (loading
+prologue, child integration and final every-button acceptance after T11.17/18).
+T11.18 depends on b1 instead of the aggregate T11.16. Parent tasks remain blocked
+until b2 passes. This changes task sequencing within the accepted architecture.
+`sim/towns.py` owns the pointer and pending request. `app/town_screen.py` loads
+original picture/cursor assets, applies the hardware-sprite palette offset and
+renders without advancing rules. GameSession retains the parent while shared
+sheets run, resets the pointer on return, hashes suspended town cells and spends
+the turn only at the exit button. Original service requests report unavailable
+until T11.18; no legacy transactions are retained. Sheet transactions remain
+T11.17. The original loading-text prologue remains b2.
+**Consequences:** location_screens.py and locations.py, plus their obsolete tests,
+are removed. Stonehenge explicitly reports unavailable pending T11.19 instead of
+using the removed all-moonstones ritual model. No original data is committed.
+Synthetic tests cover all ten routes, rectangle edges, Space priority and pointer
+bounds. Real-disk tests cover loaded sheets/returns, service call boundaries,
+held-direction navigation, turn exhaustion, foreign-controller isolation and
+replay hashes. GL tests compare every town pixel against the loaded picture plus
+hardware-pointer indices and verify render purity. Contact-sheet captures label
+service attempts without presenting them as implemented service screens.

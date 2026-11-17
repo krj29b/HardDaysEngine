@@ -3867,3 +3867,36 @@ assets/town_data.py performs the checked reads without adding an alternate
 screen loop. T11.16a does not replace host menus or implement shop/service
 transactions. The parent task remains open until T11.16b removes the old
 location model, wires these records, and reviews real-disk contact sheets.
+
+
+### 12.28 Town presenter and host continuations (T11.16b1)
+
+The town uses the same VBL joystick pointer as sheets (§12.2). Poll a live
+button before the Space key; held fire over a registered rectangle dispatches
+its id. Rectangle right and bottom edges are excluded. A child call suspends town polling.
+On return, rebuild the town and reset the pointer to its decoded start (§12.15),
+without repeating visit setup or spending the turn. The host retains the town
+owner, town identity, pointer and pending request in replay hashes, including
+while a shared sheet is active. The owning player port follows the campaign's
+existing controller assignment.
+
+The original cursor builder (mog LAB_0572, rt/combat_ui.cpp) loads frame zero
+of the decoded pointer cel and builds hardware sprite zero. The two stored
+planes give values 0..3: zero is transparent; visible pixels address palette
+entries 17..19. Software composition must add 16 to nonzero pointer pixels,
+leaving zero transparent. Do not recolour the town picture or substitute a
+palette. The original town palettes already contain those sprite colours.
+
+Opening a town runs turn setup, clears map jobs and dragon-active, stops map
+colours and clears the host's buffered map key. Shared sheets 5, 6 and the
+decoded Space number use the existing SheetScreen. Closing them returns to
+the retained town. Only the exit button sets spent to budget and takes the
+map setup exit. Escape and unrelated keys do not leave a town.
+
+The presenter/caller cutover is T11.16b1. Service requests are explicitly
+unavailable until T11.18, and transactions remain T11.17; their original
+callers are retained without applying the deleted model's effects. The
+loading-text prologue and final every-button-to-screen acceptance are
+T11.16b2, after those children exist. No invented service screens replace them.
+Stonehenge no longer calls the deleted all-moonstones ritual model; it remains
+explicitly unavailable until its original offer/ritual caller lands in T11.19.

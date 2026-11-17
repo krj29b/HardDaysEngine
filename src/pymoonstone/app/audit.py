@@ -40,7 +40,6 @@ from pymoonstone.app.fight_audit import (
 from pymoonstone.app.fight_runtime import FightLoader
 from pymoonstone.app.game import GameScene, GameSession
 from pymoonstone.app.input import InputFrame, PlayerInput
-from pymoonstone.app.location_screens import LocationKind
 from pymoonstone.app.map_scene import compose_map
 from pymoonstone.assets.adf import DiskSet
 from pymoonstone.assets.palette import default_combat_palette
@@ -62,10 +61,6 @@ _PRIMARY = KnightId.RED
 _LABEL_HEIGHT = 12
 _SHEET_COLUMNS = 4
 _INTRO_SAMPLE_TICKS: tuple[int, ...] = (50, 400, 900, 1500, 2500)
-_TOWN_BUTTON_COUNTS: tuple[tuple[LocationKind, int], ...] = (
-    (LocationKind.HIGHWOOD, 4),
-    (LocationKind.WATERDEEP, 5),
-)
 _REGION_NAMES: tuple[str, ...] = ("forest", "glen", "swamp", "wasteland")
 _NO_NODE = -1
 _END_SCENES: tuple[GameScene, ...] = (
@@ -270,21 +265,28 @@ def _turn_and_dragon_shots(rig: AuditRig) -> Iterator[AuditShot]:
 
 
 def _place_shots(rig: AuditRig) -> Iterator[AuditShot]:
-    for kind in LocationKind:
-        session = rig.new_session()
-        session._open_location(_PRIMARY, kind)
-        _step(session, 40)
-        yield rig.capture(session, f"place_{kind.name.lower()}")
-    for town, button_count in _TOWN_BUTTON_COUNTS:
-        for button in range(button_count):
+    """Original towns, all five hit regions, shared sheets and spent exits."""
+    for waterdeep in (False, True):
+        name = "waterdeep" if waterdeep else "highwood"
+        for button in range(6):
             session = rig.new_session()
-            session._open_location(_PRIMARY, town)
-            _step(session, 20)
-            for _ in range(button):
-                _tap(session, PlayerInput(dy=1))
-            _tap(session, PlayerInput(confirm=True))
-            _step(session, 20)
-            yield rig.capture(session, f"{town.name.lower()}_button{button}")
+            session._open_town(_PRIMARY, waterdeep=waterdeep)
+            _step(session, 24)
+            screen = session.town_screen
+            if screen is None:
+                raise ValueError("town audit requires original town assets")
+            if button:
+                region = screen.data.buttons[button - 1]
+                screen.state.pointer_x, screen.state.pointer_y = region.x + 2, region.y + 2
+                yield rig.capture(session, f"{name}_region{button}")
+                session.step_tick(_frame(PlayerInput(fire=True)))
+                _step(session, 24)
+            yield rig.capture(session, f"{name}_after{button}")
+        session = rig.new_session()
+        session._open_town(_PRIMARY, waterdeep=waterdeep)
+        session.step_tick(InputFrame(key=32))
+        _step(session, 24)
+        yield rig.capture(session, f"{name}_space")
 
 
 def _host_fight_session(rig: AuditRig, name: str, lair_index: int = -1) -> GameSession:
