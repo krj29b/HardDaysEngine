@@ -29,6 +29,7 @@ from pymoonstone.sim.fight_script import (
 )
 from pymoonstone.sim.m68k import s16, u16, u32
 from pymoonstone.sim.rng import Rng
+from pymoonstone.sim.screen_fx import ShakeRules, ShakeState
 from pymoonstone.sim.trajectory import FlightState
 
 if TYPE_CHECKING:
@@ -244,6 +245,9 @@ class Fight:
     snatch_flags: int = 0
     flyer: FlyerCells = field(default_factory=FlyerCells)
     beam_word: int = 0
+    shake: ShakeState = field(default_factory=ShakeState)
+    shake_rules: ShakeRules | None = None
+    effect_vbl: int | None = None
     flights: FlightState = field(default_factory=FlightState)
 
     def __post_init__(self) -> None:
@@ -403,6 +407,7 @@ class Fight:
         """Job pass, engine tick and contact pass of one fight frame (§10.7, items 1, 2, 4)."""
         self.skipped = []
         self.sounds = []
+        self.advance_vbl(vbl)
         self.beam_word = u16(vbl)
         self.job_pass()
         self.engine.vbl = vbl
@@ -410,6 +415,16 @@ class Fight:
         tick = self.engine.tick()
         contact_scan(self.engine, self.clear_links)
         return FrameOutput(tick, self.skipped, self.sounds)
+
+    def advance_vbl(self, vbl: int, *, ticks: int | None = None) -> None:
+        """Advance presentation effects by elapsed PAL ticks, once per timestamp (§10.27)."""
+        if ticks is None:
+            ticks = 0 if self.effect_vbl is None else max(0, vbl - self.effect_vbl)
+        if self.effect_vbl == vbl:
+            ticks = 0
+        if self.shake_rules is not None:
+            self.shake.advance(ticks, self.shake_rules)
+        self.effect_vbl = vbl
 
     def _apply(self, job: Job, owner: Actor, result: HandlerResult) -> None:
         if isinstance(result, Keep):

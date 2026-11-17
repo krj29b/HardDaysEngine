@@ -45,4 +45,6 @@ class FightScene:
     def render(self, renderer: SceneRenderer) -> None:
         """Display the retained frame, without touching engine or palette simulation state."""
         renderer.set_palette(self.palette)
-        renderer.compose_scene(background=self.canvas.pixels())
+        renderer.compose_scene(
+            background=self.canvas.pixels(), background_y_offset=self.fight.shake.offset
+        )

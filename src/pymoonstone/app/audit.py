@@ -20,11 +20,13 @@ from pymoonstone.app.fight_audit import (
     build_fight_audit,
     build_flyer_audit,
     build_snatcher_audit,
+    build_stalker_audit,
     caster_pose_frames,
     fight_audit_frames,
     fight_host_input,
     flyer_pose_frames,
     snatcher_pose_frames,
+    stalker_pose_frames,
 )
 from pymoonstone.app.fight_runtime import FightLoader
 from pymoonstone.app.game import GameScene, GameSession
@@ -281,7 +283,26 @@ def _flyer_shots(rig: AuditRig) -> Iterator[AuditShot]:
     raise RuntimeError("idle Flyer audit did not reach an outcome")
 
 
+def _stalker_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    bundle = rig.fight_assets()
+    for label, scene in stalker_pose_frames(bundle):
+        yield rig.capture_fight(scene, f"troll_pose_{label}")
+    for label, scene in fight_audit_frames(build_stalker_audit(bundle)):
+        yield rig.capture_fight(scene, f"troll_seeded_{label}")
+    audit = build_stalker_audit(bundle)
+    audit.scene.fight.actor(1).hp = 20
+    for frame in range(300):
+        audit.scene.advance(frame * 6)
+        if frame in (10, 20, 40):
+            yield rig.capture_fight(audit.scene, f"troll_idle_loss_frame{frame + 1}")
+        if not audit.scene.fight.fight_active:
+            yield rig.capture_fight(audit.scene, f"troll_idle_loss_outcome{frame + 1}")
+            return
+    raise RuntimeError("idle Troll audit did not reach an outcome")
+
+
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
+    "troll": _stalker_shots,
     "flyer": _flyer_shots,
     "mudmen": _snatcher_shots,
     "intro": _intro_shots,

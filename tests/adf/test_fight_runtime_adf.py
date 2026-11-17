@@ -82,7 +82,7 @@ def test_runtime_replay_has_identical_full_fight_snapshots(loader: FightLoader) 
 
 
 def test_unmigrated_handlers_and_unknown_offsets_are_rejected(loader: FightLoader) -> None:
-    arena = next(a for a in loader.defs.arenas if a.name == "troll")
+    arena = next(a for a in loader.defs.arenas if a.name == "balok")
     with pytest.raises(FightUnavailableError, match="not available yet"):
         loader.arena_for(arena.handler_offsets[0])
     with pytest.raises(FightUnavailableError, match="unknown arena"):

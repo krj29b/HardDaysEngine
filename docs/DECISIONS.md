@@ -284,3 +284,26 @@ order, hurt/finish priority and demo exclusions; real-disk tests check natural
 win/death, idle loss, state hashes and persistence across encounters. The Flyer audit
 separates script-pose previews from natural handler traces and includes late death
 frames. Sound pickers remain deferred to T11.23 as for the other handlers.
+
+## ADR-020: Troll rules reuse jobs, contact damage and VBL effects
+**Status:** ACCEPTED (2026-11-17, T11.10e; follows ADR-013 / ADR-017)
+**Context:** The Troll uses fixed hurt/attack scripts, movement from the old phase,
+an ordinary hit-spark object, and a heavy-impact DIW shake routine not
+previously reached by the engine. Its empty first-wave list means one alternating
+spawn while retaining a cap of two for subsequent refills.
+**Decision:** `assets/stalker_rules.py` validates hunk-40 instructions and reads the
+steps, scripts, hop table and spark definition. `sim/fight_ai/stalker.py` uses the
+existing approach, move-apply, damage and hop state. `fight_ai/effects.py` spawns
+the shared hit spark through the normal record/job pools. `CreatureWaves.start`
+distinguishes list setup from one alternating entry without changing the cap.
+`assets/screen_fx.py` reads the period and sentinel table for `sim/screen_fx.py`;
+the screen-shake engine call initializes that state, and PAL updates advance it
+independently of rendering. The presenter offsets its retained image within the
+existing 320×256 canvas. Collision, stamps and palette data remain in game coordinates.
+**Consequences:** Snapshots include the shake and its clock. Runtime calls consume
+one effect tick and audits consume elapsed ticks; repeated timestamps do not
+double-step, and paused time does not produce catchup. Repeated starts restart a
+single effect rather than creating the original's duplicate interrupt hooks (§10.27).
+The single-opponent outcome fixture explicitly places both fighters inside the
+arena; original spawn placement and cap behavior have separate real-disk checks.
+The newly reached two-draw sound picker is identified but deferred to T11.23.

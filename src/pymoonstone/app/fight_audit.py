@@ -253,14 +253,13 @@ def _pose_frames(
     job.x, job.height, job.depth = 150, 0, 120
     me.x, me.height, me.y = 150, 0, 120
     fight.restart_job(audit.opponent, script)
+    creature_cels = frozenset(name for name in fight.frame_lists[CREATURE_LIST] if name is not None)
     # Step the script engine directly to retain the selected pose through its end.
     for frame in range(max(12, max(samples) + 1)):
         fight.engine.vbl = frame * 6
         output = fight.engine.tick()
         audit.scene.canvas.accept(output.draws)
-        if frame in samples and any(
-            d.cel.startswith(("Ratmen", "Mudmen", "be")) for d in output.draws
-        ):
+        if frame in samples and any(d.cel in creature_cels for d in output.draws):
             yield f"{name}_frame{frame + 1}", audit.scene
 
 
@@ -335,6 +334,51 @@ def flyer_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightScene
     ):
         samples = (0, 8, 10, 12) if name == "death" else (0, 3, 7)
         yield from _pose_frames(build_flyer_audit(bundle), name, script, samples)
+
+
+def build_stalker_audit(bundle: GameAssetBundle) -> FightAudit:
+    """Single Troll using original setup/pokes with explicit audit equipment (§10.27)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "troll")
+    arena = replace(arena, total=1, max_alive=1, first_wave=arena.first_wave[:1])
+    knights = [Actor() for _ in range(4)]
+    knight = knights[0]
+    knight.hp = knight.hp_max = 20
+    knight.strength, knight.sword, knight.inventory, knight.daggers = 3, 0x19, 1, 99
+    runtime = loader.creature(
+        arena, "fo1.t", knights, Actor(), {1: Inventory()}, Rng(0x2468ACE1), 1
+    )
+    knight.hp = knight.hp_max = 200
+    opponent = next(j.owner for j in runtime.fight.engine.jobs if j.type == 0x40)
+    # Explicit single-opponent fixture, independent of campaign entry lanes.
+    for owner, x in ((1, 80), (opponent, 250)):
+        actor, job = runtime.fight.actor(owner), runtime.fight.find_job(owner)
+        if job is None:
+            raise ValueError("Troll audit fixture has no fighter job")
+        actor.x, actor.y = x, 100
+        job.x, job.depth, job.paused = x, 100, 0
+        runtime.fight.restart_job(owner, actor.idle_script)
+    return FightAudit(runtime.scene, loader.knight_rules, opponent)
+
+
+def stalker_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightScene]]:
+    """Troll pose scripts use the fixed hurt operand, never its unusable hurt table (§10.27)."""
+    from pymoonstone.app.fight_runtime import FightLoader
+
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == "troll")
+    rules = loader.stalker_rules
+    for name, script in (
+        ("idle", arena.creature.idle_script),
+        ("walk", next(s for s in arena.creature.walk_scripts if s)),
+        ("attack", rules.strike_script),
+        ("heavy", rules.heavy_script),
+        ("hurt", rules.hurt_script),
+        ("death", rules.hurt_script),
+    ):
+        yield from _pose_frames(build_stalker_audit(bundle), name, script)
 
 
 def fight_audit_frames(audit: FightAudit) -> Iterator[tuple[str, FightScene]]:

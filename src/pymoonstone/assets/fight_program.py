@@ -55,10 +55,12 @@ _ROUTINES: tuple[tuple[int, int, int, str], ...] = (
     (CODE_HUNK, 0x7296, 0x0679, "sound_pick_5"),
     (CODE_HUNK, 0x72C0, 0x41F9, "sound_pick_6"),
     (CODE_HUNK, 0x72C8, 0x41F9, "sound_pick_7"),
+    (CODE_HUNK, 0x90B8, 0x7002, "screen_shake"),
     (GUARDIAN_HUNK, 0x041C, 0x303C, "guardian_1"),
     (GUARDIAN_HUNK, 0x0428, 0x4EB9, "sound_pick_10"),
     (GUARDIAN_HUNK, 0x049E, 0x4EB9, "guardian_sound"),
     (GUARDIAN_HUNK, 0x04BC, 0x0679, "sound_pick_11"),
+    (GUARDIAN_HUNK, 0x0682, 0x7E01, "sound_pick_12"),
     (GUARDIAN_HUNK, 0x0A0E, 0x2039, "guardian_2"),
 )
 

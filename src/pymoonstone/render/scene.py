@@ -472,13 +472,17 @@ class SceneRenderer:
         background: npt.NDArray[np.uint8] | None = None,
         sprites: Sequence[SceneSprite] = (),
         border_index: int = 0,
+        background_y_offset: int = 0,
     ) -> list[SceneSprite]:
-        """Composite ``background`` at ``y=28`` and Y-sorted ``sprites`` onto ``self.canvas``."""
+        """Composite the background at y=28 plus its display offset, then Y-sorted sprites."""
         self.clear_canvas(border_index)
         if background is not None:
             bh = min(PLAYFIELD_HEIGHT, background.shape[0])
             bw = min(CANVAS_WIDTH, background.shape[1])
-            self.canvas[PLAYFIELD_Y_OFFSET : PLAYFIELD_Y_OFFSET + bh, :bw] = background[:bh, :bw]
+            start = PLAYFIELD_Y_OFFSET + background_y_offset
+            y0, y1 = max(0, start), min(CANVAS_HEIGHT, start + bh)
+            if y0 < y1:
+                self.canvas[y0:y1, :bw] = background[y0 - start : y1 - start, :bw]
 
         ordered = sort_sprites_painter(sprites)
         for sprite in ordered:

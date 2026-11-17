@@ -2102,6 +2102,84 @@ The decoder verifies type `$00` in the handler table, helper destinations and
 entry instructions, the raster read, operand instruction/displacement pairs,
 script relocations, step-table extent and adjacency to the alternation word.
 
+### 10.27 Troll stalker (`T11.10e`)
+
+Source: the supported `mog` hunk 40 at `$04E0..$065E`, with its hit-spark
+helper at `$1298`, checked against moonstone-ace's classic stalker behavior.
+The target is always the first fighter; later cooperative-target changes are
+excluded. The decoder reads operands, relocated scripts and step tables from
+the user's executable, not from copied reference tables.
+
+Each handler call clears input and defaults to idle; action is retained. A
+nonzero hit target takes priority and selects `after_hit_script` without taking
+damage or spawning a spark. Otherwise an attacker subtracts contact damage
+(§10.19, wrapped word), spawns a hit spark and selects the fixed hurt script.
+The invalid hurt table described in §10.15 is never indexed. Its fixed script
+tests HP and selects the death branch; the handler does not substitute a death.
+With neither link, a first fighter with signed HP <= 0 makes the Troll idle.
+
+Otherwise run the approach helper (§10.20). Flag clear means attack; recompute
+absolute x distance. Distances below 100 or at least 150 choose action 8 and
+the fixed strike script. In the interval [100, 150), choose heavy action `$20`
+and its fixed script, unless the previous action was already `$20`, in which
+case strike. Strike also writes the shared hop facing and relocated hop-table
+offset. Heavy does not alter those cells. No PRNG draws occur in the handler.
+
+With the approach flag set, walk by block 0. Right has priority over left:
+read the `{dx, dy}` word pair for the **current** phase (not the new phase),
+negating dx for left. Up has priority over down and replaces dy with -5 or +5.
+Each selected directional helper sets the phase increment to +1 if the input
+contains the bit of the actor's facing direction (right for facing 1, left
+otherwise), or -1 if not. Then use the existing move-apply helper (§10.20):
+advance phase with that increment until there is a script, apply the movement
+probe, clear blocked components, add wrapped coordinates and select the new
+phase's walk script. All-zero input resets phase and returns idle. There is
+no arena clipping. The step table is read as sixteen words: the original has
+only four pairs, so phases 4..7 read the following sound-id and instruction
+bytes. Those words stay runtime data, including their unusual signed values.
+
+**Hit spark** (shared by later creature handlers): restore the decoded idle
+object type's handler to the idle handler, then spawn its fixed script with
+the decoded effects frame list, x = the hurt actor's hit_x, height = 0,
+depth = hit_y and facing = the first fighter's facing. It is an ordinary pool
+record and job; no special render-only effect or creature-wave accounting is
+added. The spark script frees it in the normal way.
+
+The decoder checks type `$40` against hunk 40 offset `$04E0`, all immediate
+instruction/displacement pairs, both step-table LEAs, helper call/branch
+destinations and entry words, the spark script and idle-handler identity, and
+the spark frame-list address against the already decoded frame-list table.
+The fixed strike, heavy, hurt, hop and spark addresses must relocate into the
+script hunk. Hop, approach and jobs reuse their existing state and snapshot
+representation; no new persistent cells are needed for this handler.
+
+The Troll's decoded first-wave list is empty: setup calls the alternating
+next-creature routine once instead of a list-spawn loop. The host treats this
+as a single initial spawn without forcing the wave limit to one; the decoded
+cap of two still applies to later refills (§10.5 / §10.6).
+
+**Attack screen shake.** The heavy script calls code `$90B8`: install a VBL
+effect with initial wait/reload 3 and a table selected by the relocated operand
+at `$90E0`. Each VBL decrements the wait word. At zero, read a table word:
+`$FFFF` restores the window and ends the effect; otherwise add the word to
+both DIW window registers, advance the pointer, reload the wait. The words'
+signed high bytes are vertical pixel displacements; their low bytes are zero.
+Read the period and table at runtime. A new call restarts the sequence while
+keeping the current displacement until the next table entry. Consolidate
+overlapping starts into one hook (the original can install duplicate hooks
+against the same mutable cells). This explicit deviation avoids orphaned hooks.
+The fight retains the effect state and last effect VBL in its snapshot. The
+runtime advances it every VBL, independently of rendering; direct audit frame
+advances consume the elapsed integer VBLs once. Each host runtime call consumes
+exactly one effect tick, so pause/resume does not catch up through paused time.
+The presenter offsets the whole
+retained image within the 320×256 canvas, including its borders, without moving
+collision coordinates, sprites, permanent stamps or the palette.
+
+The heavy script also reaches hunk-40 `$0682`, a two-iteration random sound
+picker. It is identified explicitly, but its two draws and playback remain
+deferred with the other sound pickers to T11.23.
+
 ## 11. Overworld and Turns (`T11.4`)
 
 The overworld is one screen: the map picture with small sprites on it. Knights take turns. The

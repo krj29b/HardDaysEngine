@@ -7,6 +7,7 @@ combat model. T11.11 completes campaign scaling, entry lanes and settlement.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+from functools import partial
 from typing import TYPE_CHECKING
 
 from pymoonstone.app.fight_scene import FightScene
@@ -29,13 +30,16 @@ from pymoonstone.assets.fighter_rules import parse_knight_rules
 from pymoonstone.assets.flyer_rules import parse_flyer_rules
 from pymoonstone.assets.hunk import parse_hunk_executable
 from pymoonstone.assets.mog_code import MogCode
+from pymoonstone.assets.screen_fx import parse_shake_rules
 from pymoonstone.assets.snatcher_rules import parse_snatcher_rules
+from pymoonstone.assets.stalker_rules import parse_stalker_rules
 from pymoonstone.render.scene import palette_fx_to_rgb
 from pymoonstone.sim.fight import Fight, FlyerCells, TableKeys, Wall, pause_all
 from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
 from pymoonstone.sim.fight_ai.caster import CASTER_TYPE, install_caster
 from pymoonstone.sim.fight_ai.flyer import FLYER_TYPE, install_flyer
 from pymoonstone.sim.fight_ai.snatcher import SNATCHER_TYPE, install_snatcher
+from pymoonstone.sim.fight_ai.stalker import STALKER_TYPE, install_stalker
 from pymoonstone.sim.fight_setup import (
     FightSetupRules,
     FightWarnings,
@@ -46,6 +50,7 @@ from pymoonstone.sim.fight_setup import (
 from pymoonstone.sim.fighters import KNIGHT_TYPE, install_knight_control
 from pymoonstone.sim.m68k import s16, u8, u16
 from pymoonstone.sim.palette_fx import pack_rgb12
+from pymoonstone.sim.screen_fx import SCREEN_SHAKE, screen_shake
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -60,7 +65,7 @@ if TYPE_CHECKING:
 
 FIGHT_VBLS = 6
 _REGIONS = (4, 0, 8, 12)
-_SUPPORTED_TYPES = (*BRAWLER_TYPES, CASTER_TYPE, SNATCHER_TYPE, FLYER_TYPE)
+_SUPPORTED_TYPES = (*BRAWLER_TYPES, CASTER_TYPE, SNATCHER_TYPE, FLYER_TYPE, STALKER_TYPE)
 
 
 class FightUnavailableError(ValueError):
@@ -93,6 +98,14 @@ class CreatureWaves:
     edge: int
     lanes: SpawnLanes
     toggle: int = 0
+
+    def start(self, fight: Fight) -> None:
+        """Use the decoded first list or the arena's one-entry alternating setup (§10.27)."""
+        if self.arena.one_at_a_time or not self.arena.first_wave:
+            self.next(fight)
+        else:
+            for entry in self.arena.first_wave[: fight.max_alive]:
+                self.spawn(fight, entry)
 
     def spawn(self, fight: Fight, entry: SpawnEntry) -> None:
         handle = fight.alloc_record()
@@ -138,6 +151,7 @@ class FightRuntime:
         if len(ports) != 2:
             raise ValueError("a fight has exactly two joystick ports")
         self.fight.ports[:] = ports
+        self.fight.advance_vbl(vbl, ticks=1)
         if self.rules is not None and self.warnings is not None:
             self.warnings.step(self.rules)
             self.scene.palette = palette_fx_to_rgb(self.warnings.colors)
@@ -195,6 +209,8 @@ class FightRuntime:
             "snatch_flags": f.snatch_flags,
             "flyer": asdict(f.flyer),
             "beam_word": f.beam_word,
+            "shake": asdict(f.shake),
+            "effect_vbl": f.effect_vbl,
             "flights": asdict(f.flights),
             "cells": [
                 f.first,
@@ -240,6 +256,8 @@ class FightLoader:
         self.snatcher_rules = parse_snatcher_rules(executable)
         self.flyer_rules = parse_flyer_rules(executable)
         self.flyer = FlyerCells(self.flyer_rules.initial_toggle)
+        self.stalker_rules = parse_stalker_rules(executable, self.defs.frame_set_lists)
+        self.shake_rules = parse_shake_rules(executable)
         self.setup_rules = parse_fight_setup(executable)
 
     def arena_for(self, handler_offset: int) -> ArenaDef:
@@ -296,7 +314,10 @@ class FightLoader:
         install_caster(f, self.caster_rules, self.knight_rules)
         install_snatcher(f, self.snatcher_rules, self.knight_rules)
         install_flyer(f, self.flyer_rules, self.knight_rules)
+        install_stalker(f, self.stalker_rules, self.knight_rules)
         f.flyer = self.flyer
+        f.shake_rules = self.shake_rules
+        f.routines[SCREEN_SHAKE] = partial(screen_shake, self.shake_rules)
         keys = f.register_tables(script_tables(self.defs.knight))
         for actor in knights:
             keys.assign(actor)
@@ -361,11 +382,7 @@ class FightLoader:
             cap=arena.alive_cap,
         )
         f.next_creature = waves.next
-        if arena.one_at_a_time:
-            waves.next(f)
-        else:
-            for entry in arena.first_wave[: f.max_alive]:
-                waves.spawn(f, entry)
+        waves.start(f)
         pause_all(f)
         return self._runtime(scene, first, cursor, waves=waves)
 

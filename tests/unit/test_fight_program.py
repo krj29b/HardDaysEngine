@@ -35,7 +35,7 @@ def _put(buffer: bytearray, pos: int, *words: int) -> None:
 
 
 def _mog(*, break_entry: bool = False) -> MogCode:
-    code = bytearray(0x7400)
+    code = bytearray(max(offset for hunk, offset, _, _ in _ROUTINES if hunk == CODE_HUNK) + 2)
     guardian = bytearray(0xA20)
     for hunk, offset, opcode, _ in _ROUTINES:
         _put(code if hunk == CODE_HUNK else guardian, offset, opcode)
@@ -47,13 +47,14 @@ def _mog(*, break_entry: bool = False) -> MogCode:
     struct.pack_into(">I", data, 10, 0x035A)
     struct.pack_into(">I", data, 20, 0x041C)
     struct.pack_into(">I", data, 30, 0x1234)
+    struct.pack_into(">I", data, 36, 0x90B8)
     sections = []
     for index in range(GUARDIAN_HUNK + 1):
         payload, relocs = bytes(8), {}
         if index == CODE_HUNK:
             payload = bytes(code)
         elif index == DATA_HUNK:
-            payload, relocs = bytes(data), {CODE_HUNK: (10, 30), GUARDIAN_HUNK: (20,)}
+            payload, relocs = bytes(data), {CODE_HUNK: (10, 30, 36), GUARDIAN_HUNK: (20,)}
         elif index == GUARDIAN_HUNK:
             payload = bytes(guardian)
         kind = HUNK_CODE if index in (CODE_HUNK, GUARDIAN_HUNK) else HUNK_DATA
@@ -64,7 +65,7 @@ def _mog(*, break_entry: bool = False) -> MogCode:
 
 def test_script_image_names_the_routines_its_longs_point_at() -> None:
     image = script_image(_mog())
-    assert image.routines == {10: "fighter_died", 20: "guardian_1"}
+    assert image.routines == {10: "fighter_died", 20: "guardian_1", 36: "screen_shake"}
     assert len(image.data) == 40
 
 
