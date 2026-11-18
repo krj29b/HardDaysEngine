@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from harddaysengine.sim.turn_rules import TextLine
+
 
 @dataclass(slots=True, frozen=True)
 class TownButton:
@@ -27,3 +29,12 @@ class TownData:
     pointer_y: int
     space_sheet: int
     buttons: tuple[TownButton, ...]
+
+
+@dataclass(slots=True, frozen=True)
+class TownWelcome:
+    """The fixed message picture, font and substituted welcome list (§12.33)."""
+
+    picture: str
+    font: str
+    lines: tuple[TextLine, ...]

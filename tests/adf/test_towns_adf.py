@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -13,7 +12,8 @@ from harddaysengine.app.game import GameScene, GameSession
 from harddaysengine.app.input import InputFrame, PlayerInput
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.sim.overworld import Arrival
-from harddaysengine.sim.towns import TownAction
+from harddaysengine.sim.service_screen import Phase
+from harddaysengine.sim.towns import TownAction, TownEntry
 from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
@@ -26,10 +26,20 @@ def _session(adf_dir: Path, waterdeep: bool = False) -> GameSession:
     session = GameSession(disk_set=DiskSet.from_directory(adf_dir))
     session._dispatch_arrival(Arrival(1, 26 if waterdeep else 25))
     assert session.scene == GameScene.LOCATION
+    _settle(session)
     return session
 
 
+def _settle(session: GameSession) -> None:
+    for _ in range(128):
+        if not session.palette_fx.is_fading:
+            return
+        session.step_tick(InputFrame())
+    raise AssertionError("town fade did not finish")
+
+
 def _click(session: GameSession, button: int) -> None:
+    _settle(session)
     screen = session.town_screen
     assert screen is not None
     region = screen.data.buttons[button - 1]
@@ -100,17 +110,65 @@ def test_space_uses_decoded_sheet_and_exit_consumes_turn(adf_dir: Path, waterdee
         (True, 4, TownAction.MYSTIC),
     ],
 )
-def test_services_route_to_explicit_host_boundary(
+def test_services_open_real_screens_and_return_to_the_unspent_town(
     adf_dir: Path,
     waterdeep: bool,
     button: int,
     action: TownAction,
 ) -> None:
     session = _session(adf_dir, waterdeep)
-    with patch.object(session, "_open_town_service") as service:
-        _click(session, button)
-        service.assert_called_once_with(action)
+    session.overworld.current_actor.gold = 40
+    session.overworld.spent = 3
+    budget = session.overworld.budget
+    _click(session, button)
     assert session.town_screen is not None and session.town_screen.state.pending == action
+    if action == TownAction.DICE:
+        assert session.scene == GameScene.DICE and session.dice_screen is not None
+        _leave_dice(session)
+    else:
+        assert session.scene == GameScene.SERVICE and session.service_screen is not None
+        _leave_service(session)
+    _settle(session)
+    assert session.scene == GameScene.LOCATION
+    assert session.overworld.spent == 3 and session.overworld.budget == budget
+    town = session.town_screen
+    assert town.state.entry == TownEntry.READY and town.state.pending == TownAction.NONE
+    assert (town.state.pointer_x, town.state.pointer_y) == (
+        town.data.pointer_x,
+        town.data.pointer_y,
+    )
+    _click(session, 5)
+    assert session.scene == GameScene.OVERWORLD and session.overworld.spent == budget
+
+
+def _leave_dice(session: GameSession) -> None:
+    _settle(session)
+    screen = session.dice_screen
+    assert screen is not None
+    leave = next(r for r in screen.run.house.regions if r.kind == 2)
+    screen.run.state.pointer_x, screen.run.state.pointer_y = leave.x, leave.y
+    for _ in range(120):
+        session.step_tick(InputFrame(players={KnightId.RED: PlayerInput(fire=True)}))
+        if session.scene == GameScene.LOCATION:
+            return
+    raise AssertionError("dice leave did not return to town")
+
+
+def _leave_service(session: GameSession) -> None:
+    _settle(session)
+    screen = session.service_screen
+    assert screen is not None
+    session.step_tick(InputFrame(players={KnightId.RED: PlayerInput(fire=True)}))
+    session.step_tick(InputFrame())
+    assert screen.state.phase == Phase.DONATION
+    leave = next(r for r in screen.screens.donation.regions if r.code == 2)
+    screen.state.pointer_x, screen.state.pointer_y = leave.x, leave.y
+    session.step_tick(InputFrame(players={KnightId.RED: PlayerInput(fire=True)}))
+    for _ in range(screen.screens.close_wait):
+        session.step_tick(InputFrame())
+    session.step_tick(InputFrame(players={KnightId.RED: PlayerInput(fire=True)}))
+    session.step_tick(InputFrame())
+    assert session.service_screen is None
 
 
 def test_the_dice_house_without_gold_returns_to_the_town_without_effects(adf_dir: Path) -> None:

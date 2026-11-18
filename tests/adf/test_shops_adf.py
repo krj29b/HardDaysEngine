@@ -154,6 +154,8 @@ def _click(session: GameSession, field: int, side: int, mask: int = 0) -> None:
 def test_natural_stock_purchase_sale_and_return_persist(adf_dir: Path) -> None:
     session = GameSession(disk_set=DiskSet.from_directory(adf_dir))
     session._open_town(KnightId.RED, waterdeep=False)
+    while session.palette_fx.is_fading:
+        session.step_tick(InputFrame())
     screen = session.town_screen
     assert screen is not None
     button = screen.data.buttons[3]
@@ -188,6 +190,8 @@ def test_original_smith_offers_and_prices_drive_host_purchase(
 ) -> None:
     session = GameSession(disk_set=DiskSet.from_directory(adf_dir))
     session._open_town(KnightId.RED, waterdeep=waterdeep)
+    while session.palette_fx.is_fading:
+        session.step_tick(InputFrame())
     session._open_sheet(5)
     actor = session.overworld.current_actor
     assert session.sheet_screen is not None and session.sheet_screen.rules.shop is not None

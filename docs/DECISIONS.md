@@ -726,3 +726,26 @@ shares the session generator but not the fight loader's sound cells. Its hunk-42
 no cell state, so a default `SoundCells` is enough. The thrower's draws use the cel hot spot like
 the fights; the dice faces and roll text use the shared cel drawer offsets of §12.31.
 
+
+## ADR-038: Town welcome loading uses the existing PAL fade continuation
+**Status:** ACCEPTED (2026-11-18, T11.16b2; follows ADR-031 / ADR-036 / ADR-037)
+**Context:** The three service screens now exist, completing the dependencies of
+final town acceptance. Town entry still skipped its message screen. Reference
+inspection shows that the town loaders call a fixed welcome list with a stored
+town-name pointer; the fourteen-message cycle belongs to the fight-loading path.
+**Decision:** assets/town_loading_data.py checks both loaders, their shared text
+cell/list, the message/font filenames, font slot and message/fade calls. The
+existing linked-text reader accepts validated pointer substitutions without
+modifying executable data. Frozen TownWelcome records retain text order/styles.
+TownEntry belongs to the retained TownState and enters the existing host hash.
+The host advances map fade-out, welcome fade-out and town fade-in on its PAL
+palette clock, with transitions after each palette step. Loading and town fades
+ignore button/key dispatch; the owner's pointer moves during the town fade.
+Child returns reset the pointer and fade the town without repeating the prologue
+or spending the turn. The existing LOCATION scene presents each retained phase.
+**Consequences:** No render call advances loading, no fire wait or arbitrary disk
+loading timer is added, and the town welcome does not advance fight-loading text
+state. The existing town/sheet/service/dice models remain authoritative. Actual
+child-screen return tests replace the old mocked service-boundary checks. The
+places audit now captures both welcomes, all ten outcomes, Space sheets and
+returns; original content and generated pictures remain outside version control.

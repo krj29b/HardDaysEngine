@@ -19,6 +19,14 @@ class TownAction(IntEnum):
     STATUS = 7
 
 
+class TownEntry(IntEnum):
+    """Blocking visit stages, advanced only by the PAL palette clock (§12.33)."""
+
+    MAP_OUT = 0
+    WELCOME_OUT = 1
+    READY = 2
+
+
 @dataclass(slots=True)
 class TownState:
     """Mutable pointer and pending caller, retained while a child screen runs."""
@@ -28,6 +36,7 @@ class TownState:
     pointer_x: int
     pointer_y: int
     pending: TownAction = TownAction.NONE
+    entry: TownEntry = TownEntry.READY
 
 
 def reset_pointer(state: TownState, data: TownData) -> None:

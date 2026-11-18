@@ -86,7 +86,7 @@ from harddaysengine.sim.rng import DEFAULT_SEED, Rng
 from harddaysengine.sim.service_screen import ServiceWorld
 from harddaysengine.sim.service_screen_types import ServiceKind
 from harddaysengine.sim.stock import initialize as initialize_stock
-from harddaysengine.sim.towns import TownAction
+from harddaysengine.sim.towns import TownAction, TownEntry
 from harddaysengine.sim.turns import TurnResult, advance as advance_turn
 from harddaysengine.sim.types import KnightId
 
@@ -293,6 +293,8 @@ class GameSession:
 
         self._step_active_scene(frame, primary)
         self.palette_fx.step_vbl()
+        if self.scene == GameScene.LOCATION:
+            self._advance_town_entry()
         if self.audio is not None:
             self.audio.step_vbl()
 
@@ -711,14 +713,35 @@ class GameSession:
             self.last_status = "ORIGINAL DISKS REQUIRED FOR TOWNS"
             return
         screen = TownScreen(self.asset_bundle, waterdeep=waterdeep, knight=int(knight_id) + 1)
+        map_palette = self._overworld_target_palette()
         self.overworld.setup_turn()
         self.overworld.colors.active = False
         self._clear_map_jobs()
         self._map_key = 0
         self.town_screen = screen
+        screen.state.entry = TownEntry.MAP_OUT
         self.scene = GameScene.LOCATION
         self.last_status = screen.data.name
-        self._begin_fade_in(screen.picture.palette)
+        self._pending_fade_in = False
+        self.palette_fx.set_palette(_palette_to_rgb12(map_palette))
+        self.palette_fx.fade_out()
+
+    def _advance_town_entry(self) -> None:
+        """Continue the blocking original loading path after each PAL palette step (§12.33)."""
+        screen = self.town_screen
+        if screen is None:
+            raise ValueError("town entry requires its retained screen")
+        if self.palette_fx.is_fading or screen.state.entry == TownEntry.READY:
+            return
+        if screen.state.entry == TownEntry.MAP_OUT:
+            screen.state.entry = TownEntry.WELCOME_OUT
+            if screen.message is None:
+                raise ValueError("town welcome picture is not loaded")
+            self.palette_fx.set_palette(_palette_to_rgb12(screen.message.palette))
+            self.palette_fx.fade_out()
+        else:
+            screen.state.entry = TownEntry.READY
+            self._begin_fade_in(screen.picture.palette)
 
     def _open_stonehenge_or_victory(self, knight_id: KnightId) -> None:
         """Keep the original ritual caller explicit until T11.19 installs it."""
@@ -752,8 +775,12 @@ class GameSession:
         screen = self.town_screen
         if screen is None:
             raise ValueError("town scene has no original town screen")
+        if screen.state.entry != TownEntry.READY:
+            return
         kid = KnightId(screen.state.knight - 1)
-        action = screen.step(self._player_input(frame, kid), frame.key)
+        action = screen.step(
+            self._player_input(frame, kid), frame.key, polling=not self.palette_fx.is_fading
+        )
         if action == TownAction.EXIT:
             self.overworld.spent = self.overworld.budget
             self.town_screen = None
@@ -1330,10 +1357,16 @@ class GameSession:
         if world.menu:
             draw_map_menu(scene_renderer.canvas, cel, world, self.asset_bundle)
 
-    def _render_location_scene(self, scene_renderer: SceneRenderer) -> None:
+    def _render_location_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         if self.town_screen is None:
             raise ValueError("town scene has no original town screen")
-        self.town_screen.render(scene_renderer)
+        entry = self.town_screen.state.entry
+        if entry == TownEntry.MAP_OUT:
+            self._render_overworld_scene(scene_renderer, font)
+        elif entry == TownEntry.WELCOME_OUT:
+            self.town_screen.render_welcome(scene_renderer)
+        else:
+            self.town_screen.render(scene_renderer)
 
     def _render_end_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         if self.scene == GameScene.GAME_OVER and self.overworld.turn_rules is not None:
@@ -1370,7 +1403,7 @@ class GameSession:
             GameScene.KNIGHT_SELECT: lambda: self._render_knight_select_scene(scene_renderer, font),
             GameScene.OVERWORLD: lambda: self._render_overworld_scene(scene_renderer, font),
             GameScene.COMBAT: lambda: self._render_combat_scene(scene_renderer, font),
-            GameScene.LOCATION: lambda: self._render_location_scene(scene_renderer),
+            GameScene.LOCATION: lambda: self._render_location_scene(scene_renderer, font),
             GameScene.STATUS: lambda: self._render_sheet_scene(scene_renderer),
             GameScene.NEW_DAY: lambda: self._render_new_day(scene_renderer, font),
             GameScene.SERVICE: lambda: self._render_service_scene(scene_renderer),

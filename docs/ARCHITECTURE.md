@@ -3800,8 +3800,8 @@ the contact sheet shows a mismatch), the order of tests in every rule.
 
 - **Message screen:** `message.piv` with a list of text lines from `mog`, in the picture's
   palette. The **recoloured** variant overwrites palette entries 1..6 with a dark red ramp.
-  The **loading-text** variant shows the next of 14 texts in a cycle and is used before fights
-  and towns (§10.2).
+  The **loading-text** variant shows the next of 14 texts in a cycle before fights (§10.2).
+  Towns use the separate fixed welcome list with a substituted town name (§12.33).
 - **Farewell** (quit key, or no human knight left, §11.11): the farewell text on a message
   screen; wait for a fire press and release; map colours off; back to the title.
 - **Ending:** Stonehenge with the right moonstone stores the ending code (§12.16) where
@@ -4223,3 +4223,39 @@ the town without spending the turn, as in §12.31.
 frame wait, bet, "done", the pointer, the roll, and the thrower's job and pool records. The fight
 engine instance uses the shared generator. Draws come from the engine tick (§10.17) over the
 tavern picture.
+
+### 12.33 Town welcome prologue and final caller acceptance (T11.16b2)
+
+The town loaders call the fixed message routine, not the fourteen-entry rotating
+fight-loading routine. Highwood at hunk0 $2D96 and Waterdeep at $2DD2 store a
+relocated string pointer into the same hunk4 text-record cell. Each loads the
+same linked welcome list through its following LEA and calls hunk0 $2FB4.
+Decode both lists with the respective text-pointer substitution, retaining all
+coordinates, styles and order; do not modify the executable or embed its text.
+Require the substitution cell to be an actual record in the list. The list and
+all text pointers must remain in hunk4. Decode the message picture filename
+through LEA $2BFA and the font filename through LEA $2C36. The font slot store
+at $2C32 and selection at $2FCA must agree on slot 4 (bold font). The shared
+message path calls the picture-unpack helper $3044, draws the list at $2FD6,
+and installs the picture palette at $2FE2. Check those targets and forms.
+The town picture loader calls the common fade-out at $2E22 before copying the
+loaded town picture. The welcome itself has no fire wait, delay or synth start.
+
+The host represents the blocking visit as a retained town continuation. Stop
+map colour jobs, run the existing turn/job/key setup once, and fade the retained
+map to black. Then show the decoded welcome in the message picture's own palette
+and fade it to black. Finally show and fade in the town. These are PAL palette
+steps; disk decoding time does not add a simulation wait. A phase transition
+occurs after that VBL's palette step, without requiring a render call or an
+extra empty tick between fades. All phase and fade cells enter the existing hash.
+No town button or translated key is polled during the prologue or a town fade.
+The pointer moves on the owner's port during the town fade, as the original VBL
+pointer does. The welcome has no pointer. Town input starts when the fade ends.
+
+A return from a sheet, healer, mystic or dice house redraws the retained town
+and resets its pointer; it never reruns the welcome or turn setup. The only
+spent exit is town button 5. Shared sheets 5/6 and Space (9 or 32), both dice
+callers, both healers and Waterdeep's mystic are checked through their real
+screens and returns. The real-disk town contact sheet includes both welcomes,
+each of the ten button outcomes, Space sheets and service returns. Loading
+screens for fights and other places remain their own callers.

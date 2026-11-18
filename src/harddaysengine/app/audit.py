@@ -46,6 +46,7 @@ from harddaysengine.assets.palette import default_combat_palette
 from harddaysengine.render.renderer import HardDaysRenderer
 from harddaysengine.render.scene import SceneRenderer, default_bitmap_font
 from harddaysengine.sim.overworld import EncounterTrigger, MapSprite, TriggerKind, open_menu, scan
+from harddaysengine.sim.towns import TownEntry
 from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
@@ -264,29 +265,65 @@ def _turn_and_dragon_shots(rig: AuditRig) -> Iterator[AuditShot]:
     yield rig.capture(session, "farewell")
 
 
+def _settle_fade(session: GameSession) -> None:
+    """Wait through blocking PAL fades, including chained town entry (§12.33)."""
+    for _ in range(128):
+        if not session.palette_fx.is_fading:
+            return
+        _step(session, 1)
+    raise ValueError("audit fade did not finish")
+
+
+def _audit_return_town(session: GameSession) -> None:
+    """Close actual child screens using their original regions and fire waits."""
+    if session.sheet_screen is not None:
+        screen = session.sheet_screen
+        done = next(r for r in screen.state.regions if r.id == 7)
+        screen.state.pointer_x, screen.state.pointer_y = done.x, done.y
+        _tap(session, PlayerInput(fire=True))
+    elif session.service_screen is not None:
+        _tap(session, PlayerInput(fire=True))
+        _audit_service_region(session, 2, 1)
+        _step(session, session.service_screen.screens.close_wait)
+        _tap(session, PlayerInput(fire=True))
+    elif session.dice_screen is not None:
+        run = session.dice_screen.run
+        leave = next(r for r in run.house.regions if r.kind == 2)
+        run.state.pointer_x, run.state.pointer_y = leave.x, leave.y
+        _step(session, 12, PlayerInput(fire=True))
+    _settle_fade(session)
+    if session.scene != GameScene.LOCATION:
+        raise ValueError("town child did not return to its retained parent")
+
+
 def _place_shots(rig: AuditRig) -> Iterator[AuditShot]:
-    """Original towns, all five hit regions, shared sheets and spent exits."""
+    """Both welcomes, all ten button outcomes, child returns and spent exits (§12.33)."""
     for waterdeep in (False, True):
         name = "waterdeep" if waterdeep else "highwood"
-        for button in range(6):
-            session = rig.new_session()
-            session._open_town(_PRIMARY, waterdeep=waterdeep)
-            _step(session, 24)
-            screen = session.town_screen
-            if screen is None:
-                raise ValueError("town audit requires original town assets")
-            if button:
-                region = screen.data.buttons[button - 1]
-                screen.state.pointer_x, screen.state.pointer_y = region.x + 2, region.y + 2
-                yield rig.capture(session, f"{name}_region{button}")
-                session.step_tick(_frame(PlayerInput(fire=True)))
-                _step(session, 24)
-            yield rig.capture(session, f"{name}_after{button}")
         session = rig.new_session()
+        session.actors[_PRIMARY].gold = 40
         session._open_town(_PRIMARY, waterdeep=waterdeep)
+        town = session.town_screen
+        if town is None:
+            raise ValueError("town audit requires original town assets")
+        while town.state.entry == TownEntry.MAP_OUT:
+            _step(session, 1)
+        yield rig.capture(session, f"{name}_welcome")
+        _settle_fade(session)
+        yield rig.capture(session, f"{name}_town")
+        for button in range(1, 5):
+            _audit_town_button(session, button)
+            _settle_fade(session)
+            yield rig.capture(session, f"{name}_button{button}_screen")
+            _audit_return_town(session)
+            yield rig.capture(session, f"{name}_button{button}_returned")
         session.step_tick(InputFrame(key=32))
-        _step(session, 24)
+        _settle_fade(session)
         yield rig.capture(session, f"{name}_space")
+        _audit_return_town(session)
+        _audit_town_button(session, 5)
+        _settle_fade(session)
+        yield rig.capture(session, f"{name}_button5_spent_exit")
 
 
 def _host_fight_session(rig: AuditRig, name: str, lair_index: int = -1) -> GameSession:
@@ -652,6 +689,7 @@ def _dice_shots(rig: AuditRig) -> Iterator[AuditShot]:
 
 
 def _audit_town_button(session: GameSession, number: int) -> None:
+    _settle_fade(session)
     screen = session.town_screen
     if screen is None:
         raise ValueError("town audit requires its parent screen")

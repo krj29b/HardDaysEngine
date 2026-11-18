@@ -13,10 +13,34 @@ from harddaysengine.assets.shop_data import parse_stock_rules
 from harddaysengine.sim.turn_rules import GiftRules, MapDragonRules, TextLine, TurnRules
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from harddaysengine.assets.hunk import DecodedHunkExecutable
 
 
-def text_list(mog: MogCode, pointer: Pointer, what: str = "calendar text") -> tuple[TextLine, ...]:
+def _text_pointer(
+    mog: MogCode,
+    pointer: Pointer,
+    what: str,
+    replacements: Mapping[Pointer, Pointer] | None,
+    hunk: int | None,
+) -> Pointer:
+    text = mog.pointer(pointer.offset, what, pointer.hunk)
+    if replacements is not None:
+        text = replacements.get(pointer, text)
+    if hunk is not None and (pointer.hunk != hunk or text.hunk != hunk):
+        raise MogVersionError(f"mog: {what} outside its data hunk")
+    return text
+
+
+def text_list(
+    mog: MogCode,
+    pointer: Pointer,
+    what: str = "calendar text",
+    *,
+    text_pointers: Mapping[Pointer, Pointer] | None = None,
+    hunk: int | None = None,
+) -> tuple[TextLine, ...]:
     """Read relocated linked text records, rejecting loops and truncated records (§11.19)."""
     rows: list[TextLine] = []
     seen: set[Pointer] = set()
@@ -25,13 +49,15 @@ def text_list(mog: MogCode, pointer: Pointer, what: str = "calendar text") -> tu
             raise MogVersionError(f"mog: cyclic {what} list")
         seen.add(pointer)
         data = _bytes(mog, pointer, 14)
-        text = mog.pointer(pointer.offset, what, pointer.hunk)
+        text = _text_pointer(mog, pointer, what, text_pointers, hunk)
         x, y, style = struct.unpack_from(">HHH", data, 4)
         rows.append(TextLine(mog.cstring(text, what), x, y, style))
         if (
             struct.unpack_from(">I", data, 10)[0] == 0
             and mog.reloc(pointer.offset + 10, pointer.hunk) is None
         ):
+            if text_pointers is not None and not text_pointers.keys() <= seen:
+                raise MogVersionError(f"mog: {what} substitution is outside its linked list")
             return tuple(rows)
         pointer = mog.pointer(pointer.offset + 10, f"next {what}", pointer.hunk)
 
