@@ -8,7 +8,7 @@ import pytest
 from harddaysengine.assets.fight_palette import MogVersionError
 from harddaysengine.assets.hunk import HUNK_CODE, DecodedHunkExecutable, HunkSection
 from harddaysengine.assets.mog_code import MogCode, Pointer
-from harddaysengine.assets.turn_rules import _texts
+from harddaysengine.assets.turn_rules import text_list
 from harddaysengine.sim.turn_rules import TextLine
 
 
@@ -34,12 +34,12 @@ def _mog(*, cycle: bool = False, zero_cycle: bool = False) -> MogCode:
 
 
 def test_calendar_text_fields_are_loaded_without_assuming_strings_follow_records() -> None:
-    assert _texts(_mog(), Pointer(4, 0)) == (TextLine("Hello", 5, 7, 1),)
+    assert text_list(_mog(), Pointer(4, 0)) == (TextLine("Hello", 5, 7, 1),)
 
 
 @pytest.mark.parametrize("zero_cycle", [False, True])
 def test_calendar_text_cycle_and_truncated_record_raise(zero_cycle: bool) -> None:
     with pytest.raises(MogVersionError, match="cyclic"):
-        _texts(_mog(cycle=True, zero_cycle=zero_cycle), Pointer(4, 0))
+        text_list(_mog(cycle=True, zero_cycle=zero_cycle), Pointer(4, 0))
     with pytest.raises(MogVersionError, match="outside its data hunk"):
-        _texts(_mog(), Pointer(4, 60))
+        text_list(_mog(), Pointer(4, 60))

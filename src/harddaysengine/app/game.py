@@ -31,13 +31,17 @@ from harddaysengine.app.scene_assets import (
     GameAssetBundle,
     build_intro_cinematic_frame,
 )
+from harddaysengine.app.service_screen import ServiceScreen
 from harddaysengine.app.sheet_screen import SheetScreen
 from harddaysengine.app.town_screen import TownScreen
 from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.palette import (
     RGBColor,
     default_combat_palette,
 )
+from harddaysengine.assets.service_data import parse_service_rules
+from harddaysengine.assets.service_screen_data import parse_service_screens
 from harddaysengine.render.renderer import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
@@ -73,16 +77,25 @@ from harddaysengine.sim.overworld import (
 from harddaysengine.sim.palette_fx import PaletteFxState, pack_rgb12
 from harddaysengine.sim.rewards import transfer_loot
 from harddaysengine.sim.rng import DEFAULT_SEED, Rng
+from harddaysengine.sim.service_screen import ServiceWorld
+from harddaysengine.sim.service_screen_types import ServiceKind
 from harddaysengine.sim.stock import initialize as initialize_stock
 from harddaysengine.sim.towns import TownAction
 from harddaysengine.sim.turns import TurnResult, advance as advance_turn
 from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     import numpy.typing as npt
+
+    from harddaysengine.sim.service_screen_types import ServiceScreens
+    from harddaysengine.sim.service_types import DiceRules, HealerRules, MysticRules
+    from harddaysengine.sim.sound import SoundRequest
+    from harddaysengine.sim.turn_rules import TurnRules
+
+    ServiceRules = tuple[HealerRules, MysticRules, DiceRules]
 
 
 _REGION_ARENAS = {0: "gl1.t", 4: "fo1.t", 8: "sw1.t", 12: "wa1.t"}
@@ -108,6 +121,7 @@ class GameScene(IntEnum):
     LOCATION = 6
     STATUS = 7
     NEW_DAY = 8
+    SERVICE = 9
 
 
 @dataclass(slots=True, frozen=True)
@@ -206,6 +220,8 @@ class GameSession:
         self.map_runtime: MapRuntime | None = None
         self._calendar_phase = 0
         self.sheet_screen: SheetScreen | None = None
+        self.service_screen: ServiceScreen | None = None
+        self._service_data: tuple[ServiceScreens, ServiceRules] | None = None
         self.last_sheet_item = 65535
         if self.asset_bundle is not None:
             self._ensure_map()
@@ -223,6 +239,7 @@ class GameSession:
         self.active_encounter = None
         self.town_screen = None
         self.sheet_screen = None
+        self.service_screen = None
         self.last_sheet_item = 65535
         self.practice_mode = False
         self.actors = [Actor(kind=_KNIGHT_KINDS[kid]) for kid in KnightId]
@@ -283,6 +300,8 @@ class GameSession:
             self._step_status(frame)
         elif self.scene == GameScene.NEW_DAY:
             self._step_new_day(primary)
+        elif self.scene == GameScene.SERVICE:
+            self._step_service(frame)
         else:
             self._step_end_screen(primary)
 
@@ -737,11 +756,77 @@ class GameSession:
             self._open_town_service(action)
 
     def _open_town_service(self, action: TownAction) -> None:
-        """Expose the original service call without invented transactions (T11.18)."""
-        if self.town_screen is None:
+        """Open the healer or mystic screen; the dice house stays explicit (§12.31)."""
+        town = self.town_screen
+        if town is None:
             raise ValueError("service call requires its parent town")
-        self.last_status = f"{action.name} UNAVAILABLE (T11.18)"
-        self.town_screen.resume()
+        kinds = {TownAction.HEALER: ServiceKind.HEALER, TownAction.MYSTIC: ServiceKind.MYSTIC}
+        if action not in kinds or self.asset_bundle is None:
+            self.last_status = f"{action.name} UNAVAILABLE (T11.18b2)"
+            town.resume()
+            return
+        screens, _ = self._services()
+        self.service_screen = ServiceScreen(
+            self.asset_bundle,
+            screens,
+            kinds[action],
+            knight=town.state.knight,
+            pointer=town.pointer_pixels,
+            text=(self.overworld.data().char_map, self._turn_rules().span),
+        )
+        self.scene = GameScene.SERVICE
+        self._play_requests(self.service_screen.state.sounds)
+        self._begin_fade_in(self.service_screen.picture.palette)
+
+    def _services(self) -> tuple[ServiceScreens, ServiceRules]:
+        if self._service_data is None:
+            if self.asset_bundle is None:
+                raise ValueError("service screens require the original disks")
+            executable = parse_hunk_executable("mog", self.asset_bundle.disk_set.read_file("mog"))
+            screens = parse_service_screens(executable)
+            self._service_data = (screens, parse_service_rules(executable))
+        return self._service_data
+
+    def _turn_rules(self) -> TurnRules:
+        rules = self.overworld.turn_rules
+        if rules is None:
+            raise ValueError("services need the loaded turn rules")
+        return rules
+
+    def _play_requests(self, requests: Sequence[SoundRequest]) -> None:
+        if self.audio is not None and requests:
+            self.audio.handle_fight_sounds([request.sound for request in requests])
+
+    def _step_service(self, frame: InputFrame) -> None:
+        screen = self.service_screen
+        if screen is None:
+            raise ValueError("service scene has no screen")
+        kid = KnightId(screen.state.knight - 1)
+        _, (healer, mystic, _dice) = self._services()
+        world = ServiceWorld(
+            self.actors[kid],
+            self.inventories[int(kid) + 1],
+            self.overworld.prng,
+            self._turn_rules().gifts,
+            healer,
+            mystic,
+        )
+        inp = self._player_input(frame, kid)
+        done = screen.step(world, inp, fading=self.palette_fx.is_fading)
+        self._play_requests(screen.state.sounds)
+        self._sync_legacy_actor(kid)
+        if done:
+            self._close_service()
+
+    def _close_service(self) -> None:
+        self.service_screen = None
+        town = self.town_screen
+        if town is None:
+            raise ValueError("a service screen returns to its town")
+        town.resume()
+        self.scene = GameScene.LOCATION
+        self.last_status = town.data.name
+        self._begin_fade_in(town.picture.palette)
 
     def _step_status(self, frame: InputFrame) -> None:
         screen = self.sheet_screen
@@ -1056,6 +1141,7 @@ class GameSession:
             "calendar_phase": self._calendar_phase,
             "town": asdict(self.town_screen.state) if self.town_screen else None,
             "sheet": asdict(self.sheet_screen.state) if self.sheet_screen else None,
+            "service": asdict(self.service_screen.state) if self.service_screen else None,
             "last_sheet_item": self.last_sheet_item,
             "palette": self.palette_fx.snapshot(),
             "pending_fade": self._pending_fade_in,
@@ -1208,26 +1294,26 @@ class GameSession:
 
     def render_to_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         """Render the active game scene and HUD onto ``scene_renderer``."""
-        if self.scene == GameScene.TITLE:
-            self._render_title_scene(scene_renderer, font)
-        elif self.scene == GameScene.KNIGHT_SELECT:
-            self._render_knight_select_scene(scene_renderer, font)
-        elif self.scene == GameScene.OVERWORLD:
-            self._render_overworld_scene(scene_renderer, font)
-        elif self.scene == GameScene.COMBAT:
-            self._render_combat_scene(scene_renderer, font)
-        elif self.scene == GameScene.LOCATION:
-            self._render_location_scene(scene_renderer)
-        elif self.scene == GameScene.STATUS:
-            self._render_sheet_scene(scene_renderer)
-        elif self.scene == GameScene.NEW_DAY:
-            self._render_new_day(scene_renderer, font)
-        else:
-            self._render_end_scene(scene_renderer, font)
+        scenes: dict[GameScene, Callable[[], None]] = {
+            GameScene.TITLE: lambda: self._render_title_scene(scene_renderer, font),
+            GameScene.KNIGHT_SELECT: lambda: self._render_knight_select_scene(scene_renderer, font),
+            GameScene.OVERWORLD: lambda: self._render_overworld_scene(scene_renderer, font),
+            GameScene.COMBAT: lambda: self._render_combat_scene(scene_renderer, font),
+            GameScene.LOCATION: lambda: self._render_location_scene(scene_renderer),
+            GameScene.STATUS: lambda: self._render_sheet_scene(scene_renderer),
+            GameScene.NEW_DAY: lambda: self._render_new_day(scene_renderer, font),
+            GameScene.SERVICE: lambda: self._render_service_scene(scene_renderer),
+        }
+        scenes.get(self.scene, lambda: self._render_end_scene(scene_renderer, font))()
 
         if self.palette_fx.is_fading or self.palette_fx.is_flashing:
             scene_renderer.set_palette_fx(self.palette_fx.current_palette())
         scene_renderer.flush_to_fbo()
+
+    def _render_service_scene(self, renderer: SceneRenderer) -> None:
+        if self.service_screen is None:
+            raise ValueError("service scene has no screen")
+        self.service_screen.render(renderer)
 
     def _render_sheet_scene(self, renderer: SceneRenderer) -> None:
         if self.sheet_screen is None:

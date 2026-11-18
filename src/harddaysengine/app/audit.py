@@ -553,6 +553,46 @@ def _shop_shots(rig: AuditRig) -> Iterator[AuditShot]:
     yield rig.capture(session, "market_after_talisman_sale")
 
 
+def _audit_service_region(session: GameSession, code: int, ticks: int) -> None:
+    screen = session.service_screen
+    if screen is None:
+        raise ValueError("service audit requires its screen")
+    region = next(r for r in screen.screens.donation.regions if r.code == code)
+    screen.state.pointer_x, screen.state.pointer_y = region.x, region.y
+    _step(session, ticks, PlayerInput(fire=True))
+    _step(session, 1)
+
+
+def _service_visit(
+    rig: AuditRig, name: str, button: int, gold: int, donation_ticks: int
+) -> Iterator[AuditShot]:
+    session = rig.new_session()
+    actor = session.actors[_PRIMARY]
+    actor.gold, actor.hp, actor.hp_max = gold, 5, 30
+    session._open_town(_PRIMARY, waterdeep=True)
+    _step(session, 24)
+    _audit_town_button(session, button)
+    _step(session, 24)
+    yield rig.capture(session, f"{name}_greeting")
+    _tap(session, PlayerInput(fire=True))
+    yield rig.capture(session, f"{name}_donation_gold_fixture")
+    _audit_service_region(session, 5, donation_ticks)
+    yield rig.capture(session, f"{name}_donation_after_plus")
+    _audit_service_region(session, 3, 1)
+    yield rig.capture(session, f"{name}_reply")
+    _step(session, 60)
+    _tap(session, PlayerInput(fire=True))
+    _step(session, 24)
+    yield rig.capture(session, f"{name}_returned_to_town")
+
+
+def _service_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    """Healer and mystic screens through the town caller (§12.31)."""
+    yield from _service_visit(rig, "healer", 3, 40, 75)
+    yield from _service_visit(rig, "healer_small", 3, 40, 12)
+    yield from _service_visit(rig, "mystic", 4, 40, 30)
+
+
 def _audit_town_button(session: GameSession, number: int) -> None:
     screen = session.town_screen
     if screen is None:
@@ -577,6 +617,7 @@ def _audit_shop_click(session: GameSession, field: int, side: int, mask: int = 0
 
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
     "shops": _shop_shots,
+    "services": _service_shots,
     "sheets": _sheet_shots,
     "computer_knight": _computer_knight_shots,
     "dragon": _dragon_shots,

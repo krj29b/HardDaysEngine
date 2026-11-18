@@ -16,24 +16,24 @@ if TYPE_CHECKING:
     from harddaysengine.assets.hunk import DecodedHunkExecutable
 
 
-def _texts(mog: MogCode, pointer: Pointer) -> tuple[TextLine, ...]:
+def text_list(mog: MogCode, pointer: Pointer, what: str = "calendar text") -> tuple[TextLine, ...]:
     """Read relocated linked text records, rejecting loops and truncated records (§11.19)."""
     rows: list[TextLine] = []
     seen: set[Pointer] = set()
     while True:
         if pointer in seen:
-            raise MogVersionError("mog: cyclic calendar text list")
+            raise MogVersionError(f"mog: cyclic {what} list")
         seen.add(pointer)
         data = _bytes(mog, pointer, 14)
-        text = mog.pointer(pointer.offset, "calendar text", pointer.hunk)
+        text = mog.pointer(pointer.offset, what, pointer.hunk)
         x, y, style = struct.unpack_from(">HHH", data, 4)
-        rows.append(TextLine(mog.cstring(text, "calendar text"), x, y, style))
+        rows.append(TextLine(mog.cstring(text, what), x, y, style))
         if (
             struct.unpack_from(">I", data, 10)[0] == 0
             and mog.reloc(pointer.offset + 10, pointer.hunk) is None
         ):
             return tuple(rows)
-        pointer = mog.pointer(pointer.offset + 10, "next calendar text", pointer.hunk)
+        pointer = mog.pointer(pointer.offset + 10, f"next {what}", pointer.hunk)
 
 
 def _long_operand(mog: MogCode, pos: int, opcode: int) -> int:
@@ -124,8 +124,8 @@ def parse_turn_rules(executable: DecodedHunkExecutable) -> TurnRules:
         raise MogVersionError("mog: missing persistent dragon health")
     return TurnRules(
         moons=tuple(_bytes(mog, moon, 8)),
-        next_day=_texts(mog, _pointer(mog, 0, 0x2BA8, 0x41F9, 4)),
-        farewell=_texts(mog, _pointer(mog, 0, 0xD5C, 0x41F9, 4)),
+        next_day=text_list(mog, _pointer(mog, 0, 0x2BA8, 0x41F9, 4)),
+        farewell=text_list(mog, _pointer(mog, 0, 0xD5C, 0x41F9, 4)),
         span=struct.unpack(">H", _bytes(mog, span, 2))[0]
         - struct.unpack(">H", _bytes(mog, margin, 2))[0],
         moon_x=mog.operand(0x2BD0, 0x323C, "moon x"),

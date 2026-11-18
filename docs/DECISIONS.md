@@ -679,3 +679,27 @@ their replays from that point. The host still sends only ids to the legacy mixer
 release currently plays its silence id there. Replays started from the same loader must restore
 the session cells. The two list pickers share one offset word, as in the original, and a read
 outside the decoded window raises (it is unreachable from the stored start values).
+
+## ADR-036: The healer and mystic screens are a tick-driven child of the town
+**Status:** ACCEPTED (2026-11-18, T11.18b1; follows ADR-031 / ADR-034)
+**Context:** The donation screen, healer and mystic are blocking 68k loops: fire waits, frame
+waits, a pointer moved by the VBL interrupt, and a transaction in the middle. The dice house
+additionally runs a fight-engine job and its scripts. All three in one session was too much.
+**Decision:** Split T11.18b into b1 (donation screen, healer, mystic) and b2 (dice house).
+`assets/service_screen_data.py` walks the opening, region and redraw routines with a small
+checked instruction walker: each instruction must be one of a few known shapes, every relocated
+operand must point where that shape expects, and anything else raises. Reply lists, tables and
+constants are checked operands at their positions. The linked text-record reader of
+`turn_rules` becomes public (`text_list`) and is shared. `sim/service_screen.py` models the
+routine as phases (greeting, donation, close wait, close fire, done), one VBL per step. Fire
+waits are press-then-release. The pointer moves every VBL, even during a fade or a frame wait.
+Only the routine pauses while a palette fade runs, matching the blocking original fades. The
+greeting's synth starts are a new `SoundKind.START` (channel and sequence, no busy marking). The
+host adds `GameScene.SERVICE` as a child of the retained town, uses the town's pointer sprite,
+hashes the screen state, and returns to the town without spending the turn. `render_to_scene`
+becomes a dispatch table so that adding a scene does not raise its complexity.
+**Consequences:** The mystic's leave clears the donation before the reply check, so it answers
+with *nothing given*; its *refused* list is decoded but unreachable, as in the original. A press
+that lands inside the 2-frame repeat wait is ignored. The dice house stays explicitly
+unavailable until T11.18b2. Text uses `Small.font` (font table entry 0) without narrow spacing.
+

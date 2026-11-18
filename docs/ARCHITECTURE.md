@@ -4088,3 +4088,72 @@ These immutable decoded rule records and pure transactions are T11.18a.
 T11.18b supplies original assets/text/scripts, screen phases, host snapshots,
 town returns and real-disk contact-sheet acceptance. No service is exposed as
 playable until those callers are implemented.
+
+### 12.31 Donation screens: healer and mystic (T11.18b1)
+
+This subsection is the exact form of §12.19 for the supported `mog` version. It covers the two
+screens and their shared donation screen. Rules come from §12.30; this section owns assets,
+text, phases, timing and the host caller. The dice house is T11.18b2.
+
+**Opening** (mystic at hunk0 `$9B66`, healer at `$9DD0`). The routine selects font table entry 0
+(`Small.font`; entry 4 is the bold menu font, the only one with narrow spacing, §11.19). It loads
+the screen's picture (a checked `LEA` of its filename, then the picture loader) and the shared cel
+file through the `BSR` to `$A23A` (a checked `LEA` of `mys.cel`). It fades out, places the pointer
+with two `MOVE.W #imm` stores to the pointer cells (160, 170), switches the pointer on and
+shows the picture. It then draws the greeting text list (a checked `LEA` followed by `JSR` to
+the list printer at `$9196`) and starts four synth sequences directly. Each start is
+`MOVE.W #seq,D0`, `MOVE.W #channel,D1` and a `JSR` to the synth start in hunk 44. These bypass
+the front end of §10.32: no busy marking. The routine fades to the picture's palette and waits
+for fire, meaning a press and then a release.
+
+The pointer is the hardware sprite the town built (§12.28). The screens never rebuild it. It moves
+2 pixels per VBL within x 0..314 and y 0..195 in every phase, as in the town, and is shown
+throughout.
+
+**Text.** Text lists are the 14-byte linked records of §11.19: text pointer, x, y, style, next
+pointer. Style 1 centres within the loaded span. Labels and numbers are single strings drawn at
+an immediate x, y and style (`MOVE.W` to D0, D1 and D2, or `EOR.L D2,D2` for style 0, then `JSR`
+to `$917C`). A number is formatted into a 4-byte field: the value modulo 1000 as decimal digits,
+left-aligned, without leading zeros, padded with spaces to three characters (`$93CA`).
+
+**Donation screen** (`$9F4E`, `D0` = portrait frame: the mystic passes 0 and the healer 1 through
+`MOVEQ`). The purse becomes the knight's gold and the donation starts at 0 (§12.30). Four regions
+are registered from `MOVE.W #imm,disp(A0)` stores into the region scratch record: x at +12, y at
++14, width at +4, height at +6, and the button code at +20. A later region inherits every field
+it does not store. The codes are 4 ("-"), 5 ("+"), 3 (accept) and 2 (leave). The redraw (`$A100`)
+blits the picture, then draws:
+
+- the portrait frame twice and the four button frames, each as `MOVE.W` frame (or the portrait
+  cell), x and y, then `JSR` to the cel drawer in hunk 28. The frame is drawn at x minus the
+  frame's hot-spot x, as on the sheets;
+- the donation label (style 4: right-aligned to the span) and the purse label;
+- the purse and the donation numbers at their immediate positions.
+
+**Loop** (`$A046`). Each VBL: if a region is under the pointer while fire is held (the pointer is
+locked otherwise, §12.2), its code acts. Leave (2) and accept (3) end the screen (§12.30). "-" (4)
+and "+" (5) move one gold. When the move succeeds, the screen redraws and waits for the
+`MOVEQ #2` frames before polling again. When it fails, polling continues on the next VBL with no
+wait. So a held button moves one gold every three VBLs.
+
+**Reply.** The screen blits the picture again and chooses a text list:
+
+- *mystic*: a donation of 0 gives *nothing given*, even after accept. Leave clears the
+  donation first, so the mystic answers a leave with *nothing given*, and its *refused* branch
+  (a screen not accepted with a donation left) cannot be reached. Otherwise the gamble runs (§12.30, its draws at this moment). A win with no
+  pickable stat gives the *nothing to raise* list. *Unchanged* gives its list. A raise or a lower
+  searches the raise or lower table: the `MOVEQ #2` count gives three rows, each an 8-byte
+  `{stat long, text-list pointer}`. The table pointer is stored by `MOVE.L #table,cell`. A stat
+  missing from the table falls through to the unchanged list.
+- *healer*: not accepted gives *refused*, and a donation of 0 gives *nothing given*. Otherwise the
+  healing runs (§12.30). A donation not above the reply limit (signed) gives the *small donation*
+  list. A larger one gives *healed* when the curse bit was set, and *plain* otherwise.
+
+The refused, nothing-given and unchanged lists are shared: the healer branches into the mystic's
+tail. **Close** (`$9D5C`): wait for the `MOVE.L #imm,D0` frames (50), wait for fire, fade out,
+pointer off. The host then resumes the town (§12.28) without spending the turn.
+
+**Host.** The service screen is a child of the town, like the shared sheets. The town keeps its
+state, and the replay hash holds the screen's phase, pointer, wait counters, fire stage, donation
+cells and the displayed list. The simulation advances only while no palette fade runs, but the
+pointer keeps moving. Sound starts are reported as *start* requests (channel, sequence) for the
+presentation; until T11.23b the host passes only the ids.

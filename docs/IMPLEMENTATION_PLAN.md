@@ -301,6 +301,11 @@ Rules for the whole phase:
   input/waits, host snapshots and town returns with reviewed contact sheets. The three
   screen loops plus executable decoding and transaction rules exceed one session. Parent
   acceptance remains unchanged and requires both subtasks.
+  T11.18b is split again: **T11.18b1**, the shared donation screen with the healer and the
+  mystic (decoded openings, regions, redraw list, reply lists and tables, tick phases, host
+  child screen and contact sheet), and **T11.18b2**, the dice house, which also needs the
+  thrower's fight-engine job (type `$44`) with its handler and scripts, the dice table picture
+  and the class colour ramp.
 - **T11.19 Stonehenge:** the offer sheet, the ritual screen (`hen1.p`, `hen1.c`, `he.a`, timed
   fades), the win condition (the moonstone of the current phase) and the hand-over to the ending.
 - **T11.20 Wizard's tower:** `WI2.P`, `WI1.P`, `Wi1.C`, `wz.a`, then the temple sheet; the visit

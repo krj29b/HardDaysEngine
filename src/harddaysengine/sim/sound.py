@@ -32,11 +32,12 @@ class SoundError(ValueError):
 
 
 class SoundKind(IntEnum):
-    """The three front-end entries (§10.32)."""
+    """The three front-end entries (§10.32) and a direct synth start bypassing them (§12.31)."""
 
     PLAY = 0
     FIXED = 1
     RELEASE = 2
+    START = 3
 
 
 @dataclass(slots=True, frozen=True)
@@ -44,8 +45,8 @@ class SoundRequest:
     """One front-end call.
 
     ``sound`` is the sequence id (for a release, the silence sequence it then plays). ``channel``
-    names the channel of a fixed or release request and is 0 for play. ``mask`` is the busy-byte
-    mask of a release and 0 otherwise.
+    names the channel of a fixed, release or start request and is 0 for play. ``mask`` is the
+    busy-byte mask of a release and 0 otherwise.
     """
 
     kind: SoundKind
