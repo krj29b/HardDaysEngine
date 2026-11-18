@@ -266,8 +266,16 @@ class GameSession:
         self._dice_data: tuple[DiceHouse, DiceEngine] | None = None
         self._service_data: tuple[ServiceScreens, ServiceRules] | None = None
         self.last_sheet_item = 65535
+        self._sound_fade_ticks = 0
+        self._sound_return = ""
         if self.asset_bundle is not None:
             self._ensure_map()
+            if self.audio is not None:
+                self.asset_bundle.attach_synth(self.audio)
+                if self.scene == GameScene.TITLE:
+                    self._play_title_music()
+                elif self.scene == GameScene.OVERWORLD:
+                    self._map_music()
 
     def _reset_campaign(self, count: int, custom_roster: Sequence[KnightId] = ()) -> None:
         clamped = max(1, min(4, count))
@@ -321,16 +329,26 @@ class GameSession:
             return slot_inp
         return direct
 
+    @property
+    def blocking_fade(self) -> bool:
+        """Whether an original silent OUT still owns its retained caller (§6.3.2)."""
+        return bool(self._sound_return or self._sound_fade_ticks)
+
     def step_tick(self, frame: InputFrame) -> None:
         """Advance the game session by exactly one 50 Hz PAL VBL tick."""
         self.tick_count += 1
         primary = self._player_input(frame, self.players[0])
-        if primary.pause and self.scene in (GameScene.OVERWORLD, GameScene.COMBAT):
+        if (
+            primary.pause
+            and not self._sound_return
+            and self.scene in (GameScene.OVERWORLD, GameScene.COMBAT)
+        ):
             self.paused = not self.paused
             return
         if self.paused:
             return
 
+        self._advance_sound_fade()
         self._step_active_scene(frame, primary)
         self.palette_fx.step_vbl()
         if self.scene == GameScene.LOCATION:
@@ -339,6 +357,9 @@ class GameSession:
             self.audio.step_vbl()
 
     def _step_active_scene(self, frame: InputFrame, primary: PlayerInput) -> None:
+        if self._sound_return:
+            self._continue_sound_return()
+            return
         scenes: dict[GameScene, Callable[[], None]] = {
             GameScene.TITLE: lambda: self._step_title(primary),
             GameScene.KNIGHT_SELECT: lambda: self._step_knight_select(primary),
@@ -357,6 +378,68 @@ class GameSession:
             GameScene.MEETING: lambda: self._step_meeting(frame),
         }
         scenes.get(self.scene, lambda: self._step_end_screen(primary))()
+
+    def _load_sound_bank(self, name: str) -> None:
+        if self.audio is not None and self.asset_bundle is not None:
+            if self.audio.module_player is not None:
+                self.asset_bundle.attach_synth(self.audio)
+            self.asset_bundle.load_sound_bank(self.audio, name)
+
+    def _map_music(self) -> None:
+        if self.audio is not None and self.asset_bundle is not None:
+            self._play_requests(self.asset_bundle.get_scene_sounds().map_music)
+
+    def _silent_sound_fade(self) -> None:
+        """Set the original silent-fade flag for its full blocking wait (§6.3.2)."""
+        if self.asset_bundle is not None:
+            self._sound_fade_ticks = self.asset_bundle.get_scene_sounds().fade_wait
+
+    def _advance_sound_fade(self) -> None:
+        if self._sound_fade_ticks:
+            self._sound_fade_ticks -= 1
+            if self.audio is not None:
+                data = self.asset_bundle.get_scene_sounds() if self.asset_bundle else None
+                if data is not None and self._sound_fade_ticks % data.fade_period == 0:
+                    self.audio.fade_step(True)
+                if not self._sound_fade_ticks:
+                    self.audio.stop_all()
+        elif self.audio is not None and self.palette_fx.is_fading:
+            self.audio.fade_step(False)
+
+    def _begin_sound_return(self, action: str) -> None:
+        """Keep the current screen while its original silent OUT runs (§6.3.2)."""
+        if self.asset_bundle is None:
+            raise ValueError("silent screen return requires original data")
+        self._sound_return = action
+        self._silent_sound_fade()
+        self.palette_fx.fade_out(divisor=self.asset_bundle.get_scene_sounds().fade_period)
+
+    def _continue_sound_return(self) -> None:
+        if self._sound_fade_ticks:
+            return
+        action, self._sound_return = self._sound_return, ""
+        callbacks = {
+            "service": self._close_service,
+            "dice": self._close_service,
+            "fight": self._complete_combat,
+            "sheet": self._complete_sheet_return,
+            "title": self._return_to_title,
+            "town": self._complete_town_return,
+        }
+        callbacks[action]()
+
+    def _return_to_title(self) -> None:
+        self._clear_map_jobs()
+        self.scene = GameScene.TITLE
+        self._play_title_music()
+
+    def _complete_sheet_return(self) -> None:
+        self.sheet_screen = None
+        self._reenter_map()
+
+    def _complete_town_return(self) -> None:
+        self.town_screen = None
+        self._reenter_map()
 
     def _play_title_music(self) -> None:
         if self.audio is not None and self.asset_bundle is not None:
@@ -403,6 +486,8 @@ class GameSession:
         if self.asset_bundle is None:
             raise ValueError("the ending needs the original disks")
         self.ending_screen = EndingScreen(self.asset_bundle, request.flags)
+        if self.audio is not None:
+            self.audio.stop_all()
         self.palette_fx.set_palette([0] * 32)
         self.palette_fx.clear_flash()
         self.scene = GameScene.ENDING
@@ -436,6 +521,8 @@ class GameSession:
         if primary.skip_intro or primary.confirm or primary.fire or finished:
             self.scene = GameScene.KNIGHT_SELECT
             self.last_status = "SELECT KNIGHTS"
+            if self.audio is not None and self.asset_bundle is not None:
+                self.asset_bundle.attach_synth(self.audio)
 
     def _step_knight_pick(self, dx_edge: int, confirm: bool) -> None:
         if dx_edge != 0:
@@ -493,6 +580,7 @@ class GameSession:
             return
         self._reset_campaign(self.selected_player_count)
         self.scene = GameScene.OVERWORLD
+        self._map_music()
         self.last_status = f"DAY {self.overworld.day}"
         self._begin_fade_in(self._overworld_target_palette())
 
@@ -570,6 +658,7 @@ class GameSession:
 
     def _reenter_map(self) -> None:
         self.scene = GameScene.OVERWORLD
+        self._map_music()
         if self._ensure_map():
             self._map_key = 0
             self.overworld.enter()
@@ -674,6 +763,7 @@ class GameSession:
 
     def _show_next_day(self) -> None:
         world = self.overworld
+        self._map_music()
         self.palette_fx.set_palette(
             world.colors.colors or _palette_to_rgb12(self._overworld_target_palette())
         )
@@ -836,6 +926,8 @@ class GameSession:
         screen.state.wait = screen.rules.fade_wait
         if out:
             self.palette_fx.fade_out(divisor=screen.rules.fade_period)
+            if screen.state.phase in (MeetingPhase.COMBAT_OUT, MeetingPhase.RESULT_CLOSING):
+                self._silent_sound_fade()
         else:
             self.palette_fx.fade_in(
                 _palette_to_rgb12(screen.palette()),
@@ -1021,6 +1113,13 @@ class GameSession:
         screen.state.wait = screen.rules.fade_wait
         if out:
             self.palette_fx.fade_out(divisor=screen.rules.fade_period)
+            if screen.state.phase in (
+                ValleyPhase.LOADING_OUT,
+                ValleyPhase.COMBAT_OUT,
+                ValleyPhase.TEMPLE_OUT,
+                ValleyPhase.EXIT_OUT,
+            ):
+                self._silent_sound_fade()
         else:
             self.palette_fx.fade_in(
                 _palette_to_rgb12(screen.palette()),
@@ -1171,6 +1270,7 @@ class GameSession:
         self.last_status = "HOME VILLAGE"
         self.palette_fx.set_palette(_palette_to_rgb12(palette))
         self.palette_fx.fade_out(divisor=rules.fade_period)
+        self._silent_sound_fade()
 
     def _step_village(self) -> None:
         visit = self.village_visit
@@ -1192,6 +1292,7 @@ class GameSession:
             visit.phase = VillagePhase.TEMPLE_OUT
             visit.wait = visit.rules.fade_wait
             self.palette_fx.fade_out(divisor=visit.rules.fade_period)
+            self._silent_sound_fade()
             return
         visit.wait = max(0, visit.wait - 1)
         if visit.wait or self.palette_fx.is_fading:
@@ -1228,6 +1329,12 @@ class GameSession:
         screen.state.wait = screen.rules.fade_wait
         if out:
             self.palette_fx.fade_out(divisor=screen.rules.fade_period)
+            if screen.state.phase in (
+                WizardPhase.LOADING_OUT,
+                WizardPhase.EXIT_OUT,
+                WizardPhase.TEMPLE_OUT,
+            ):
+                self._silent_sound_fade()
         else:
             self.palette_fx.fade_in(
                 _palette_to_rgb12(screen.palette()),
@@ -1236,6 +1343,8 @@ class GameSession:
             )
 
     def _wizard_stage(self, screen: WizardScreen, stage: int) -> None:
+        if stage == 0:
+            self._load_sound_bank(screen.rules.bank)
         screen.state.phase = (WizardPhase.ARRIVAL, WizardPhase.GIFT, WizardPhase.FAREWELL)[stage]
         screen.state.wait = 0
         screen.start_stage(stage, self.overworld.prng, self.tick_count)
@@ -1334,6 +1443,12 @@ class GameSession:
         screen.state.wait = screen.rules.fade_wait
         if out:
             self.palette_fx.fade_out(divisor=screen.rules.fade_period)
+            if screen.state.phase in (
+                StonePhase.RITUAL_MESSAGE_OUT,
+                StonePhase.RITUAL_OUT,
+                StonePhase.TEMPLE_CLOSING,
+            ):
+                self._silent_sound_fade()
         else:
             self.palette_fx.fade_in(
                 _palette_to_rgb12(screen.message_palette()),
@@ -1393,6 +1508,7 @@ class GameSession:
             self._stone_fade(out=True)
         elif state.phase == StonePhase.RITUAL_MESSAGE_OUT:
             state.phase = StonePhase.RITUAL
+            self._load_sound_bank(screen.rules.ritual.bank)
             screen.start_ritual(self.overworld.prng)
             self.palette_fx.set_palette([0] * 32)
             self.palette_fx.fade_to(
@@ -1478,8 +1594,7 @@ class GameSession:
         )
         if action == TownAction.EXIT:
             self.overworld.spent = self.overworld.budget
-            self.town_screen = None
-            self._reenter_map()
+            self._begin_sound_return("town")
         elif action in (TownAction.SMITH, TownAction.MARKET, TownAction.STATUS):
             number = {
                 TownAction.SMITH: 5,
@@ -1567,8 +1682,7 @@ class GameSession:
         self._play_requests(screen.run.state.sounds)
         self._sync_legacy_actor(kid)
         if done:
-            self.dice_screen = None
-            self._close_service()
+            self._begin_sound_return("dice")
 
     def _services(self) -> tuple[ServiceScreens, ServiceRules]:
         if self._service_data is None:
@@ -1587,6 +1701,8 @@ class GameSession:
 
     def _play_requests(self, requests: Sequence[SoundRequest]) -> None:
         if self.audio is not None and requests:
+            if self.audio.module_player is not None and self.asset_bundle is not None:
+                self.asset_bundle.attach_synth(self.audio)
             self.audio.handle_requests(requests)
 
     def _step_service(self, frame: InputFrame) -> None:
@@ -1608,10 +1724,11 @@ class GameSession:
         self._play_requests(screen.state.sounds)
         self._sync_legacy_actor(kid)
         if done:
-            self._close_service()
+            self._begin_sound_return("service")
 
     def _close_service(self) -> None:
         self.service_screen = None
+        self.dice_screen = None
         town = self.town_screen
         if town is None:
             raise ValueError("a service screen returns to its town")
@@ -1627,6 +1744,8 @@ class GameSession:
             return
         kid = KnightId(screen.state.knight - 1)
         done = screen.step(self.overworld, self._player_input(frame, kid))
+        if self.audio is not None and self.asset_bundle is not None:
+            self._play_requests(self.asset_bundle.get_scene_sounds().sheet(screen.state.sounds))
         self.bad_luck |= screen.state.bad_luck
         for knight in KnightId:
             self._sync_legacy_actor(knight)
@@ -1678,14 +1797,14 @@ class GameSession:
                 self.overworld.restore_position()
             else:
                 self.overworld.lairs[screen.state.lair].tidy()
-        self.sheet_screen = None
         if self.town_screen is not None:
+            self.sheet_screen = None
             self.town_screen.resume()
             self.scene = GameScene.LOCATION
             self.last_status = self.town_screen.data.name
             self._begin_fade_in(self.town_screen.picture.palette)
             return
-        self._reenter_map()
+        self._begin_sound_return("sheet")
         self.last_status = f"DAY {self.overworld.day}"
 
     def _step_new_day(self, primary: PlayerInput) -> None:
@@ -1704,9 +1823,7 @@ class GameSession:
             if not self.palette_fx.is_fading and self.overworld.turns.wait_fire(
                 primary.fire or primary.confirm
             ):
-                self._clear_map_jobs()
-                self.scene = GameScene.TITLE
-                self._play_title_music()
+                self._begin_sound_return("title")
             return
         fire_edge = primary.fire and not self._end_prev_fire
         self._end_prev_fire = primary.fire
@@ -1847,6 +1964,15 @@ class GameSession:
             return
         active.runtime.fight.engine.gore_off = not self.gore_enabled
         self.active_encounter = active
+        if self.audio is not None and self.asset_bundle is not None:
+            self.audio.stop_all()
+            self._load_sound_bank("kn.a")
+            if trigger.kind != TriggerKind.PVP_DUEL and not self.practice_mode:
+                if self.fight_loader is None:
+                    raise ValueError("combat sound banks require the fight loader")
+                bank = self.fight_loader.arena_for(trigger.creature_type).cels.sound_bank
+                if bank is not None:
+                    self._load_sound_bank(bank)
         self.overworld.colors.active = False
         self.scene = GameScene.COMBAT
         self._begin_fade_in(active.runtime.scene.palette)
@@ -1868,7 +1994,26 @@ class GameSession:
         if output is not None and self.audio is not None:
             self.audio.handle_requests(output.sounds)
         if active.runtime.finished:
+            self._fight_sound_exit(active)
+
+    def _fight_sound_exit(self, active: ActiveEncounter) -> None:
+        if self.audio is not None:
+            self.audio.stop_all()
+        retained = self.meeting_screen is not None or self.valley_screen is not None
+        dragon = (
+            active.trigger.kind == TriggerKind.DRAGON_INTERCEPT
+            and self.overworld.turn_rules is not None
+        )
+        if retained or dragon:
             self._finish_combat(active)
+        else:
+            self._begin_sound_return("fight")
+
+    def _complete_combat(self) -> None:
+        active = self.active_encounter
+        if active is None:
+            raise ValueError("combat close has no encounter")
+        self._finish_combat(active)
 
     def _finish_combat(self, active: ActiveEncounter) -> None:
         """Settle original defeat/lair records; original caller sheets remain T11.15 (§10.24)."""
@@ -2007,6 +2152,7 @@ class GameSession:
             "last_sheet_item": self.last_sheet_item,
             "palette": self.palette_fx.snapshot(),
             "pending_fade": self._pending_fade_in,
+            "sound_fade": (self._sound_fade_ticks, self._sound_return),
             "map_jobs": self.map_runtime.snapshot() if self.map_runtime else None,
             "legacy": [asdict(self.knight_combat[kid]) for kid in KnightId],
             "encounter": self.active_encounter.runtime.snapshot()
@@ -2179,6 +2325,7 @@ class GameSession:
 
         if (
             self.palette_fx.is_fading
+            or bool(self._sound_return)
             or self.palette_fx.is_flashing
             or self.wizard_screen is not None
             or self.village_visit is not None
@@ -2363,11 +2510,6 @@ def run_game_window(
         audio=audio,
         disk_set=disk_set,
     )
-    if session.asset_bundle is not None:
-        session.asset_bundle.attach_synth(audio)
-        title_mod = session.asset_bundle.load_title_music()
-        if title_mod is not None:
-            audio.play_music(title_mod)
 
     pygame.init()
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)

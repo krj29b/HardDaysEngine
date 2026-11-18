@@ -41,6 +41,26 @@ def click(state: SheetState, rules: SheetRules, world: OverworldState, region: S
         and s16(state.pointer_x) < s16(rules.shop.split_x)
     ):
         state.sounds.append("sell")
+    _hold_jingle(state, rules)
+
+
+def _hold_jingle(state: SheetState, rules: SheetRules) -> None:
+    if not rules.jingle_wait:
+        return
+    for index, event in enumerate(state.sounds):
+        if event in ("good", "bad"):
+            state.pending_sounds.extend(state.sounds[index + 1 :])
+            del state.sounds[index + 1 :]
+            state.wait = rules.jingle_wait
+            return
+
+
+def _jingle_tick(state: SheetState, rules: SheetRules) -> None:
+    state.wait -= 1
+    if not state.wait and state.pending_sounds:
+        state.sounds[:] = state.pending_sounds
+        state.pending_sounds.clear()
+        _hold_jingle(state, rules)
 
 
 def _dispatch(
@@ -94,11 +114,14 @@ def step(
     state: SheetState, rules: SheetRules, world: OverworldState, dx: int, dy: int, fire: bool
 ) -> None:
     """Move the pointer and dispatch held fire once per PAL tick (§12.2)."""
-    if state.done:
+    if state.done and not state.wait:
         return
     state.sounds.clear()
     state.pointer_x = max(0, min(314, state.pointer_x + dx * 2))
     state.pointer_y = max(0, min(195, state.pointer_y + dy * 2))
+    if state.wait:
+        _jingle_tick(state, rules)
+        return
     region = next((r for r in state.regions if r.contains(state.pointer_x, state.pointer_y)), None)
     state.hover = ""
     if region is not None:

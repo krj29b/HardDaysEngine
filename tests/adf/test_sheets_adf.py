@@ -46,6 +46,15 @@ def _click(session: GameSession, region: SheetRegion) -> None:
     session.step_tick(InputFrame(players={KnightId(state.knight - 1): PlayerInput(fire=True)}))
 
 
+def _map_return(session: GameSession) -> None:
+    assert session.asset_bundle is not None
+    retained = session.sheet_screen
+    wait = session.asset_bundle.get_scene_sounds().fade_wait
+    _ticks(session, wait - 1)
+    assert session.scene == GameScene.STATUS and session.sheet_screen is retained
+    _ticks(session, 1)
+
+
 def test_space_opens_status_and_consumes_item_through_loaded_region(adf_dir: Path) -> None:
     session = _session(adf_dir)
     world = session.overworld
@@ -64,6 +73,7 @@ def test_space_opens_status_and_consumes_item_through_loaded_region(adf_dir: Pat
     assert session.sheet_screen.state.last_item == 0
     done = next(r for r in session.sheet_screen.state.regions if r.id == 7)
     _click(session, done)
+    _map_return(session)
     assert session.scene == GameScene.OVERWORLD and session.sheet_screen is None
     assert session.last_sheet_item == 0
 
@@ -87,6 +97,7 @@ def test_lair_loot_gold_items_and_tidy_use_persistent_records(adf_dir: Path) -> 
     assert world.inventories[actor.inventory].byte(0) == 1
     done = next(r for r in session.sheet_screen.state.regions if r.id == 7)
     _click(session, done)
+    _map_return(session)
     assert session.scene == GameScene.OVERWORLD and lair.map_x == lair.map_y == 65535
 
 

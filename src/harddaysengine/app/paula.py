@@ -59,6 +59,10 @@ class SampleMemory:
         """Place ``data`` at offset 0 of ``region``."""
         self._regions[region] = np.frombuffer(data, dtype=np.int8).copy()
 
+    def clear(self) -> None:
+        """Release sample buffers when a fresh executable takes over Paula (§6.3.1)."""
+        self._regions.clear()
+
     def read(self, location: int, count: int) -> NDArray[np.int8]:
         """``count`` bytes from ``location``; bytes outside a loaded region are 0."""
         out = np.zeros(count, dtype=np.int8)
@@ -68,6 +72,16 @@ class SampleMemory:
             end = min(len(data), offset + count)
             out[: end - offset] = data[offset:end]
         return out
+
+    def write(self, region: int, data: bytes, capacity: int) -> None:
+        """DOS read into a bank: retain the unwritten tail after a short read (§6.2.10)."""
+        previous = self._regions.get(region)
+        size = max(capacity, len(previous) if previous is not None else 0)
+        out = np.zeros(size, dtype=np.int8)
+        if previous is not None:
+            out[: len(previous)] = previous
+        out[: len(data)] = np.frombuffer(data, dtype=np.int8)
+        self._regions[region] = out
 
 
 def _effective_period(period: int) -> int:

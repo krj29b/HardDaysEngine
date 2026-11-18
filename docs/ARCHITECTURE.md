@@ -398,10 +398,10 @@ AmigaDOS Hunk executables on Disk A.
 
 ### 6.1 `.a` Sound Sample Banks (`13` files across Disks B & C)
 - **Files:**
-  - Disk B: `he.a` (shared ambient/UI bank), `kn.a` (knight combat bank), `Ra.a` (Ratmen),
-    `re.a` (Trolls), `to.a` (Trogg Spear), `tr.a` (Trogg Axe), `wn.a` (Tavern / Wind).
+  - Disk B: `he.a` (ritual/screen bank), `kn.a` (knight combat bank), `Ra.a` (Ratmen),
+    `re.a` (campaign music), `to.a` (Troll), `tr.a` (all Trogg variants), `wn.a` (unused loader).
   - Disk C: `ba.a` (Balok), `be.a` (Beast), `dr.a` (Dragon), `Gu.a` (Guardian), `mu.a` (Mudmen),
-    `wz.a` (Demon / Wizard).
+    `wz.a` (Wizard).
 - **Container:** 12 of the 13 `.a` banks are wrapped in a 32-byte single-section Amiga Hunk header
   (`HUNK_HEADER` + 1 `HUNK_CODE` section + 4-byte `HUNK_END` footer); `wn.a` is a direct IFF
   `FORM....8SVX` container.
@@ -484,8 +484,8 @@ References inside the synth are hunk-44 offsets. Read from the user's file:
 The first nine instruments are the single-cycle waveforms in hunk 45, and their sample longs are
 relocated into hunk 45. The other 122 hold offsets inside a sound bank. When an area's bank is
 loaded, a relocation routine adds the base of one of five bank buffers to each of them
-(T11.23c). Until then a bank instrument's sample address is the raw small offset, which is not
-sample memory, and our model plays silence for it.
+(§6.2.10). A standalone, unrelocated synth keeps the raw small offset, which is not
+sample memory and reads silence. The game installs the relocation data before its bank loads.
 
 **Instrument loop word.** Negative means *looping*: after the first pass, the channel replays
 the part from the loop offset to the end. With loop offset 0, the whole sample repeats and no
@@ -671,6 +671,35 @@ This part is not original code. It turns register writes into sound:
   timing differs. ADKCON is not modelled: init writes it to clear modulation, which the synth
   never enables.
 
+### 6.2.10 Bank loading and instrument relocation (T11.23c)
+
+Hunk16 `$00F2` loads the campaign bank; `$0134..$0268` contains the
+individual bank loaders. Each reads its relocated filename, destination cell
+and byte count, then calls `$026A`. That reader skips exactly 32 file bytes
+before copying the requested bytes. These are memory images, including any
+embedded IFF headers; decoding an embedded BODY would move sample offsets.
+The requested size includes the file's header on most banks, so DOS returns
+fewer bytes after the skip (Wz.a is shorter still). A short read leaves the
+old buffer tail untouched; a fresh buffer tail is represented as zero. This
+also retains a trailing HUNK_END when it falls within the returned bytes.
+The five destination cells in hunk1 are `$140`, `$144`, `$148`, `$14C`, `$150`
+(knight, shared creature/screen, campaign, wizard, Ratmen). Loading a new bank
+replaces that slot; it does not rewrite the instrument offsets or reset voices.
+
+The relocation entry is the relocated JSR at hunk16 `$010A`, into hunk44
+`$1214`. Interpret its bounded instruction forms over symbolic bank addresses:
+LEA of an instrument, MOVE.L bank cell to D1, ADD.L D1 to sample field +6,
+ADDA.L row stride, CMPA.L end row, byte BEQ/BNE/BRA, MOVE.L bank cell to
+sample field +6, ADDI.L offset to that field, and RTS. All table references
+must point into hunk45 and all bank cells into hunk1. The ADD forms use each
+original sample offset; MOVE followed by ADDI replaces it. The resulting
+sample is a pair (slot, byte offset), resolved in app sample memory. Repeat
+loading uses these immutable pairs, so addresses never accumulate bank bases.
+Waveform instruments retain their hunk45 addresses. Unloaded slots read zero.
+The startup campaign bank is loaded on entry to mog; knight and creature
+banks are loaded by their existing fight loaders, and wizard/ritual callers
+install their decoded banks before starting their first sequences.
+
 ### 6.3 `.cmp` Music Modules (`music.cmp`, `vmusic.cmp` on Disk A)
 - RNC1-compressed 4-channel, 31-sample **ProTracker (`M.K.`)** modules:
   - Decompress with the RNC1 backward decoder (§2.2).
@@ -684,6 +713,73 @@ This part is not original code. It turns register writes into sound:
     - `+1080..+1083`: `"M.K."` signature.
     - `+1084 .. +1084 + max_pattern * 1024`: Pattern data (`64` rows × `4` channels × `4` bytes).
     - Followed by raw 8-bit signed PCM sample data for all 31 samples.
+
+#### 6.3.1 Original program player (T11.23c)
+
+The supported program's hunk1 CRC-32 is `$9FAA6BB6`. Read the period table
+through the PC-relative LEA at `$01D2` (37 words), the vibrato waveform through
+`$048C` (32 bytes), and the initial speed from `$00DA`. Finetune is ignored.
+Each PAL tick increments the byte counter; at speed it clears the counter and
+reads the next row, otherwise it applies effects to all four channels. Initial
+speed is 6, so the first row starts on VBL 6. There is no CIA tempo change.
+Init finds the sample base using the maximum of all 128 order bytes. It zeroes
+four bytes at each sample start, including zero-length slots. Each voice keeps
+its current sample, period, volume, slide target/direction/speed, and vibrato
+parameter/phase across rows and module stop. A module stop removes the tick
+job; it does not stop DMA. Mog initialization then resets Paula.
+
+A sample number loads its sample start, length, repeat start/length and header
+volume. A nonzero repeat start replaces the initial length with repeat start
+plus repeat length. A nonzero note restarts DMA unless effect3, which sets a
+slide target/direction instead. All four new notes start together; afterwards
+the loop registers are written in reverse channel order. Sample memory is
+signed PCM. Output uses the existing event-level Paula model without synth
+interrupts.
+
+Between row ticks: effect0 cycles root/high-nibble/low-nibble semitone offsets
+at tick modulo3, looking up the period in the original table; 1 subtracts the
+parameter and clamps to113, 2 adds and clamps to856 (12-bit period); 3 remembers
+a nonzero speed and moves towards its target, clamping and clearing the target
+when reached; 4 remembers a nonzero parameter, uses waveform index
+`(phase >> 2) &31`, amplitude `wave * (parameter &15) >>6`, adds/subtracts
+according to the phase's sign, then adds `(parameter >>2)&60` to the byte phase.
+Every other effect restores the base period. A changes the stored volume by
+the high nibble if nonzero, otherwise subtracts the low nibble, clamped0..64.
+Effects1/2 use the current row parameter directly, without parameter memory.
+Their word arithmetic keeps the upper4 bits while comparing/writing only the
+low12: a subtraction that wraps under zero can therefore escape the lower clamp.
+
+On a row, B sets song position to parameter-1 and toggles the break byte; D
+also toggles it and ignores its parameter, always proceeding to row0. C writes
+the immediate volume (signed-byte comparison with64), without changing the
+stored sample volume. F uses only the low5 bits as speed, ignores zero, and
+clears the tick counter when accepted. Other commands, including E and sample
+offset9, do nothing. A row advances by16 bytes; at1024 it wraps, clears the
+break byte and advances the order position. A remaining break also advances
+the position and resets row0. Positions wrap at128 and at song length.
+
+#### 6.3.2 Mog scene sounds (T11.23c)
+
+Map music is the four direct starts at hunk0 `$2F20..$2F58`; read each sequence
+and channel immediate and require its relocated target to be the synth start.
+Direct starts do not reserve busy bits. Existing service, wizard, dice,
+loading and ritual data already decode their channel-specific starts.
+Sheet click is the PLAY immediate at `$C03A` (the rest/offer/take sites must
+agree). Good jingle is four ordered PLAYs at `$CEB4,$CEBE,$CEC8,$CED2`, bad is
+two at `$CE8E,$CE98`. Each jingle waits8 VBLs after requesting its voices.
+The legacy sheet `buy`, `sell` and `coin` events denote printed text, not
+audio: `$C410`, `$C4CC` and `$C284` call the text routine in hunk12. Do not
+invent sound requests for them. This corrects earlier sound wording in §12.
+
+Silent fade is hunk0 `$8B46`: set the synth fade flag, start black fade with
+period2, wait36 VBLs, clear the flag and stop all. Only its actual callers
+use attenuation: farewell, fight close, shared return from places, ritual-message
+close and ritual completion, wizard farewell, dice leave, service leave,
+and fight-loading close. Normal OUT (`$8B26`) and IN (`$8B7C`) fades run
+the fade hook with the flag clear; they do not stop sounds. The host retains
+its corresponding caller while a silent fade runs, including already-black
+palettes. New starts wait until the caller's fade finishes. Next Day restarts
+the same four map sequences, as `$2F5A` calls the shared music entry.
 
 ---
 

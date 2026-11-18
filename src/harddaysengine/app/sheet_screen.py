@@ -54,9 +54,10 @@ class SheetScreen:
         """Advance one PAL tick using the owning knight's port (§12.2)."""
         inp = inp.normalized()
         step(self.state, self.rules, world, inp.dx, inp.dy, inp.fire or inp.confirm)
-        if self.state.done:
+        finished = self.state.done and not self.state.wait
+        if finished:
             close(self.state, world)
-        return self.state.done
+        return finished
 
     def palette(self, world: OverworldState) -> tuple[int, ...]:
         colors = list(self.data.palette)

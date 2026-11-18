@@ -6,13 +6,13 @@ renders one fiftieth of a second (§6.2.9). Without synth data the channels stay
 
 from __future__ import annotations
 
-import io
 from functools import partial
 from typing import TYPE_CHECKING
 
 import pygame
 
-from harddaysengine.app.paula import Paula, SampleMemory
+from harddaysengine.app.module_player import ModulePlayer
+from harddaysengine.app.paula import Paula, SampleMemory, address
 from harddaysengine.app.sound_front import SoundFront
 from harddaysengine.app.synth import WAVE_REGION, Synth
 
@@ -23,6 +23,8 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from harddaysengine.assets.audio import DecodedModule
+    from harddaysengine.assets.bank_data import BankData, BankLoad
+    from harddaysengine.assets.music_data import MusicData
     from harddaysengine.assets.synth_data import FrontEndData, SynthData
     from harddaysengine.sim.sound import SoundRequest
 
@@ -38,6 +40,9 @@ class AudioEngine:
         self.paula = Paula(self.memory, sample_rate)
         self.synth: Synth | None = None
         self.front: SoundFront | None = None
+        self.banks: BankData | None = None
+        self.music_data: MusicData | None = None
+        self.module_player: ModulePlayer | None = None
         self._pending: list[Callable[[], None]] = []
         self._headless = headless
         self._mixer_initialized = False
@@ -80,10 +85,14 @@ class AudioEngine:
 
     def attach_synth(self, synth: SynthData, front: FrontEndData) -> None:
         """Enter ``mog``: load the waveform hunk, then run the synth init and front-end set-up."""
+        self.memory.clear()
+        self.banks = None
         self.memory.load(WAVE_REGION, synth.waves)
         self.synth = Synth(synth, self.paula)
         self.paula.handler = self.synth.interrupt
         self.front = SoundFront(front, self._start)
+        self.module_player = None
+        self._is_music_playing = False
         self._pending.clear()
         self.synth.init()
         self.paula.commit()
@@ -95,6 +104,26 @@ class AudioEngine:
             raise ValueError("synth start without synth data")
         self.synth.start(sequence, channel)
         self.paula.commit()
+
+    def attach_banks(self, banks: BankData) -> None:
+        """Resolve the original instrument addresses once (§6.2.10)."""
+        if self.synth is None:
+            raise ValueError("bank relocation requires synth data")
+        if len(banks.samples) != len(self.synth.samples):
+            raise ValueError("bank relocation does not match the instrument table")
+        self.banks = banks
+        self.synth.samples[:] = [
+            address(slot + WAVE_REGION, offset) for slot, offset in banks.samples
+        ]
+
+    def load_bank(self, bank: BankLoad, data: bytes) -> None:
+        """Copy the exact original file slice into its persistent slot (§6.2.10)."""
+        if self.banks is None:
+            raise ValueError("bank load requires relocation data")
+        start = self.banks.header_bytes
+        if len(data) < start:
+            raise ValueError(f"truncated sound bank header {bank.name!r}")
+        self.memory.write(bank.slot + WAVE_REGION, data[start : start + bank.size], bank.size)
 
     def handle_requests(self, requests: Sequence[SoundRequest]) -> None:
         """Queue requests reported by ``sim``; they run after the next synth tick (§6.2.9)."""
@@ -110,12 +139,15 @@ class AudioEngine:
 
     def fade_step(self, flag: bool) -> None:
         """One palette fade step: the synth's fade attenuation (§6.2.8)."""
-        if self.synth is not None:
+        if self.synth is not None and self.module_player is None:
             self.synth.fade(flag)
 
     def step_vbl(self) -> NDArray[np.int16]:
         """Advance one PAL VBL: tick, queued requests, then render and queue the PCM."""
-        if self.synth is not None:
+        if self.module_player is not None:
+            self.module_player.tick()
+            self.paula.commit()
+        elif self.synth is not None:
             self.synth.tick()
             self.paula.commit()
         pending, self._pending = self._pending, []
@@ -135,28 +167,23 @@ class AudioEngine:
         return pcm
 
     def play_music(self, module: DecodedModule, *, loops: int = -1) -> bool:
-        """Load and play a decompressed `.cmp` ProTracker module via `pygame.mixer.music`."""
+        """Start the original 50 Hz program player, including in headless mode (§6.3.1)."""
+        if loops != -1:
+            raise ValueError("the original module player repeats its arrangement")
+        if self.music_data is None:
+            raise ValueError("module playback requires the original program player tables")
+        self._pending.clear()
+        self.paula.handler = None
+        self.module_player = ModulePlayer(module, self.music_data, self.paula)
         self._current_music_title = module.title
-        if not self._mixer_initialized:
-            self._is_music_playing = False
-            return False
-        try:
-            pygame.mixer.music.load(io.BytesIO(module.raw_mod))
-            pygame.mixer.music.play(loops=loops)
-        except pygame.error:
-            self._is_music_playing = False
-            return False
         self._is_music_playing = True
         return True
 
     def stop_music(self) -> None:
-        """Stop ProTracker module playback if active."""
+        """Remove the program music tick job, retaining Paula's last buffers (§6.3.1)."""
         self._is_music_playing = False
-        if self._mixer_initialized:
-            try:
-                pygame.mixer.music.stop()
-            except pygame.error:
-                return
+        if self.module_player is not None:
+            self.module_player.running = False
 
     def close(self) -> None:
         """Stop music and shut down `pygame.mixer` if initialized."""

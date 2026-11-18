@@ -19,6 +19,7 @@ class SheetRules:
     protection_limit: int
     armour_hp: bytes
     shop: ShopRules | None = None
+    jingle_wait: int = 0
 
 
 @dataclass(slots=True, frozen=True)
@@ -69,7 +70,9 @@ class SheetState:
     bad_luck: int = 0
     read_only: bool = False
     hover: str = ""
+    wait: int = 0
     sounds: list[str] = field(default_factory=list)
+    pending_sounds: list[str] = field(default_factory=list)
     icons: list[SheetIcon] = field(default_factory=list)
     texts: list[SheetText] = field(default_factory=list)
     regions: list[SheetRegion] = field(default_factory=list)

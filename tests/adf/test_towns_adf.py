@@ -55,6 +55,15 @@ def _close_sheet(session: GameSession) -> None:
     session.step_tick(InputFrame(players={KnightId.RED: PlayerInput(fire=True)}))
 
 
+def _finish_town_exit(session: GameSession) -> None:
+    assert session.asset_bundle is not None
+    retained = session.town_screen
+    for _ in range(session.asset_bundle.get_scene_sounds().fade_wait - 1):
+        session.step_tick(InputFrame())
+        assert session.town_screen is retained and session.scene == GameScene.LOCATION
+    session.step_tick(InputFrame())
+
+
 @pytest.mark.parametrize("waterdeep,button", [(False, 1), (True, 1), (False, 4)])
 def test_town_sheet_call_returns_to_town_without_spending(
     adf_dir: Path,
@@ -80,6 +89,7 @@ def test_town_sheet_call_returns_to_town_without_spending(
     )
     assert (actor.hp, actor.gold, world.prng.state, world.spent) == (hp, gold, rng, 3)
     _click(session, 5)
+    _finish_town_exit(session)
     assert session.scene == GameScene.OVERWORLD and session.town_screen is None
     assert world.spent == world.budget
 
@@ -93,6 +103,7 @@ def test_space_uses_decoded_sheet_and_exit_consumes_turn(adf_dir: Path, waterdee
     _close_sheet(session)
     assert session.scene == GameScene.LOCATION
     _click(session, 5)
+    _finish_town_exit(session)
     assert session.overworld.spent == session.overworld.budget
     assert session.scene == GameScene.OVERWORLD
     for _ in range(2):
@@ -138,6 +149,7 @@ def test_services_open_real_screens_and_return_to_the_unspent_town(
         town.data.pointer_y,
     )
     _click(session, 5)
+    _finish_town_exit(session)
     assert session.scene == GameScene.OVERWORLD and session.overworld.spent == budget
 
 
@@ -168,6 +180,9 @@ def _leave_service(session: GameSession) -> None:
         session.step_tick(InputFrame())
     session.step_tick(InputFrame(players={KnightId.RED: PlayerInput(fire=True)}))
     session.step_tick(InputFrame())
+    assert session.asset_bundle is not None
+    for _ in range(session.asset_bundle.get_scene_sounds().fade_wait):
+        session.step_tick(InputFrame())
     assert session.service_screen is None
 
 

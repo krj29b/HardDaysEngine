@@ -1,6 +1,6 @@
 """Sheet transfer, item, pointer and dispatch regressions (§12.2-9/26)."""
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from unittest.mock import patch
 
 import pytest
@@ -15,6 +15,26 @@ from tests.unit.sheet_setup import RULES, sheet
 
 def _region(state: SheetState, field: int, side: int = 0) -> SheetRegion:
     return next(r for r in state.regions if r.field == field and r.side == side and not r.id)
+
+
+def test_two_bad_jingles_are_separated_by_their_blocking_waits() -> None:
+    world, state = sheet()
+    rules = replace(RULES, jingle_wait=8)
+    world.inventories[1].counts[9] = 1
+    redraw(state, rules, world)
+    with patch.object(Rng, "draw", return_value=13):
+        click(state, rules, world, _region(state, 18))
+    assert state.done and state.wait == 8 and state.sounds == ["bad"]
+    assert state.pending_sounds == ["bad"]
+    for _ in range(7):
+        step(state, rules, world, 1, 0, True)
+        assert state.sounds == []
+    step(state, rules, world, 1, 0, True)
+    assert state.wait == 8 and state.sounds == ["bad"] and not state.pending_sounds
+    for _ in range(8):
+        step(state, rules, world, 0, 0, True)
+    assert state.wait == 0 and state.sounds == []
+    assert world.inventories[1].byte(18) == 0
 
 
 @pytest.mark.parametrize("number", [1, 2, 3, 8, 9, 10, 11, 32])

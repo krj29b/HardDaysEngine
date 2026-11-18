@@ -939,3 +939,24 @@ original happens during the frame after the VBL, and ours happens at the start o
 the difference is under one frame. Bytes the original would mis-dispatch, a tempo of 0, an
 instrument past the table and reads outside hunk 44 raise `SynthError`. The game's data reaches
 none of them.
+
+## ADR-048: Runtime bank slots and the original program music share the Paula renderer
+**Status:** ACCEPTED (2026-11-18, T11.23c; follows ADR-047)
+**Context:** The sequencer deliberately leaves bank addresses unresolved. Generic module
+playback also gives different results for the program player's speed and effect subset.
+**Decision:** Decode the bank loaders and execute their relocation pass over symbolic
+(slot, offset) addresses, preserving replacement instruments and short DOS reads. Resolve
+those addresses into five persistent app sample-memory regions. The existing sequencer and
+Paula renderer play both bank samples and generated waveforms without a second mixer.
+Decode the program player's period/vibrato tables from the executable and implement its
+50 Hz row/effect rules on the same Paula interface. Only one executable owns audio at once;
+entering mog reloads its synth/front-end and startup bank. Headless and audible playback
+run the same player. Scene callers load their banks before requesting their first sounds.
+Retain screens through original silent fades; record their waits and continuation in the
+existing session hash. Map, sheet and service requests retain their original call order.
+**Consequences:** No generic ProTracker playback, baked sample offsets or embedded pitch
+tables. Sample-memory reads outside loaded data are zero. Original DOS short reads retain
+the buffer tail (fresh tails are zero). The sheet buy/sell/coin events are text calls, so
+they generate no invented audio. Original-module and relocated-bank traces are verified
+against independent disk reads and deterministic PCM hashes. Audio hardware is not needed
+for these checks.

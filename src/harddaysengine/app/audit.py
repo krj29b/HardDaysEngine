@@ -279,7 +279,7 @@ def _turn_and_dragon_shots(rig: AuditRig) -> Iterator[AuditShot]:
 def _settle_fade(session: GameSession) -> None:
     """Wait through blocking PAL fades, including chained town entry (§12.33)."""
     for _ in range(128):
-        if not session.palette_fx.is_fading:
+        if not session.palette_fx.is_fading and not session.blocking_fade:
             return
         _step(session, 1)
     raise ValueError("audit fade did not finish")
@@ -630,7 +630,7 @@ def _service_visit(
     yield rig.capture(session, f"{name}_reply")
     _step(session, 60)
     _tap(session, PlayerInput(fire=True))
-    _step(session, 24)
+    _settle_fade(session)
     yield rig.capture(session, f"{name}_returned_to_town")
 
 
@@ -692,7 +692,7 @@ def _dice_shots(rig: AuditRig) -> Iterator[AuditShot]:
             leave = next(r for r in screen.run.house.regions if r.kind == 2)
             screen.run.state.pointer_x, screen.run.state.pointer_y = leave.x, leave.y
             _step(session, 12, PlayerInput(fire=True))
-            _step(session, 30)
+            _settle_fade(session)
             yield rig.capture(session, "dice_left_to_town")
         if not wanted:
             return

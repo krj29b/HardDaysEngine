@@ -9,14 +9,17 @@ from harddaysengine.app.intro_player import IntroCinematicPlayer
 from harddaysengine.assets.ai_map_rules import parse_ai_map_rules
 from harddaysengine.assets.arena import DecodedArena, composite_arena_background, decode_arena
 from harddaysengine.assets.audio import DecodedModule, decode_cmp_module
+from harddaysengine.assets.bank_data import parse_banks
 from harddaysengine.assets.cel import DecodedCel, decode_cel
 from harddaysengine.assets.fight_palette import FightPaletteTables, parse_fight_palette_tables
 from harddaysengine.assets.hit import HitSet, parse_collide_hit
 from harddaysengine.assets.hunk import HunkFormatError, parse_hunk_executable
 from harddaysengine.assets.map_rules import parse_map_rules
 from harddaysengine.assets.mog_code import MogCode
+from harddaysengine.assets.music_data import parse_music_data
 from harddaysengine.assets.palette import RGBColor, default_combat_palette
 from harddaysengine.assets.picture import DecodedPicture, decode_picture, decode_picture_pack
+from harddaysengine.assets.scene_sound_data import SceneSounds, parse_scene_sounds
 from harddaysengine.assets.synth_data import parse_front_end, parse_synth
 from harddaysengine.assets.tables import (
     MogRuntimeTables,
@@ -64,6 +67,7 @@ class GameAssetBundle:
     _fight_palette_tables: FightPaletteTables | None = None
     _hit_sets: dict[str, HitSet] | None = None
     _hit_sets_checked: bool = False
+    _scene_sounds: SceneSounds | None = None
 
     def get_intro_player(self) -> IntroCinematicPlayer | None:
         """Lazily build and cache the ``program`` starting cinematic player (§7.4)."""
@@ -158,7 +162,27 @@ class GameAssetBundle:
         if not self.disk_set.has_file("mog"):
             return
         mog = MogCode(parse_hunk_executable("mog", self.disk_set.read_file("mog")))
-        audio.attach_synth(parse_synth(mog), parse_front_end(mog))
+        synth = parse_synth(mog)
+        audio.attach_synth(synth, parse_front_end(mog))
+        banks = parse_banks(mog, synth)
+        audio.attach_banks(banks)
+        audio.load_bank(banks.startup, self.disk_set.read_file(banks.startup.name))
+        if self.disk_set.has_file("program"):
+            audio.music_data = parse_music_data(
+                parse_hunk_executable("program", self.disk_set.read_file("program"))
+            )
+
+    def load_sound_bank(self, audio: AudioEngine, name: str) -> None:
+        """Load a named original bank into its decoded destination (§6.2.10)."""
+        if audio.banks is not None:
+            audio.load_bank(audio.banks.named(name), self.disk_set.read_file(name))
+
+    def get_scene_sounds(self) -> SceneSounds:
+        """Cache original map music, sheet sounds and fade operands (§6.3.2)."""
+        if self._scene_sounds is None:
+            mog = MogCode(parse_hunk_executable("mog", self.disk_set.read_file("mog")))
+            self._scene_sounds = parse_scene_sounds(mog)
+        return self._scene_sounds
 
     def load_title_music(self) -> DecodedModule | None:
         """Return unpacked ProTracker ``music.cmp`` module if present on disk."""

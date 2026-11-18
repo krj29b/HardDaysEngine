@@ -66,6 +66,8 @@ def meeting_click(session: GameSession, region: SheetRegion) -> None:
     sheet = session.sheet_screen
     if sheet is None:
         raise ValueError("encounter audit has no shared sheet")
+    while sheet.state.wait:
+        session.step_tick(InputFrame())
     sheet.state.pointer_x, sheet.state.pointer_y = region.x + 1, region.y + 1
     kid = KnightId(sheet.state.knight - 1)
     session.step_tick(InputFrame(players={kid: PlayerInput(fire=True)}))

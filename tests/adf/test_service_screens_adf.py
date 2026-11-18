@@ -153,6 +153,13 @@ def _close(session: GameSession, screens: ServiceScreens) -> None:
     _tick(session, count=screens.close_wait)
     _tick(session, fire=True)
     _tick(session)
+    # The original leave calls the 36-VBL silent OUT before returning to town (§6.3.2).
+    retained = session.service_screen
+    assert session.asset_bundle is not None
+    wait = session.asset_bundle.get_scene_sounds().fade_wait
+    _tick(session, count=wait - 1)
+    assert session.service_screen is retained
+    _tick(session)
 
 
 def test_healer_heals_for_the_donation_and_returns_to_the_unspent_town(

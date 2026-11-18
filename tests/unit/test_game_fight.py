@@ -19,6 +19,7 @@ from harddaysengine.app.scene_assets import GameAssetBundle
 from harddaysengine.assets.cel import CelFrame, CelFrameMeta, DecodedCel
 from harddaysengine.assets.fight_program import cel_shape
 from harddaysengine.assets.palette import default_combat_palette
+from harddaysengine.assets.scene_sound_data import SceneSounds
 from harddaysengine.render.scene import SceneRenderer, default_bitmap_font
 from harddaysengine.sim.fight import (
     END_FIGHT,
@@ -42,6 +43,8 @@ if TYPE_CHECKING:
     from harddaysengine.sim.inventory import Inventory
     from harddaysengine.sim.rng import Rng
 
+_SYNTHETIC_FADE_WAIT = 18
+
 
 def _trigger() -> EncounterTrigger:
     return EncounterTrigger(
@@ -51,7 +54,9 @@ def _trigger() -> EncounterTrigger:
 
 def _session(*, audio: AudioEngine | None = None) -> GameSession:
     session = GameSession(start_scene=GameScene.OVERWORLD, audio=audio)
-    session.asset_bundle = Mock(spec=GameAssetBundle)
+    bundle = Mock(spec=GameAssetBundle)
+    bundle.get_scene_sounds.return_value = SceneSounds((), (), (), (), 1, _SYNTHETIC_FADE_WAIT)
+    session.asset_bundle = bundle
     loader = Mock(spec=FightLoader)
     loader.flyer = FlyerCells()
     loader.drake = DrakeCells()
@@ -140,6 +145,9 @@ def test_host_returns_engine_health_and_lives_after_the_end_delay(lost: bool) ->
     assert session.scene == GameScene.COMBAT
     session.step_tick(InputFrame())
     assert runtime.finished
+    assert session.blocking_fade and session.active_encounter is not None
+    for _ in range(_SYNTHETIC_FADE_WAIT):
+        session.step_tick(InputFrame())
     assert session.scene == GameScene.OVERWORLD
     assert session.active_encounter is None
     assert legacy.hp == (80 if lost else 35)
@@ -162,6 +170,7 @@ def test_unsupported_encounter_preserves_campaign_and_records() -> None:
 
 def test_host_dispatches_fight_sound_requests_in_order() -> None:
     audio = Mock(spec=AudioEngine)
+    audio.module_player = None
     session = _session(audio=audio)
     session._start_combat(_trigger(), KnightId.RED)
     assert session.active_encounter is not None
@@ -192,6 +201,9 @@ def test_lair_settlement_preserves_remaining_wave_and_awards_only_progress(lost:
     session.bad_luck = 1
     inventory = session.inventories[1].counts.copy()
     for _ in range(18):
+        session.step_tick(InputFrame())
+    assert session.blocking_fade and session.active_encounter is active
+    for _ in range(_SYNTHETIC_FADE_WAIT):
         session.step_tick(InputFrame())
     assert session.active_encounter is None
     assert session.lair_counts[3] == (2 if lost else 0)

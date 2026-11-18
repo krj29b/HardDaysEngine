@@ -103,6 +103,8 @@ def parse_sheet_rules(
     if table.hunk != 0:
         raise MogVersionError("mog: sheet armour table is outside code")
     ai = parse_ai_map_rules(executable)
+    mog.expect(0xCEA2, (0x7008,), "bad jingle wait")
+    mog.expect(0xCEDC, (0x7008,), "good jingle wait")
     return SheetRules(
         data.buttons,
         sizes,
@@ -116,4 +118,5 @@ def parse_sheet_rules(
         mog.operand(0xBFB6, 0xB07C, "protection threshold"),
         mog.code[table.offset : table.offset + 8],
         parse_shop_rules(executable),
+        jingle_wait=mog.word(0xCEA2) & 255,
     )
