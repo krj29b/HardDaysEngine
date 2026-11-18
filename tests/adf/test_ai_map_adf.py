@@ -10,6 +10,7 @@ import pytest
 
 from harddaysengine.app.game import GameScene, GameSession
 from harddaysengine.app.input import InputFrame, PlayerInput
+from harddaysengine.app.meeting_audit import meeting_until
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.ai_map_rules import parse_ai_map_rules
 from harddaysengine.assets.fight_palette import MogVersionError
@@ -190,6 +191,7 @@ def test_computer_arrival_enters_original_duel_and_resumes_without_redrawing(adf
     scan(world)
     session.step_tick(InputFrame())
     session.step_tick(InputFrame())
+    meeting_until(session, lambda: session.scene == GameScene.COMBAT)
     active = session.active_encounter
     assert session.scene == GameScene.COMBAT and active is not None
     assert active.runtime.first == int(world.current_knight_id) + 1
@@ -201,6 +203,7 @@ def test_computer_arrival_enters_original_duel_and_resumes_without_redrawing(adf
     gold, lives = actor.gold, human.lives
     human.gold = 30
     session._finish_combat(active)
+    meeting_until(session, lambda: session.scene == GameScene.OVERWORLD)
     assert human.lives == lives - 1 and actor.progress == 1 and actor.gold == gold + 15
     rng = world.prng.state
     session.step_tick(InputFrame())
@@ -221,6 +224,7 @@ def test_dead_or_frogged_opponent_settles_without_duel(adf_dir: Path, frog: bool
     session._reenter_map()
     session.step_tick(InputFrame())
     session.step_tick(InputFrame())
+    meeting_until(session, lambda: session.scene == GameScene.OVERWORLD)
     assert session.scene == GameScene.OVERWORLD and session.active_encounter is None
     assert actor.progress == 1 and actor.gold == (20 if frog else 0)
     assert world.ai.pending

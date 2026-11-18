@@ -9,9 +9,11 @@ import pytest
 
 from harddaysengine.app.game import GameScene, GameSession
 from harddaysengine.app.input import InputFrame, PlayerInput
+from harddaysengine.app.meeting_audit import meeting_done, meeting_ready, meeting_until
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.mog_code import MogCode
+from harddaysengine.sim.meeting import MeetingPhase
 from harddaysengine.sim.overworld import EncounterTrigger, TriggerKind
 from harddaysengine.sim.types import KnightId
 
@@ -131,6 +133,11 @@ def test_map_attack_uses_real_dragon_runtime_and_settles_at_host_boundary(
     lives = world.current_actor.lives
     active.runtime.finished = True
     session._finish_combat(active)
+    if not lost:
+        meeting_until(session, lambda: meeting_ready(session, MeetingPhase.RESULT_SHEET))
+        assert session.sheet_screen is not None and session.sheet_screen.state.number == 10
+        meeting_done(session)
+        meeting_until(session, lambda: session.scene == GameScene.OVERWORLD)
     assert session.scene == GameScene.OVERWORLD and world.spent == world.budget
     if lost:
         assert world.current_actor.lives == lives - 1 and world.dragon.gold > 0

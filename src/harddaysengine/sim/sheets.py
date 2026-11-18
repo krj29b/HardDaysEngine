@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from harddaysengine.sim import sheet_actions as actions
-from harddaysengine.sim.m68k import s16
+from harddaysengine.sim.m68k import s8, s16
 from harddaysengine.sim.sheet_layout import button, rebuild
 from harddaysengine.sim.shops import market, smith
 
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 def redraw(state: SheetState, rules: SheetRules, world: OverworldState) -> None:
     if state.number == 1:
-        if world.actors[state.other - 1].lives == 0:
+        if s8(world.actors[state.other - 1].lives) <= 0:
             state.changes = 0
         if state.changes:
             state.number = 9

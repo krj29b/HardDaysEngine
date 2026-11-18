@@ -29,6 +29,7 @@ from harddaysengine.app.input import (
 from harddaysengine.app.loop import Accumulator50Hz
 from harddaysengine.app.map_runtime import MapRuntime
 from harddaysengine.app.map_scene import compose_map, draw_calendar_screen, draw_map_menu
+from harddaysengine.app.meeting_screen import MeetingScreen
 from harddaysengine.app.scene_assets import (
     GameAssetBundle,
     build_intro_cinematic_frame,
@@ -77,6 +78,12 @@ from harddaysengine.sim.m68k import s8, s16, u8, u16
 from harddaysengine.sim.map_dragon import (
     automatic_loss,
     settle as settle_dragon,
+)
+from harddaysengine.sim.meeting import (
+    MeetingAction,
+    MeetingPhase,
+    after_protection,
+    decide as meeting_decide,
 )
 from harddaysengine.sim.overworld import (
     Arrival,
@@ -148,6 +155,7 @@ class GameScene(IntEnum):
     WIZARD = 12
     VILLAGE = 13
     VALLEY = 14
+    MEETING = 15
 
 
 @dataclass(slots=True, frozen=True)
@@ -242,6 +250,7 @@ class GameSession:
         self.wizard_screen: WizardScreen | None = None
         self.village_visit: VillageVisit | None = None
         self.valley_screen: ValleyScreen | None = None
+        self.meeting_screen: MeetingScreen | None = None
         self.loading_cycle = 0
         self.palette_fx: PaletteFxState = PaletteFxState(
             _palette_to_rgb12(default_combat_palette())
@@ -277,6 +286,7 @@ class GameSession:
         self.wizard_screen = None
         self.village_visit = None
         self.valley_screen = None
+        self.meeting_screen = None
         self.loading_cycle = 0
         self.sheet_screen = None
         self.service_screen = None
@@ -344,6 +354,7 @@ class GameSession:
             GameScene.WIZARD: lambda: self._step_wizard(frame),
             GameScene.VILLAGE: self._step_village,
             GameScene.VALLEY: lambda: self._step_valley(frame),
+            GameScene.MEETING: lambda: self._step_meeting(frame),
         }
         scenes.get(self.scene, lambda: self._step_end_screen(primary))()
 
@@ -617,21 +628,16 @@ class GameSession:
         row = computer_frame(world, world.ai_rules, key)
         for kid in KnightId:
             self._sync_legacy_actor(kid)
-        if row is not None:
-            opponent = self.actors[row.key - 1]
-            if opponent.frog_days or s8(opponent.lives) <= 0:
-                self._computer_meeting_loot(world.current_actor, opponent)
-                return
         self.last_status = ""
         if self._map_result(row, ord("Q") if key == ord("Q") else 0) and self.map_runtime:
             self.map_runtime.advance(world, self.tick_count)
 
-    def _computer_meeting_loot(self, winner: Actor, loser: Actor) -> None:
+    def _computer_meeting_loot(self, winner: Actor, loser: Actor, *, progress: int = 1) -> None:
         """Computer settlement shares the original transfer rule (§11.20)."""
         rules = self.overworld.turn_rules
         if rules is None:
             raise ValueError("meeting loot requires original transfer tables")
-        winner.progress = u16(winner.progress + 1)
+        winner.progress = u16(winner.progress + progress)
         transfer_loot(winner, loser, self.overworld.ordered_actors(), self.inventories, rules.gifts)
         for kid in KnightId:
             self._sync_legacy_actor(kid)
@@ -706,17 +712,7 @@ class GameSession:
         if row.kind == 2:
             self._dispatch_lair(row.key - 6)
         elif row.kind in (1, 33):
-            self._start_combat(
-                EncounterTrigger(
-                    TriggerKind.PVP_DUEL,
-                    kid,
-                    -1,
-                    world.day,
-                    world.moon_phase,
-                    opponent_knight_id=KnightId(row.key - 1),
-                ),
-                kid,
-            )
+            self._open_meeting(row.key)
         elif row.kind in (21, 22, 23, 24):
             self._open_village(kid)
         elif row.kind in (25, 26):
@@ -816,6 +812,189 @@ class GameSession:
     def ending_request(self) -> EndingRequest | None:
         """Encoded program hand-over, consumed by the ending host in T11.22 (§12.34)."""
         return None if self.stone_screen is None else self.stone_screen.state.request
+
+    def _open_meeting(self, other: int) -> None:
+        """Keep turn ownership separate from defender/winner sheet ownership (§12.40)."""
+        if self.asset_bundle is None:
+            self.last_status = "ORIGINAL DISKS REQUIRED FOR MEETINGS"
+            return
+        first = int(self.overworld.current_knight_id) + 1
+        if other == first or not 1 <= other <= 4:
+            raise ValueError("meeting requires two different knight handles")
+        screen = MeetingScreen(self.asset_bundle, first, other, self.overworld.names[other - 1])
+        self.meeting_screen = screen
+        palette = self._overworld_target_palette()
+        self.overworld.colors.active = False
+        self._clear_map_jobs()
+        self._map_key = 0
+        self._pending_fade_in = False
+        self.scene = GameScene.MEETING
+        self.palette_fx.set_palette(_palette_to_rgb12(palette))
+        self._meeting_fade(screen, out=True)
+
+    def _meeting_fade(self, screen: MeetingScreen, *, out: bool) -> None:
+        screen.state.wait = screen.rules.fade_wait
+        if out:
+            self.palette_fx.fade_out(divisor=screen.rules.fade_period)
+        else:
+            self.palette_fx.fade_in(
+                _palette_to_rgb12(screen.palette()),
+                divisor=screen.rules.fade_period,
+                from_black=True,
+            )
+
+    def _step_meeting(self, frame: InputFrame) -> None:
+        screen = self.meeting_screen
+        if screen is None:
+            raise ValueError("meeting scene has no caller")
+        state = screen.state
+        state.wait = max(0, state.wait - 1)
+        if state.wait or self.palette_fx.is_fading:
+            return
+        if state.phase == MeetingPhase.PROTECT:
+            inp = self._player_input(frame, KnightId(state.second - 1))
+            if state.released(inp.fire or inp.confirm):
+                state.phase = MeetingPhase.PROTECT_OUT
+                self._meeting_fade(screen, out=True)
+            return
+        self._meeting_transition(screen)
+
+    def _meeting_transition(self, screen: MeetingScreen) -> None:
+        state = screen.state
+        if state.phase == MeetingPhase.MAP_OUT:
+            first, second = self.actors[state.first - 1], self.actors[state.second - 1]
+            self._meeting_action(
+                screen,
+                meeting_decide(first, second, self.inventories[second.inventory], screen.rules),
+            )
+        elif state.phase == MeetingPhase.PROTECT_OUT:
+            state.phase = MeetingPhase.PROTECT_SHEET
+            self.last_sheet_item = 65535
+            self._open_sheet(screen.rules.temple_sheet, knight=state.second)
+        elif state.phase == MeetingPhase.COMBAT_OUT:
+            self.active_encounter = None
+            if state.hoard:
+                state.phase = MeetingPhase.RESULT_SHEET
+                self._open_sheet(screen.rules.hoard_sheet, knight=state.first)
+            else:
+                self._meeting_result(screen)
+
+    def _meeting_action(self, screen: MeetingScreen, action: MeetingAction) -> None:
+        if action == MeetingAction.SETTLE:
+            self._meeting_result(screen)
+        elif action == MeetingAction.PROTECT:
+            screen.state.phase = MeetingPhase.PROTECT
+            self._meeting_fade(screen, out=False)
+        elif action == MeetingAction.RETURN:
+            self._meeting_return(screen)
+        else:
+            self._meeting_fight(screen)
+
+    def _meeting_fight(self, screen: MeetingScreen) -> None:
+        state, world = screen.state, self.overworld
+        kid, other = KnightId(state.first - 1), KnightId(state.second - 1)
+        for who in (kid, other):
+            self._sync_legacy_actor(who)
+        state.phase = MeetingPhase.COMBAT
+        self._start_combat(
+            EncounterTrigger(
+                TriggerKind.PVP_DUEL,
+                kid,
+                -1,
+                world.day,
+                world.moon_phase,
+                opponent_knight_id=other,
+            ),
+            kid,
+        )
+        active = self.active_encounter
+        if active is None:
+            self._meeting_return(screen)
+            return
+        active.runtime.fight.confused = state.confused
+        active.runtime.fight.confused_on = bool(state.confused)
+
+    def _meeting_result(self, screen: MeetingScreen) -> None:
+        state = screen.state
+        if state.defeat == 3:
+            if self.actors[state.first - 1].kind == screen.rules.computer_kind:
+                self._meeting_return(screen)
+                return
+            number, winner, loser = screen.rules.temple_sheet, state.first, 0
+        else:
+            winner, loser = (
+                (state.second, state.first) if state.defeat & 1 else (state.first, state.second)
+            )
+            if self.actors[winner - 1].kind == screen.rules.computer_kind:
+                self._computer_meeting_loot(
+                    self.actors[winner - 1], self.actors[loser - 1], progress=screen.rules.progress
+                )
+                self._meeting_return(screen)
+                return
+            number = screen.rules.loot_sheet
+        state.phase = MeetingPhase.RESULT_SHEET
+        self._open_sheet(number, knight=winner, other=loser)
+
+    def _meeting_return(self, screen: MeetingScreen) -> None:
+        if screen.state.hoard:
+            self.overworld.spent = self.overworld.budget
+        for kid in KnightId:
+            self._sync_legacy_actor(kid)
+        self.meeting_screen, self.sheet_screen = None, None
+        self._reenter_map()
+
+    def _close_meeting_sheet(self, sheet: SheetScreen) -> None:
+        screen = self.meeting_screen
+        if screen is None:
+            raise ValueError("meeting sheet has no caller")
+        state = screen.state
+        if state.phase in (MeetingPhase.PROTECT_SHEET, MeetingPhase.RESULT_SHEET):
+            state.phase = (
+                MeetingPhase.PROTECT_CLOSING
+                if state.phase == MeetingPhase.PROTECT_SHEET
+                else MeetingPhase.RESULT_CLOSING
+            )
+            self._meeting_fade(screen, out=True)
+            return
+        state.wait = max(0, state.wait - 1)
+        if state.wait or self.palette_fx.is_fading:
+            return
+        self.last_sheet_item = sheet.state.last_item
+        self.sheet_screen = None
+        if state.phase == MeetingPhase.PROTECT_CLOSING:
+            self._meeting_protection_result(screen)
+        else:
+            self._meeting_return(screen)
+
+    def _meeting_protection_result(self, screen: MeetingScreen) -> None:
+        state = screen.state
+        used = self.last_sheet_item == screen.rules.protection_slot
+        if used and not self.bad_luck:
+            self._meeting_return(screen)
+            return
+        state.confused = state.second if used else 0
+        action = after_protection(
+            self.actors[state.first - 1], self.actors[state.second - 1], screen.rules
+        )
+        self._meeting_action(screen, action)
+
+    def _finish_meeting_combat(self, active: ActiveEncounter) -> None:
+        screen = self.meeting_screen
+        if screen is None:
+            raise ValueError("meeting fight has no caller")
+        screen.state.defeat = settle_defeats(active.runtime.fight, active.runtime.opponent)
+        self.last_defeat_mask = screen.state.defeat
+        self.bad_luck = 0
+        active.runtime.release()
+        self._meeting_combat_out(screen, active)
+
+    def _meeting_combat_out(self, screen: MeetingScreen, active: ActiveEncounter) -> None:
+        self.scene, screen.state.phase = GameScene.MEETING, MeetingPhase.COMBAT_OUT
+        self.palette_fx.set_palette(_palette_to_rgb12(active.runtime.scene.palette))
+        self._meeting_fade(screen, out=True)
+
+    def _meeting_snapshot(self) -> dict[str, object] | None:
+        return None if self.meeting_screen is None else self.meeting_screen.snapshot()
 
     def _open_valley(self, knight_id: KnightId) -> None:
         """Retain the original Valley caller through messages, fight and rewards (§12.38)."""
@@ -1458,7 +1637,9 @@ class GameSession:
         if done:
             self._close_sheet()
 
-    def _open_sheet(self, number: int, *, lair: int = -1, other: int = 0) -> None:
+    def _open_sheet(
+        self, number: int, *, lair: int = -1, other: int = 0, knight: int | None = None
+    ) -> None:
         if self.asset_bundle is None:
             self.scene = GameScene.OVERWORLD
             self.last_status = "ORIGINAL DISKS REQUIRED FOR SHEETS"
@@ -1468,7 +1649,7 @@ class GameSession:
             self.asset_bundle,
             self.overworld,
             number,
-            knight=int(self.overworld.current_knight_id) + 1,
+            knight=int(self.overworld.current_knight_id) + 1 if knight is None else knight,
             lair=lair,
             other=other,
         )
@@ -1480,6 +1661,9 @@ class GameSession:
         screen = self.sheet_screen
         if screen is None:
             raise ValueError("no shared sheet to close")
+        if self.meeting_screen is not None:
+            self._close_meeting_sheet(screen)
+            return
         if self.village_visit is not None:
             self._close_village_sheet(screen)
             return
@@ -1595,9 +1779,7 @@ class GameSession:
                 lanes=self.spawn_lanes,
                 day=self.overworld.day,
                 moon_frame=self.overworld.moon_frame,
-                computers=frozenset(
-                    int(kid) + 1 for kid in (knight_id, opponent_id) if kid not in self.players
-                ),
+                computers=self._fight_computers(knight_id, opponent_id),
             )
             return ActiveEncounter(trigger, runtime, (knight_id, opponent_id))
         arena = loader.arena_for(trigger.creature_type)
@@ -1613,6 +1795,12 @@ class GameSession:
             lanes=self.spawn_lanes,
         )
         return ActiveEncounter(trigger, runtime, (knight_id,))
+
+    def _fight_computers(self, *kids: KnightId) -> frozenset[int]:
+        """Use campaign kinds, or roster setup before map rules are installed (§12.40)."""
+        if self.overworld.rules is None:
+            return frozenset(int(kid) + 1 for kid in kids if kid not in self.players)
+        return frozenset(int(kid) + 1 for kid in kids if self.actors[kid].kind == 4)
 
     def _fight_lair_count(self, trigger: EncounterTrigger, loader: FightLoader) -> int | None:
         if trigger.kind != TriggerKind.LAIR_BOSS:
@@ -1688,8 +1876,7 @@ class GameSession:
 
     def _finish_combat(self, active: ActiveEncounter) -> None:
         """Settle original defeat/lair records; original caller sheets remain T11.15 (§10.24)."""
-        if active.trigger.kind == TriggerKind.VALLEY_OF_THE_GODS:
-            self._finish_valley_combat(active)
+        if self._finish_caller_fight(active):
             return
         fight = active.runtime.fight
         self.last_defeat_mask = settle_defeats(fight, active.runtime.opponent)
@@ -1712,6 +1899,43 @@ class GameSession:
             self._enter_game_over()
         else:
             self._return_from_map_fight(won)
+
+    def _finish_caller_fight(self, active: ActiveEncounter) -> bool:
+        if self.practice_mode:
+            return False
+        if active.trigger.kind == TriggerKind.VALLEY_OF_THE_GODS:
+            self._finish_valley_combat(active)
+        elif active.trigger.kind == TriggerKind.PVP_DUEL and self.meeting_screen is not None:
+            self._finish_meeting_combat(active)
+        elif (
+            active.trigger.kind == TriggerKind.DRAGON_INTERCEPT
+            and self.overworld.turn_rules is not None
+        ):
+            self._finish_dragon_combat(active)
+        else:
+            return False
+        return True
+
+    def _finish_dragon_combat(self, active: ActiveEncounter) -> None:
+        rules, bundle = self.overworld.turn_rules, self.asset_bundle
+        if rules is None or bundle is None:
+            raise ValueError("dragon settlement requires original assets and turn rules")
+        self.last_defeat_mask = settle_defeats(active.runtime.fight, active.runtime.opponent)
+        lost = bool(self.last_defeat_mask & 1)
+        settle_dragon(self.overworld, rules, lost=lost, spend=lost)
+        self.bad_luck = 0
+        active.runtime.release()
+        for kid in KnightId:
+            self._sync_legacy_actor(kid)
+        if lost:
+            self.active_encounter = None
+            self._return_from_map_fight(False)
+            return
+        first = int(self.overworld.current_knight_id) + 1
+        screen = MeetingScreen(bundle, first, 0, "")
+        screen.state.hoard = True
+        self.meeting_screen = screen
+        self._meeting_combat_out(screen, active)
 
     def _settle_map_encounter(self, active: ActiveEncounter, won: bool) -> None:
         fight = active.runtime.fight
@@ -1779,6 +2003,7 @@ class GameSession:
             "wizard": self._wizard_snapshot(),
             "village": self._village_snapshot(),
             "valley": self._valley_snapshot(),
+            "meeting": self._meeting_snapshot(),
             "loading_cycle": self.loading_cycle,
             "sheet": asdict(self.sheet_screen.state) if self.sheet_screen else None,
             "service": asdict(self.service_screen.state) if self.service_screen else None,
@@ -1935,14 +2160,6 @@ class GameSession:
         )
         renderer.set_palette(palette)
 
-    def _ending_snapshot(self) -> dict[str, object] | None:
-        return None if self.ending_screen is None else self.ending_screen.snapshot()
-
-    def _render_ending(self, renderer: SceneRenderer) -> None:
-        if self.ending_screen is None:
-            raise ValueError("ending scene has no run")
-        self.ending_screen.render(renderer)
-
     def render_to_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         """Render the active game scene and HUD onto ``scene_renderer``."""
         scenes: dict[GameScene, Callable[[], None]] = {
@@ -1960,6 +2177,7 @@ class GameSession:
             GameScene.WIZARD: lambda: self._render_wizard_scene(scene_renderer, font),
             GameScene.VILLAGE: lambda: self._render_overworld_scene(scene_renderer, font),
             GameScene.VALLEY: lambda: self._render_valley_scene(scene_renderer, font),
+            GameScene.MEETING: lambda: self._render_meeting_scene(scene_renderer, font),
         }
         scenes.get(self.scene, lambda: self._render_end_scene(scene_renderer, font))()
 
@@ -1968,10 +2186,34 @@ class GameSession:
             or self.palette_fx.is_flashing
             or self.wizard_screen is not None
             or self.village_visit is not None
-            or (self.valley_screen is not None and self.scene != GameScene.COMBAT)
+            or self._caller_palette_active()
         ):
             scene_renderer.set_palette_fx(self.palette_fx.current_palette())
         scene_renderer.flush_to_fbo()
+
+    def _ending_snapshot(self) -> dict[str, object] | None:
+        return None if self.ending_screen is None else self.ending_screen.snapshot()
+
+    def _render_ending(self, renderer: SceneRenderer) -> None:
+        if self.ending_screen is None:
+            raise ValueError("ending scene has no run")
+        self.ending_screen.render(renderer)
+
+    def _caller_palette_active(self) -> bool:
+        return self.scene != GameScene.COMBAT and (
+            self.valley_screen is not None or self.meeting_screen is not None
+        )
+
+    def _render_meeting_scene(self, renderer: SceneRenderer, font: BitmapFont) -> None:
+        screen = self.meeting_screen
+        if screen is None:
+            raise ValueError("meeting scene has no caller")
+        if screen.state.phase == MeetingPhase.MAP_OUT:
+            self._render_overworld_scene(renderer, font)
+        elif screen.state.phase == MeetingPhase.COMBAT_OUT:
+            self._render_combat_scene(renderer, font)
+        else:
+            screen.render(renderer)
 
     def _render_valley_scene(self, renderer: SceneRenderer, font: BitmapFont) -> None:
         screen = self.valley_screen

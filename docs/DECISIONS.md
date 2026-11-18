@@ -866,6 +866,23 @@ different `program` build raises instead of playing a wrong ending. `MogCode` er
 "mog" for some failures on `program`; the ending decoder's own messages say "program". The intro
 player stays as it is until someone rewrites it on the same decoder.
 
+## ADR-045: Sheet ownership is explicit in retained encounter continuations
+**Status:** ACCEPTED (2026-11-18, T11.21c)
+**Context:** A meeting can open a defender's protection sheet or a winner's loot
+sheet while the map turn still belongs to the initiator. Generic fight returns
+currently skip those sheets, and dragon wins skip their hoard.
+**Decision:** Retain one encounter caller across blocking fades, optional message,
+duel and sheet. Add explicit owner selection at the existing sheet boundary;
+do not swap authoritative actors or the map turn. Reuse original transactions,
+fight settlement and AI loot. The dragon caller uses the same retained sheet
+return with deferred spending. Decode the original caller operands and text.
+**Consequences:** Defender input and failed-scroll confusion remain isolated to
+the correct knight. Human meetings retain movement; computer pending decisions
+resume once. Acquisition/Wyrm sheets remain in the shared loop. Preserve the
+signed loser-life test governing sheet1's take scope. Natural duels,
+dragon fights, synthetic operands, replay and contact sheets verify the change.
+No additional combat/inventory model or embedded game data is introduced.
+
 ## ADR-046: The ending player is a VBL generator over the plan with a pixel-free canvas
 **Status:** ACCEPTED (2026-11-18, T11.22b)
 **Context:** The ending's control flow nests frame loops, pairs, bare ticks, a wipe loop and

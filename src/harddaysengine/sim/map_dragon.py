@@ -110,7 +110,7 @@ def attacks(world: OverworldState) -> bool:
     )
 
 
-def settle(world: OverworldState, rules: TurnRules, *, lost: bool) -> None:
+def settle(world: OverworldState, rules: TurnRules, *, lost: bool, spend: bool = True) -> None:
     """Loot on loss, slain marker/progress on win, exhaust budget either way (§11.10)."""
     actor = world.current_actor
     if lost:
@@ -118,7 +118,8 @@ def settle(world: OverworldState, rules: TurnRules, *, lost: bool) -> None:
     else:
         world.dragon.lives = 255
         actor.progress = u16(actor.progress + rules.dragon.progress)
-    world.spent = world.budget
+    if spend:
+        world.spent = world.budget
 
 
 def automatic_loss(world: OverworldState, rules: TurnRules) -> bool:

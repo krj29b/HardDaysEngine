@@ -42,6 +42,7 @@ from harddaysengine.app.fight_runtime import FightLoader
 from harddaysengine.app.game import GameScene, GameSession
 from harddaysengine.app.input import InputFrame, PlayerInput
 from harddaysengine.app.map_scene import compose_map
+from harddaysengine.app.meeting_audit import meeting_shots
 from harddaysengine.app.valley_audit import valley_shots
 from harddaysengine.app.village_audit import village_shots
 from harddaysengine.app.wizard_audit import wizard_shots
@@ -816,6 +817,7 @@ def _stone_shots(rig: AuditRig) -> Iterator[AuditShot]:
 
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
     "ending": ending_shots,
+    "meetings": meeting_shots,
     "valley": valley_shots,
     "villages": village_shots,
     "wizard": wizard_shots,

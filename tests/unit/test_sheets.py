@@ -85,14 +85,14 @@ def test_gold_stops_at_exact_cap_and_wraps(
 
 
 def test_living_meeting_one_take_becomes_status_dead_meeting_can_be_emptied() -> None:
-    for lives, expected in ((1, 9), (0, 1)):
+    for lives, expected in ((1, 9), (0, 1), (127, 9), (128, 1), (255, 1)):
         world, state = sheet(1)
         world.actors[1].lives = lives
         world.inventories[2].counts[0] = 3
         redraw(state, RULES, world)
         click(state, RULES, world, _region(state, 0, 1))
         assert state.number == expected
-        assert state.changes == (1 if lives else 0)
+        assert state.changes == int(expected == 9)
 
 
 def test_acquisition_returns_to_previous_sheet_and_cycles_original_record_order() -> None:

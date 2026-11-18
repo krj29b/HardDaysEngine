@@ -49,6 +49,7 @@ def use_item(state: SheetState, rules: SheetRules, world: OverworldState, slot: 
         state.done = True
         state.sounds.append("good")
     elif slot in (14, 16):
+        state.changes = 0
         state.previous = state.number
         state.number = 8 if slot == 14 else 11
         state.hand_over = slot == 16

@@ -4762,3 +4762,75 @@ in the original reaches them.
 
 **Version gate.** `program` hunk 0 must have CRC-32 $3064C4E2. Every operand above is still read
 and checked, so a different build fails loudly instead of playing a wrong ending.
+
+### 12.40 Meeting and dragon-hoard callers (T11.21c)
+
+Complete §12.18 using supported mog hunk0 $0AB4..$0CA2, the dragon caller
+$11CC..$1250, and the existing sheet rules (§12.2/7). Read/check helper targets,
+field displacements, sheet numbers, computer kind and progress immediate; no
+dialogue or reward tables are embedded. The protection text list is relocated
+by $0C3C; $0C28 identifies its writable name string. Find that string's row in
+the linked list and substitute the defender's name in a copied TextLine. Use
+the normal shared message picture/font and condensed bold-font spacing from
+§12.38, with the recolour at $301E..$3032. Do not mutate decoded text.
+
+Keep original turn owner separate from the sheet owner and duel pair. Never
+change the map turn index just to display a different knight. A map arrival
+of kind 1 or 33 opens this caller, including computer-initiated arrivals.
+Retain map OUT, message IN/OUT and sheet OUT fades with the shared period/minimum
+wait. Clear map input/jobs and dragon-active at entry; human meetings do not
+spend remaining movement. A computer arrival already exhausted its budget in
+§11.20 and keeps its pending continuation so the decision is not repeated.
+
+The defender's frog byte nonzero or lives byte **exactly zero** skips the fight
+and settles for the first knight. Otherwise a human defender (kind != runtime
+computer kind at $0C0A) with inventory byte +18 nonzero sees the named protection
+message. Wait for press/release, then open sheet9 for that defender, clearing
+last-item memory to $FFFF. The defender's input controls the message and sheet;
+the attacker cannot spend its items. Closing sheet9, or a scroll's automatic
+close, returns control to the caller after its OUT fade. Avoid only when last
+item equals the decoded slot at $0C82 and global bad_luck is clear. A failed
+protection use marks the defender as the fight's confused knight and enables
+the existing direction inversion (§10.19). Closing without using it continues
+normally. Two computer knights return without fighting.
+
+A duel uses the existing persistent FightRuntime, authoritative records, shared
+RNG, regional backdrop and original human/computer ports. Settle both defeats
+once (HP restored/life lost), clear bad luck and retain the last frame through
+OUT. Mask 3 opens sheet9 for a human first knight, otherwise returns. With only
+the first defeated, use the second as winner and first as loser. A computer
+winner gains the decoded word at $0BF2 and uses the existing ordered loot
+transfer. A human winner opens sheet1 with winner on the left and loser on the
+right, even when the winner was the defender. Sheet1 allows one take from a
+loser with signed lives > 0, then becomes sheet9. The signed BGT at $AD62 clears
+changes for any nonpositive signed lives byte, allowing that loser to be emptied.
+This refines §12.2's "no lives" wording; the earlier no-fight decision still tests
+exact zero. Its close returns to the original turn. There is no automatic human
+progress reward in this caller. Direct fight/practice entry still has its own
+existing continuation; it must not create an unrelated meeting caller.
+Campaign kind bytes determine computer fighters; direct fights created before
+map rules are installed retain their roster-based computer setup.
+
+Acquisition and Wyrm scrolls keep using the existing in-place sheet8/11 loop:
+next-knight selection, one acquisition then return to the remembered sheet,
+and Wyrm target committed on sheet close. These also work inside meeting,
+protection and hoard sheets; retain the caller until the shared loop ends.
+Both scrolls re-enter the shared sheet initializer ($ABEC, changes cleared at
+$AC02). Clear changes on entering sheet8/11, including when the parent is a
+meeting that just changed to sheet9; otherwise acquisition immediately bounces
+back without allowing a take. Decode/check this reset with the meeting rules.
+
+On a natural dragon win mark its lives $FF and grant the existing decoded
+dragon progress award once, then show sheet10 (MOVEQ at $1246). Use the existing
+dragon inventory/gold as its source. Preserve the combat frame through OUT;
+on hoard close fade OUT, then copy budget to spent and re-enter the map. Defer
+that spent assignment until the hoard is closed. Loss still transfers loot,
+spends and returns immediately, including automatic computer/frog/no-life
+losses. Do not make a second reward roll or replace hoard stock on opening.
+
+Hash the retained caller's original pair, phase, waits, input latch, defeat mask,
+confused handle and hoard mode alongside existing sheet/fight state. Reset clears
+it. Keep palette effects during blocking black tails, but allow combat's own
+warning/death palette to update while the fight is running. Exact synth wiring
+remains T11.23. The bounded explicit pair replaces dependence on stale original
+swap-register state on a no-fight return; no unrelated record is swapped.
