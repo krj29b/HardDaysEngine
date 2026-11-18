@@ -193,6 +193,11 @@ def _ramps(code: _Code) -> tuple[tuple[int, tuple[int, ...]], ...]:
     return tuple(rows)
 
 
+def class_ramps(mog: MogCode) -> tuple[tuple[int, tuple[int, ...]], ...]:
+    """Shared five-shade place palette routine (§12.32/36)."""
+    return _ramps(_Code(mog))
+
+
 def _sounds(code: _Code) -> tuple[tuple[int, int], ...]:
     out = []
     for pos in _SOUNDS:

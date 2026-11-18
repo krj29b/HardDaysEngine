@@ -36,6 +36,7 @@ from harddaysengine.app.service_screen import ServiceScreen
 from harddaysengine.app.sheet_screen import SheetScreen
 from harddaysengine.app.stonehenge_screen import StoneScreen
 from harddaysengine.app.town_screen import TownScreen
+from harddaysengine.app.wizard_screen import WizardScreen
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.dice_house_data import SCRIPT_HUNK as DICE_SCRIPT_HUNK, parse_dice_house
 from harddaysengine.assets.fight_program import cel_shape, fight_constants, script_image
@@ -82,7 +83,7 @@ from harddaysengine.sim.overworld import (
     map_sprites,
 )
 from harddaysengine.sim.palette_fx import PaletteFxState, pack_rgb12
-from harddaysengine.sim.rewards import transfer_loot
+from harddaysengine.sim.rewards import transfer_loot, wizard_gift
 from harddaysengine.sim.rng import DEFAULT_SEED, Rng
 from harddaysengine.sim.service_screen import ServiceWorld
 from harddaysengine.sim.service_screen_types import ServiceKind
@@ -91,6 +92,7 @@ from harddaysengine.sim.stonehenge import EndingRequest, StonePhase, bless
 from harddaysengine.sim.towns import TownAction, TownEntry
 from harddaysengine.sim.turns import TurnResult, advance as advance_turn
 from harddaysengine.sim.types import KnightId
+from harddaysengine.sim.wizard import WizardPhase
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -133,6 +135,7 @@ class GameScene(IntEnum):
     SERVICE = 9
     DICE = 10
     STONEHENGE = 11
+    WIZARD = 12
 
 
 @dataclass(slots=True, frozen=True)
@@ -223,6 +226,8 @@ class GameSession:
         self.active_encounter: ActiveEncounter | None = None
         self.town_screen: TownScreen | None = None
         self.stone_screen: StoneScreen | None = None
+        self.wizard_screen: WizardScreen | None = None
+        self.loading_cycle = 0
         self.palette_fx: PaletteFxState = PaletteFxState(
             _palette_to_rgb12(default_combat_palette())
         )
@@ -253,6 +258,8 @@ class GameSession:
         self.active_encounter = None
         self.town_screen = None
         self.stone_screen = None
+        self.wizard_screen = None
+        self.loading_cycle = 0
         self.sheet_screen = None
         self.service_screen = None
         self.dice_screen = None
@@ -315,6 +322,7 @@ class GameSession:
             GameScene.SERVICE: lambda: self._step_service(frame),
             GameScene.DICE: lambda: self._step_dice(frame),
             GameScene.STONEHENGE: lambda: self._step_stone(frame),
+            GameScene.WIZARD: lambda: self._step_wizard(frame),
         }
         scenes.get(self.scene, lambda: self._step_end_screen(primary))()
 
@@ -361,7 +369,7 @@ class GameSession:
     def _enter_victory(self, status: str) -> None:
         self.scene = GameScene.VICTORY
         self.last_status = status
-        self._begin_fade_in(self._picture_target_palette("WI1.P", "WI2.P"))
+        self._begin_fade_in(self._picture_target_palette("message.piv"))
         self._play_victory_music()
 
     def _enter_game_over(self) -> None:
@@ -678,6 +686,8 @@ class GameSession:
             self._open_town(kid, waterdeep=row.kind == 26)
         elif row.kind == 27:
             self._open_stonehenge(kid)
+        elif row.kind == 30:
+            self._open_wizard(kid)
         else:
             self.last_status = "PLACE SCREEN UNAVAILABLE"
         if self.scene != GameScene.OVERWORLD:
@@ -767,6 +777,128 @@ class GameSession:
     def ending_request(self) -> EndingRequest | None:
         """Encoded program hand-over, consumed by the ending host in T11.22 (§12.34)."""
         return None if self.stone_screen is None else self.stone_screen.state.request
+
+    def _open_wizard(self, knight_id: KnightId) -> None:
+        """Original wizard visit, with retained loading and the shared reward state (§12.36)."""
+        if self.asset_bundle is None:
+            self.last_status = "ORIGINAL DISKS REQUIRED FOR THE WIZARD"
+            return
+        owner = int(knight_id) + 1
+        self.wizard_screen = WizardScreen(
+            self.asset_bundle, owner, self.actors[knight_id].kind, self.loading_cycle
+        )
+        palette = self._overworld_target_palette()
+        self.overworld.setup_turn()
+        self.overworld.colors.active = False
+        self._clear_map_jobs()
+        self._map_key = 0
+        self._pending_fade_in = False
+        self.scene = GameScene.WIZARD
+        self.last_status = "WIZARD"
+        self.palette_fx.set_palette(_palette_to_rgb12(palette))
+        self._wizard_fade(self.wizard_screen, out=True)
+
+    def _wizard_fade(self, screen: WizardScreen, *, out: bool) -> None:
+        screen.state.wait = screen.rules.fade_wait
+        if out:
+            self.palette_fx.fade_out(divisor=screen.rules.fade_period)
+        else:
+            self.palette_fx.fade_in(
+                _palette_to_rgb12(screen.palette()),
+                divisor=screen.rules.fade_period,
+                from_black=True,
+            )
+
+    def _wizard_stage(self, screen: WizardScreen, stage: int) -> None:
+        screen.state.phase = (WizardPhase.ARRIVAL, WizardPhase.GIFT, WizardPhase.FAREWELL)[stage]
+        screen.state.wait = 0
+        screen.start_stage(stage, self.overworld.prng, self.tick_count)
+        if stage == 2:
+            self.palette_fx.set_palette(_palette_to_rgb12(screen.palette()))
+        else:
+            self.palette_fx.fade_in(
+                _palette_to_rgb12(screen.palette()),
+                divisor=screen.rules.palette_period,
+                from_black=True,
+            )
+        if stage == 0 and self.audio is not None:
+            self.audio.mixer.register_sample_bank(screen.bank)
+        if screen.animation is None:
+            raise ValueError("wizard stage did not start")
+        self._play_requests(screen.animation.sounds)
+
+    def _step_wizard(self, frame: InputFrame) -> None:
+        screen = self.wizard_screen
+        if screen is None:
+            raise ValueError("wizard scene has no visit")
+        if screen.state.phase in (WizardPhase.ARRIVAL, WizardPhase.GIFT, WizardPhase.FAREWELL):
+            inp = self._player_input(frame, KnightId(screen.state.knight - 1))
+            done = screen.advance(self.tick_count, inp.fire or inp.confirm)
+            if screen.animation is None:
+                raise ValueError("wizard stage has no animation")
+            self._play_requests(screen.animation.sounds)
+            if done:
+                self._wizard_fire(screen)
+            return
+        screen.state.wait = max(0, screen.state.wait - 1)
+        if not screen.state.wait and not self.palette_fx.is_fading:
+            self._wizard_continue(screen)
+
+    def _wizard_fire(self, screen: WizardScreen) -> None:
+        if screen.state.phase == WizardPhase.GIFT:
+            self._wizard_stage(screen, 2)
+        else:
+            if screen.state.phase == WizardPhase.FAREWELL:
+                self.actors[screen.state.knight - 1].recency = screen.dialogue.recency
+                screen.state.phase = WizardPhase.EXIT_OUT
+            else:
+                screen.state.phase = WizardPhase.ARRIVAL_OUT
+            self._wizard_fade(screen, out=True)
+
+    def _wizard_continue(self, screen: WizardScreen) -> None:
+        state = screen.state
+        if state.phase == WizardPhase.MAP_OUT:
+            state.phase = WizardPhase.LOADING
+            self.loading_cycle = (self.loading_cycle + 1) % len(screen.rules.loading.messages)
+            self._play_requests(screen.rules.loading.sounds)
+            self._wizard_fade(screen, out=False)
+        elif state.phase == WizardPhase.LOADING:
+            state.phase = WizardPhase.LOADING_OUT
+            self._wizard_fade(screen, out=True)
+        elif state.phase == WizardPhase.LOADING_OUT:
+            self._wizard_stage(screen, 0)
+        elif state.phase == WizardPhase.ARRIVAL_OUT:
+            state.result = wizard_gift(
+                self.actors[state.knight - 1],
+                self.inventories[state.knight],
+                self.overworld.prng,
+                self._turn_rules().gifts,
+                self.overworld.gifts,
+            )
+            self._sync_legacy_actor(KnightId(state.knight - 1))
+            self._wizard_stage(screen, 1)
+        elif state.phase == WizardPhase.EXIT_OUT:
+            state.phase = WizardPhase.TEMPLE
+            self._open_sheet(9)
+
+    def _close_wizard_sheet(self, sheet: SheetScreen) -> None:
+        screen = self.wizard_screen
+        if screen is None:
+            raise ValueError("wizard temple has no visit")
+        if screen.state.phase == WizardPhase.TEMPLE:
+            screen.state.phase = WizardPhase.TEMPLE_OUT
+            self._wizard_fade(screen, out=True)
+            return
+        screen.state.wait = max(0, screen.state.wait - 1)
+        if screen.state.wait or self.palette_fx.is_fading:
+            return
+        self.last_sheet_item = sheet.state.last_item
+        self.sheet_screen, self.wizard_screen = None, None
+        self.overworld.spent = self.overworld.budget
+        self._reenter_map()
+
+    def _wizard_snapshot(self) -> dict[str, object] | None:
+        return None if self.wizard_screen is None else self.wizard_screen.snapshot()
 
     def _stone_snapshot(self) -> dict[str, object] | None:
         return None if self.stone_screen is None else self.stone_screen.snapshot()
@@ -1103,6 +1235,9 @@ class GameSession:
         screen = self.sheet_screen
         if screen is None:
             raise ValueError("no shared sheet to close")
+        if self.wizard_screen is not None:
+            self._close_wizard_sheet(screen)
+            return
         if self.stone_screen is not None:
             self._close_stone_sheet(screen)
             return
@@ -1384,6 +1519,8 @@ class GameSession:
             "calendar_phase": self._calendar_phase,
             "town": asdict(self.town_screen.state) if self.town_screen else None,
             "stone": self._stone_snapshot(),
+            "wizard": self._wizard_snapshot(),
+            "loading_cycle": self.loading_cycle,
             "sheet": asdict(self.sheet_screen.state) if self.sheet_screen else None,
             "service": asdict(self.service_screen.state) if self.service_screen else None,
             "dice": self.dice_screen.run.snapshot() if self.dice_screen else None,
@@ -1520,7 +1657,7 @@ class GameSession:
             self._render_calendar(scene_renderer, farewell=True)
             return
         if self.scene == GameScene.VICTORY:
-            self._compose_picture_or_solid(scene_renderer, "WI1.P", "WI2.P")
+            self._compose_picture_or_solid(scene_renderer, "message.piv")
             font.draw_text(scene_renderer.canvas, "VICTORY!", 128, 236, color_index=30)
         else:
             self._compose_picture_or_solid(scene_renderer, "message.piv")
@@ -1556,12 +1693,25 @@ class GameSession:
             GameScene.SERVICE: lambda: self._render_service_scene(scene_renderer),
             GameScene.DICE: lambda: self._render_dice_scene(scene_renderer),
             GameScene.STONEHENGE: lambda: self._render_stone_scene(scene_renderer, font),
+            GameScene.WIZARD: lambda: self._render_wizard_scene(scene_renderer, font),
         }
         scenes.get(self.scene, lambda: self._render_end_scene(scene_renderer, font))()
 
-        if self.palette_fx.is_fading or self.palette_fx.is_flashing:
+        if (
+            self.palette_fx.is_fading
+            or self.palette_fx.is_flashing
+            or self.wizard_screen is not None
+        ):
             scene_renderer.set_palette_fx(self.palette_fx.current_palette())
         scene_renderer.flush_to_fbo()
+
+    def _render_wizard_scene(self, renderer: SceneRenderer, font: BitmapFont) -> None:
+        if self.wizard_screen is None:
+            raise ValueError("wizard scene has no visit")
+        if self.wizard_screen.state.phase == WizardPhase.MAP_OUT:
+            self._render_overworld_scene(renderer, font)
+        else:
+            self.wizard_screen.render(renderer)
 
     def _render_stone_scene(self, renderer: SceneRenderer, font: BitmapFont) -> None:
         if self.stone_screen is None:

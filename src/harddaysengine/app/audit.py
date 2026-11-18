@@ -41,6 +41,7 @@ from harddaysengine.app.fight_runtime import FightLoader
 from harddaysengine.app.game import GameScene, GameSession
 from harddaysengine.app.input import InputFrame, PlayerInput
 from harddaysengine.app.map_scene import compose_map
+from harddaysengine.app.wizard_audit import wizard_shots
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.palette import default_combat_palette
 from harddaysengine.render.renderer import HardDaysRenderer
@@ -812,6 +813,7 @@ def _stone_shots(rig: AuditRig) -> Iterator[AuditShot]:
 
 
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
+    "wizard": wizard_shots,
     "stonehenge": _stone_shots,
     "shops": _shop_shots,
     "services": _service_shots,

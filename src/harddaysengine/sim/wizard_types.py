@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 
 from harddaysengine.sim.rewards import GiftKind, GiftResult
+from harddaysengine.sim.sound import SoundRequest
+from harddaysengine.sim.turn_rules import TextLine
 
 
 @dataclass(slots=True, frozen=True)
@@ -54,3 +56,40 @@ class WizardDialogue:
             if key == kind:
                 speech = candidate
         return speech
+
+
+@dataclass(slots=True, frozen=True)
+class WizardSpawn:
+    script: int
+    position: tuple[int, int, int]
+    facing: int
+    kind: int
+
+
+@dataclass(slots=True, frozen=True)
+class WizardLoading:
+    picture: str
+    font: str
+    messages: tuple[tuple[TextLine, ...], ...]
+    sounds: tuple[SoundRequest, ...]
+
+
+@dataclass(slots=True, frozen=True)
+class WizardRules:
+    tower: str
+    gift: str
+    cel: str
+    bank: str
+    font: str
+    spawns: tuple[WizardSpawn, ...]
+    ramps: tuple[tuple[int, tuple[int, ...]], ...]
+    palette_entry: int
+    palette_period: int
+    waits: tuple[int, int, int]
+    speech_at: tuple[tuple[int, int, int], ...]
+    fade_period: int
+    fade_wait: int
+    sounds: tuple[SoundRequest, ...]
+    items: tuple[tuple[int, str], ...]
+    gold_suffix: str
+    loading: WizardLoading

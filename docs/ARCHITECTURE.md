@@ -4371,3 +4371,69 @@ target and another at loop entry. The gift-to-farewell change has no fade-out:
 it replaces the picture and directly installs the class palette. The final
 recency store is the byte operand at $9876 (70). These details refine §12.20;
 T11.20a adds no host route or alternative screen loop.
+
+### 12.36 Animated wizard caller (T11.20b)
+
+The wizard loader ($2E42) selects scene 3 and calls the rotating loading message
+at $2F5A. Retain a session loading-text cursor, starting at 0. Decode its fourteen
+linked lists through LEA $2F74 and the compare operand at $2F94; the cursor is
+incremented and reset after selecting the list. Its four direct synth starts are
+the checked immediate pairs at $2F20/$2F2E/$2F3C/$2F4A. Message/font filenames
+come from $2BFA/$2C36, and the wizard's Small.font from $2C70; the selected
+font slot is 0 at $9598 and $9890. Stop map colour jobs, run turn setup, free
+map jobs and clear keys once on entry. Retain map fade-out, loading-message
+fade-in and fade-out as blocking phases, using the common decoded two-VBL
+palette period and 36-VBL minimum wait (§12.34). Loading takes no additional
+simulation time. The cursor and phase enter replay hashes. This gives the wizard
+its original loading path; other callers of the rotating message can share the
+cursor when their loading presentations are completed.
+
+Read tower picture/cel/gift picture filenames through relocated LEAs
+$2E5C/$2F04/$2E8C, checking the picture/cel loader calls and palette copies.
+All five creature frame slots receive the same wizard cel allocation; preserve
+this aliasing, rather than remapping a script slot to zero. The bank load at
+$2F10 names hunk16 $250. Its LEA at +0 names Wz.a in hunk17; decode the bank
+without embedding any samples. Exact instrument relocation remains T11.23c.
+
+Four spawn blocks at $95CE/$96EE/$9716/$97A8 contain a relocated immediate
+script pointer (hunk4), the shared cel-list LEA, three position words, MOVEQ
+facing and type, and a spawn call. D4's long immediate is unused by spawn (the
+second gift block passes 2); check its form without turning it into a slot.
+The fourth block must equal the first. Type $28 uses the existing idle-object
+handler; jobs keep their script/work state and end naturally. The three stages
+use fresh pools: one tower job, then two ordered gift jobs, then the tower job.
+Their frames use the existing ordered FightCanvas and its stamps. Unknown
+callbacks fail; there is no catch-and-restart animation fallback.
+
+The five-shade class ramp is the shared routine at $AADE (§12.32). The byte
+palette offset is the long at $95C2 (12), divided by two. Retain the checked
+class order and five RGB12 words; do not embed colours. The tower and farewell
+use that patched tower palette; the gift uses its own unpatched picture palette.
+The greeting/farewell coordinates and style come from $9608/$9816 (x long,
+y/style MOVEQ); gift coordinates/style are three words at $96D6. Speeches are
+background text, composed before animated jobs, so later draws may overlap them.
+The gold farewell uses a three-character decimal field (§12.31), followed by
+the decoded byte-store suffix at $9A6A through its NUL. Item names are read
+from the ten `{slot word, string pointer}` rows reached through LEA $9B3C.
+Substitution is done on a copy as §12.35 specifies.
+
+At tower entry run one engine pass, emit the four START requests read at $9630
+and its three following 12-byte blocks, set the palette target (period from
+$9666), then immediately run the first loop pass. Run jobs during this target
+fade. A loop pass is followed by its entire 5/6/4-VBL wait, decoded from
+$9680/$9764/$985C, then sample held fire on the visit owner's logical port.
+An early press/release is not buffered. If fire is absent, run the next pass
+on that same tick. On arrival fire, pause jobs for the common blocking fade;
+only after it ends roll the shared reward once and start the two gift scripts.
+The gift's first loop pass is immediate, with a black-to-picture target fade
+(period $974A). Gift fire directly replaces the picture/pool and installs the
+class palette; farewell's first pass is immediate, without a blocking fade.
+Farewell fire stores the decoded recency byte, then runs the silent OUT fade.
+
+The host retains the visit while sheet9 is open. Closing that sheet fades its
+retained display, then sets spent to budget and uses the existing map re-entry.
+No input skips a blocking fade; render calls cannot advance jobs, waits or RNG.
+Hash the owner, class, phase, waits, gift result, job/pool records, engine work,
+lists and counters. Scene reset clears the visit; a new game resets the loading
+cursor. The wizard pictures are removed from the legacy victory display; actual
+ending playback remains the program hand-over of T11.22.

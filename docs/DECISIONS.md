@@ -796,3 +796,21 @@ introduced. Message cycles remain campaign-owned. Synthetic boundary checks and
 independent real-disk reads verify row identity, ordering and field locations.
 Parent T11.20 remains open; the tower is not playable until b, which also removes
 the wizard picture from the legacy victory presentation. No game data is tracked.
+
+## ADR-041: Wizard stages retain original script jobs and their wait-before-input order
+**Status:** ACCEPTED (2026-11-18, T11.20b; follows ADR-039 / ADR-040)
+**Context:** The wizard uses three script-driven stages with different frame waits,
+a rotating loading message, two pictures, a class ramp and a shared reward roll.
+Restarting scripts for display or accepting fire every tick changes its timing.
+**Decision:** Decode the remaining wizard operands and asset references into frozen
+rules. A visit owns the original Fight/ScriptEngine pools, using all five aliased
+cel slots and ordered FightCanvas composition over text-bearing backgrounds.
+Sample held fire only when a decoded frame wait expires. The host retains the
+visit through blocking PAL fades and sheet9, and hashes the state independently
+of rendering. The session owns the rotating loading-text cursor, available to
+later loading callers; rewards reuse T11.20a and the campaign generator.
+**Consequences:** Preserve two initial tower passes, continuous jobs during target
+fades, fresh pools at stage changes, direct gift-to-farewell palette installation,
+and a spent temple exit. Original data comes from user disks. Exact sound-bank
+instrument wiring remains T11.23c, as for other original place screens. The wizard
+pictures cease to be the legacy victory backdrop; program endings remain T11.22.
