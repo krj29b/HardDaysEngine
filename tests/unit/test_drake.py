@@ -16,6 +16,7 @@ from harddaysengine.sim.fight_ai.drake import (
 from harddaysengine.sim.fight_script import RoutineCall
 from harddaysengine.sim.m68k import s8, u16
 from harddaysengine.sim.rng import Rng
+from harddaysengine.sim.sound import play
 from tests.unit.drake_setup import DRAKE, SCRIPTS, make_drake
 from tests.unit.knight_setup import RULES
 
@@ -167,7 +168,7 @@ def test_flight_countdown_landing_uses_uncapped_arc_for_sound_and_shake(
     assert _handle(f, handle) == SCRIPTS.landing
     me = f.actor(handle)
     assert (me.height, me.behaviour_flags2, f.drake.flags) == (0, 3, 0)
-    assert f.sounds == sounds and f.shake.active == shake
+    assert f.sounds == [play(s) for s in sounds] and f.shake.active == shake
 
 
 def test_pounce_contact_marks_first_dead_and_restarts_its_fixed_script() -> None:
@@ -188,4 +189,4 @@ def test_sound_pair_engine_calls_keep_decoded_order_without_random_draws() -> No
     state = f.rng.state
     call = RoutineCall("drake_grab_sounds", handle, 1, 0, 0, 0, 1)
     f.routines[call.name](f, call)
-    assert f.sounds == [64, 65] and f.rng.state == state
+    assert f.sounds == [play(64), play(65)] and f.rng.state == state

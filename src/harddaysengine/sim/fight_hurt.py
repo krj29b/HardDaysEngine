@@ -106,7 +106,7 @@ def block_check(blow: Blow) -> bool:
         return True
     if me.facing == attacker.facing:
         return False
-    blow.fight.sounds.append(blow.rules.clang_sound)
+    blow.fight.play_sound(blow.rules.clang_sound)
     return True
 
 

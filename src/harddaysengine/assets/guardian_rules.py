@@ -111,10 +111,6 @@ def _rules(mog: MogCode) -> GuardianRules:
         scripts=GuardianScripts(**scripts),
         hop_table=_pointer(mog, 0x80E, 0x23FC, DATA_HUNK),
         hop2_table=_pointer(mog, 0x874, 0x23FC, DATA_HUNK),
-        sounds=tuple(
-            mog.operand(pos, 0x303C, "Guardian sound", hunk=HUNK)
-            for pos in (0xA84, 0xA8E, 0xA98, 0xAA2)
-        ),
         **values,
     )
 

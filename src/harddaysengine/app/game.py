@@ -966,7 +966,7 @@ class GameSession:
             ports[port] = self._player_input(frame, kid).to_joystick_word()
         output = active.runtime.step_vbl(self.tick_count, ports)
         if output is not None and self.audio is not None:
-            self.audio.handle_fight_sounds((*output.sounds, *output.tick.sounds))
+            self.audio.handle_fight_sounds([request.sound for request in output.sounds])
         if active.runtime.finished:
             self._finish_combat(active)
 

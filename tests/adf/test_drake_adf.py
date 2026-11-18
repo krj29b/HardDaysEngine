@@ -61,7 +61,7 @@ def _play(bundle: GameAssetBundle, *, defend: bool) -> tuple[Fight, list[str], l
     for frame in range(2500):
         fight.ports[0] = audit.input_word() if defend else 0
         output = audit.scene.advance(frame * 6)
-        assert all(call.name.startswith("sound_pick_") for call in output.skipped_calls)
+        assert not output.skipped_calls
         hashes.append(
             hashlib.sha256(json.dumps(runtime.snapshot(), sort_keys=True).encode()).hexdigest()
         )

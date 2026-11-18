@@ -36,6 +36,7 @@ from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.mog_code import MogCode
 from harddaysengine.assets.screen_fx import parse_shake_rules
 from harddaysengine.assets.snatcher_rules import parse_snatcher_rules
+from harddaysengine.assets.sound_rules import parse_sound_rules
 from harddaysengine.assets.stalker_rules import parse_stalker_rules
 from harddaysengine.render.scene import palette_fx_to_rgb
 from harddaysengine.sim.fight import (
@@ -67,6 +68,7 @@ from harddaysengine.sim.fighters import KNIGHT_TYPE, install_knight_control
 from harddaysengine.sim.m68k import s16, u8, u16
 from harddaysengine.sim.palette_fx import pack_rgb12, step_color
 from harddaysengine.sim.screen_fx import SCREEN_SHAKE, screen_shake
+from harddaysengine.sim.sound import install_sounds
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -237,6 +239,7 @@ class FightRuntime:
             "ai_day": f.ai_day,
             "ai_last_action": f.ai_last_action,
             "rng": f.rng.state,
+            "sound_cells": asdict(f.sound_cells),
             "approach": asdict(f.approach),
             "caster": asdict(f.caster),
             "snatch_flags": f.snatch_flags,
@@ -304,6 +307,8 @@ class FightLoader:
         )
         self.computer_knight_rules = parse_computer_knight_rules(executable)
         self.guardian_rules = parse_guardian_rules(executable)
+        self.sound_rules = parse_sound_rules(executable)
+        self.sound_cells = self.sound_rules.initial_cells()
         self.drake = DrakeCells()
         self.shake_rules = parse_shake_rules(executable)
         self.setup_rules = parse_fight_setup(executable)
@@ -367,6 +372,8 @@ class FightLoader:
         install_drake(f, self.drake_rules, self.knight_rules)
         install_guardian(f, self.guardian_rules, self.knight_rules)
         install_dragon(f, self.dragon_rules, self.knight_rules)
+        install_sounds(f, self.sound_rules)
+        f.sound_cells = self.sound_cells
         f.drake = self.drake
         f.flyer = self.flyer
         f.shake_rules = self.shake_rules

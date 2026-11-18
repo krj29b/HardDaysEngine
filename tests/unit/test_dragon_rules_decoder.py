@@ -45,8 +45,6 @@ def _mog(*, bad_step: bool = False, bad_plan: bool = False, bad_frame: bool = Fa
     struct.pack_into(">HI", code, 0x697C, 0x247C, 201 if bad_frame else 200)
     struct.pack_into(">HI", code, 0x6998, 0x2A3C, 40)
     struct.pack_into(">H", code, 0x6992, 0x7603)
-    struct.pack_into(">HH", code, 0x6D28, 0x303C, 71)
-    struct.pack_into(">HH", code, 0x6D32, 0x303C, 72)
     data = bytes(code)
     sections = (
         HunkSection(0, HUNK_CODE, len(data), data, {4: tuple(relocs), 0: (0x696A,), 1: (0x697E,)}),
@@ -61,7 +59,7 @@ def test_reads_invented_tunables_scripts_and_flight_requests() -> None:
     assert rules.near.steps == 7 and rules.far.arc == 35 and rules.near.x == 90
     assert rules.scripts.strike8 == 500 and rules.scripts.part_death == 560
     assert rules.fire_list == 2 and rules.fire_kind == 40 and rules.fire_facing == 3
-    assert rules.sounds == (71, 72) and rules.hop_table == 800
+    assert rules.hop_table == 800
 
 
 @pytest.mark.parametrize("corruption", ["step", "plan", "frame"])

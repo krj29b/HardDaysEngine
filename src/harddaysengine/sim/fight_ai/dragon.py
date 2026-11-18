@@ -76,7 +76,6 @@ class DragonRules:
     hop_table: int
     part_limit: int
     part_action: int
-    sounds: tuple[int, int]
 
 
 def _script(actor: Actor, script: int) -> HandlerResult:
@@ -292,17 +291,11 @@ def linked_jobs(rules: DragonRules, fight: Fight, _call: RoutineCall) -> None:
                 fight.actor(handle).y = a.depth
 
 
-def _sound(sound: int, fight: Fight, _call: RoutineCall) -> None:
-    fight.sounds.append(sound)
-
-
 def install_dragon(fight: Fight, rules: DragonRules, knight_rules: KnightRules) -> None:
-    """Install both original types and their movement/link/sound callbacks (§10.30)."""
+    """Install both original types and their movement and link callbacks (§10.30)."""
     fight.handlers[DRAGON_TYPE] = partial(dragon_handler, rules, knight_rules)
     fight.handlers[PART_TYPE] = partial(part_handler, rules)
     fight.routines["dragon_step"] = partial(dragon_step, rules)
     fight.routines["dragon_link_jobs"] = partial(linked_jobs, rules)
-    fight.routines["dragon_sound_0"] = partial(_sound, rules.sounds[0])
-    fight.routines["dragon_sound_1"] = partial(_sound, rules.sounds[1])
     if not fight.flights.slots:
         fight.flights.slots = [FlightSlot() for _ in range(rules.flight.slots)]

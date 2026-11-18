@@ -291,6 +291,8 @@ class ScriptEngine:
 
     ``frame_lists`` holds the four frame-set lists (§10.15) by number 1..4. ``call`` runs a
     ``$B0`` routine and ``spawn`` a ``$B8`` object; both are supplied by the fight (§10.18).
+    ``sound`` receives each ``$A4`` id when the fight keeps one ordered request list (§10.32);
+    without it the ids go to :attr:`TickOutput.sounds`.
     """
 
     image: ScriptImage
@@ -299,6 +301,7 @@ class ScriptEngine:
     frame_lists: Mapping[int, tuple[str | None, ...]]
     call: Callable[[RoutineCall], None]
     spawn: Callable[[int, Job], None]
+    sound: Callable[[int], None] | None = None
     jobs: list[Job] = field(
         default_factory=lambda: [Job(list_base=i * LIST_ENTRIES_PER_JOB) for i in range(JOB_COUNT)]
     )
@@ -606,7 +609,11 @@ def _op_move(engine: ScriptEngine, job: Job, pos: int) -> bool:
 
 
 def _op_sound(engine: ScriptEngine, job: Job, pos: int) -> bool:
-    engine.output.sounds.append(_byte(engine.image.data, pos + 1))
+    sound = _byte(engine.image.data, pos + 1)
+    if engine.sound is None:
+        engine.output.sounds.append(sound)
+    else:
+        engine.sound(sound)
     job.script += 2
     return False
 

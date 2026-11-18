@@ -36,8 +36,6 @@ def _mog(*, bad_step: bool = False, bad_script: bool = False) -> MogCode:
         relocs.append(pos + 2)
     if bad_script:
         struct.pack_into(">H", body, 0xA34, 0x23FC)
-    for i, pos in enumerate((0xA84, 0xA8E, 0xA98, 0xAA2)):
-        struct.pack_into(">HH", body, pos, 0x303C, 40 + i)
     sections = [HunkSection(0, HUNK_CODE, len(code), code, {})]
     sections.extend(HunkSection(i, HUNK_DATA, 0, b"", {}) for i in range(1, HUNK))
     sections.append(HunkSection(HUNK, HUNK_CODE, len(body), bytes(body), {4: tuple(relocs)}))
@@ -52,7 +50,6 @@ def test_decodes_invented_operands_and_script_pointers() -> None:
     assert rules.grab_damage == 27 and rules.release_offset == 28
     assert rules.scripts.body == 1100 and rules.scripts.release == 1110
     assert rules.hop_table == 500 and rules.hop2_table == 600
-    assert rules.sounds == (40, 41, 42, 43)
 
 
 @pytest.mark.parametrize("corruption", ["step", "script"])

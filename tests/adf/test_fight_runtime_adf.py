@@ -76,7 +76,10 @@ def test_runtime_runs_original_trogg_waves_through_outcome(loader: FightLoader, 
 
 
 def test_runtime_replay_has_identical_full_fight_snapshots(loader: FightLoader) -> None:
+    # The sound-picker cells persist for the session (§10.32): replay from the same cells.
+    cells = replace(loader.sound_cells)
     first, trace = _play(loader, TROGG_ARENAS[0])
+    loader.sound_cells = replace(cells)
     second, replay = _play(loader, TROGG_ARENAS[0])
     assert first.finished and second.finished
     assert trace == replay

@@ -1427,7 +1427,7 @@ scripts actually call; an unlisted routine stops the engine with an error:
 | Pause all | Toggle the pause word of the job of every pool record except the "kept" record (the one whose job keeps running during a grab), then of the dragon record |
 | Set the gloat latch | The brawler's gloat latch becomes 1 (§10.20). The knight's "down hard" script calls it, so a knight that goes down hard is never gloated over. Added by T11.10a: the walker of T11.7 does not reach that fixed script |
 
-The others belong to the tasks that own their subject: the nine known sound pickers (T11.23), the
+The others belong to the tasks that own their subject: the sound pickers and other sound-only routines (§10.32, T11.23a), the
 dagger throw, the hop and its step (T11.9, §10.19), the counter (T11.10f / h), and three guardian
 routines (T11.10g). Until a routine has an implementation the engine reports each call with its name,
 owner and arguments and carries on, so the caller can see it was skipped.
@@ -2486,6 +2486,77 @@ and synchronizes only existing map records at settlement. Computer records do no
 write joystick ports. Original map initialization remains T11.12/13; meeting sheets and loot
 remain T11.21. A seeded equipped audit uses ordinary joystick inputs for wins and
 idle input for losses, alongside separately labelled pose previews.
+
+### 10.32 Fight sound requests and sound pickers (T11.23a)
+
+This subsection models every fight-script engine routine (§10.18) whose only job is sound, and
+the form in which the fight hands sounds to the presentation. It refines the sound notes of
+§10.26 to §10.30; where they differ, this text wins.
+
+**The front end.** `mog` hunk 16 holds the sound front end that every effect goes through. It has
+three kinds of entry, and the fight reports each call as one *sound request*, in execution order:
+
+- *play* (hunk 16 `$0088`): start a sequence on the next free channel. Channel choice is
+  presentation (T11.23b) and never feeds back into the simulation.
+- *fixed* (hunk 16 `$0000`, `$0010`, `$0020`, `$0030`, channels 0 to 3): mark the channel busy
+  and start a sequence on it. The entry address names the channel.
+- *release* (hunk 16 `$0040`, `$0052`, channels 0 and 1): `ANDI.B #mask` on the busy byte, then a
+  `BSR` to the play entry with a fixed silence sequence. The mask clears the channel's own bit
+  and bits 4 to 7. The request carries the channel, the mask and the silence id.
+
+Script opcode `$A4` (§10.17) is a *play* request, and so are the handler sounds of §10.19 to
+§10.31 (the clang, the drake landing and grab pairs). Inside one fight frame, the requests of the
+job pass, the engine tick and the contact pass form one ordered list: handlers, script opcodes and
+routines append to the same list as they run.
+
+**Random draws.** Every picker draw is one full draw of the shared generator (§11.2, the hunk-0
+routine at `$A2B0`), masked from the low end. The pickers are part of the PRNG order: until
+T11.23a the fight skipped them, so fights that reached one made fewer draws than the original.
+
+**Hunk-0 pickers** (`$71D2` to `$72FB`). Each one starts with a `JSR` to the generator, unless
+noted, and ends with a play request:
+
+- *Masked add.* `ANDI.L #mask,D0`, an optional fold, then an `ADDI.W` or `ADDI.L` of a base. The
+  fold (`BEQ.S +2`, `SUBQ.W #1,D0`) leaves 0 alone and lowers every other value by one, so
+  values 0 and 1 give the same sound. `$71D2`, `$721C`, `$7234`, `$724C`, `$7264` and `$727C` are
+  single masked adds. `$71EC` is two of them, each with its own draw: a folded one and a plain one.
+- *Plain cycle* (`$7296`). Add one to a code-hunk word; when the signed result is not below a
+  limit (`CMPI.W`, `BLT`), store zero. The id is the word plus a base. This takes no draw.
+- *List cycle* (`$72C0`, `$72C8`). Each loads its own list address (`LEA`, then `BRA` to a shared
+  tail for the first). The shared tail adds two to one shared offset word and reads the list word
+  at that byte offset. If the word is the terminator (`CMPI.W #$FFFF`), the offset becomes zero and
+  the first list word is used. This takes no draw. The two lists sit back to back in the code
+  hunk and share the offset word, so one list can leave the offset at a position where the other
+  list reads its terminator early. Starting from offset 0, no sequence of calls reaches past the
+  second list's terminator. The decoder therefore keeps the words from the first list to that
+  terminator, and a read outside them is an error.
+
+The plain-cycle word and the list offset are code-hunk cells. The original never resets them
+between fights, so they persist for the whole session, like the generator. They start at the
+values stored in the executable.
+
+**Hunk-40 routines** (the Guardian and Wizard hunk):
+
+- `$041C`: one fixed request (`MOVE.W #id,D0`, then `JSR` to a fixed entry).
+- `$0428` and `$0AAE`: one draw, `ANDI.W #3`, then a branch on the value. Each branch target plays
+  one pair of ids (two play requests). The comparisons (`BEQ`, then `CMP #1` and `CMP #2` with `BEQ`)
+  are decoded, so the value-to-pair mapping is read, not assumed. `$0AAE` sends value 0 to the
+  same pair as value 3.
+- `$049E`: one draw, `ANDI.W #3`, then a byte-table read with sign extension (`EXT.W`). The table
+  sits right after the routine at `$04DA`.
+- `$04BC`: add one to a hunk-40 word, `ANDI.W #3` it in place, and play one id only when the
+  result is zero. This takes no draw. The word persists like the hunk-0 cells.
+- `$0682`: `MOVEQ #n,D7` and a `DBRA` loop, so n + 1 iterations. Each iteration takes one draw and
+  `ANDI.W #7`, reads a byte table at `$0674` and zero-extends it (`ANDI.W #$FF`).
+- `$0A84`: four fixed requests in order, one per channel.
+
+**Other hunk-0 routines.** `$6D28` and `$6D32` (the Dragon's) are fixed requests on channels 0 and
+1. `$6D3C` (the Balok grab) is two play requests and stays with §10.28.
+
+**Decoding.** For the supported `mog` version, every instruction word, every relocated call
+target (the generator, and each front-end entry with its hunk) and every immediate above is
+checked at its position. Ids, masks, bases, limits, list words, table bytes, loop counts and the
+initial cell values are all read from the user's file.
 
 ## 11. Overworld and Turns (`T11.4`)
 

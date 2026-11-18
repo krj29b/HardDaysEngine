@@ -68,7 +68,7 @@ def _mog(*, break_entry: bool = False) -> MogCode:
 
 def test_script_image_names_the_routines_its_longs_point_at() -> None:
     image = script_image(_mog())
-    assert image.routines == {10: "fighter_died", 20: "guardian_1", 36: "screen_shake"}
+    assert image.routines == {10: "fighter_died", 20: "guardian_fixed_sound", 36: "screen_shake"}
     assert len(image.data) == 40
 
 

@@ -30,6 +30,7 @@ from harddaysengine.sim.fight import (
 )
 from harddaysengine.sim.fight_script import ScriptImage, TickOutput
 from harddaysengine.sim.overworld import EncounterTrigger, MoonPhase, TriggerKind
+from harddaysengine.sim.sound import SoundKind, SoundRequest, play
 from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
@@ -159,15 +160,16 @@ def test_unsupported_encounter_preserves_campaign_and_records() -> None:
     assert session.state_hash() == before
 
 
-def test_host_dispatches_handler_sounds_before_script_sounds() -> None:
+def test_host_dispatches_fight_sound_requests_in_order() -> None:
     audio = Mock(spec=AudioEngine)
     session = _session(audio=audio)
     session._start_combat(_trigger(), KnightId.RED)
     assert session.active_encounter is not None
-    output = FrameOutput(TickOutput(sounds=[2, 3]), [], [1])
+    requests = [play(1), SoundRequest(SoundKind.FIXED, 2, 3), play(3)]
+    output = FrameOutput(TickOutput(), [], requests)
     with patch.object(FightRuntime, "step_vbl", return_value=output):
         session.step_tick(InputFrame())
-    audio.handle_fight_sounds.assert_called_once_with((1, 2, 3))
+    audio.handle_fight_sounds.assert_called_once_with([1, 2, 3])
 
 
 def test_no_disks_does_not_create_synthetic_gameplay() -> None:

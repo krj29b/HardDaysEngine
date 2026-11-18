@@ -653,3 +653,29 @@ rejection exhaustion raise. Part b still owns actual playability and presentatio
 acceptance; the parent stays open and town services remain unavailable until then.
 Independent local-disk reads and a separate random recurrence check tables and
 draw order without committing original strings, tables, extracted assets or images.
+
+## ADR-035: Fight sounds are ordered front-end requests; pickers live in sim
+**Status:** ACCEPTED (2026-11-18, T11.23a; refines ADR-016 / ADR-022 / ADR-023 sound notes)
+**Context:** T11.23 covers the sound pickers, the original synth sequencer, per-arena sample
+banks and scene music. That is more than one session. The pickers draw from the shared generator,
+so skipping them left fights that reach one with fewer draws than the original. The other parts
+are presentation only. Before this, fights reported sounds as bare ids in two lists (handler
+sounds and script `$A4` sounds), so their relative order was lost. Fixed-channel and release
+calls were also reported as ordinary ids.
+**Decision:** Split T11.23 into a (sound-only engine routines and the request model in `sim`),
+b (the hunk-16 channel front end and an exact synth sequencer in `app`, replacing the legacy mixer
+logic) and c (per-arena bank slots and instrument relocation, scene and area music, and sheet
+sound events). Part a adds `sim/sound.py`: a frozen `SoundRequest` (play, fixed or release, with
+channel and release mask), step records for the picker kinds, and `SoundCells`. Fight sounds form
+one ordered list: handlers, script `$A4` (through an optional engine callback) and routines append
+to `Fight.sounds`, and `TickOutput.sounds` stays empty under a fight. `assets/sound_rules.py`
+decodes every sound-only routine from checked instructions, including the relocated call targets
+that name the front-end entry and channel. The Dragon and Guardian fixed-sound routines move out
+of their rules, because they are fixed-channel requests, not plain ids. The executable keeps the
+picker cells in code and data hunks that are never reset, so `FightLoader` owns one `SoundCells`
+per session (like the flyer and drake cells) and the fight snapshot includes it.
+**Consequences:** Fights that reach a picker now make the original number of draws, which changes
+their replays from that point. The host still sends only ids to the legacy mixer until part b; a
+release currently plays its silence id there. Replays started from the same loader must restore
+the session cells. The two list pickers share one offset word, as in the original, and a read
+outside the decoded window raises (it is unreachable from the stored start values).

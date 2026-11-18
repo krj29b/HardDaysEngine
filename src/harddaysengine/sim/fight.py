@@ -30,6 +30,7 @@ from harddaysengine.sim.fight_script import (
 from harddaysengine.sim.m68k import s16, u16, u32
 from harddaysengine.sim.rng import Rng
 from harddaysengine.sim.screen_fx import ShakeRules, ShakeState
+from harddaysengine.sim.sound import SoundCells, SoundRequest, play
 from harddaysengine.sim.trajectory import FlightState
 
 if TYPE_CHECKING:
@@ -202,13 +203,13 @@ class FlyerCells:
 class FrameOutput:
     """What one :meth:`Fight.step` produced.
 
-    The engine tick, the skipped routine calls and the sounds the handlers asked for in the job
-    pass (the script sounds are in ``tick.sounds``).
+    The engine tick, the skipped routine calls and every sound request of the frame in execution
+    order: handlers, script opcodes and routines (§10.32). ``tick.sounds`` stays empty.
     """
 
     tick: TickOutput
     skipped_calls: list[RoutineCall]
-    sounds: list[int]
+    sounds: list[SoundRequest]
 
 
 def restart_from(actor: Actor, script: int) -> Restart:
@@ -270,7 +271,8 @@ class Fight:
     confused: int = 0
     confused_on: bool = False
     moon_frame: int = 0
-    sounds: list[int] = field(default_factory=list)
+    sounds: list[SoundRequest] = field(default_factory=list)
+    sound_cells: SoundCells = field(default_factory=SoundCells)
     hop_facing: int = 0
     hop_table: int = 0
     hop_counter: int = 0
@@ -303,6 +305,7 @@ class Fight:
             frame_lists=self.frame_lists,
             call=self._call,
             spawn=self._spawn_object,
+            sound=self.play_sound,
         )
         self.routines = {
             FIGHTER_DIED: fighter_died,
@@ -311,6 +314,10 @@ class Fight:
             PAUSE_ALL: pause_all,
             SET_GLOAT: set_gloat_latch,
         }
+
+    def play_sound(self, sound: int) -> None:
+        """A play request on the next free channel, in execution order (§10.32)."""
+        self.sounds.append(play(sound))
 
     # ---- records and jobs (§10.18) ---------------------------------------------------------
 

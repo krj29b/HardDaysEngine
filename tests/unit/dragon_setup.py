@@ -41,7 +41,6 @@ DRAGON_RULES = DragonRules(
     hop_table=520,
     part_limit=85,
     part_action=0x14,
-    sounds=(51, 52),
 )
 TABLES = ScriptTables(
     11,

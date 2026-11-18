@@ -148,10 +148,6 @@ def _rules(
         fire_kind=fire_kind,
         fire_facing=fire_facing,
         hop_table=mog.relocated(0x6A42, 0x23FC, DATA_HUNK, "Dragon object hop table"),
-        sounds=(
-            mog.operand(0x6D28, 0x303C, "Dragon sound 0"),
-            mog.operand(0x6D32, 0x303C, "Dragon sound 1"),
-        ),
         **values,
     )
 

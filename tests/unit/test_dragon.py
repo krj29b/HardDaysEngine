@@ -239,9 +239,6 @@ def test_linked_job_callback_preserves_both_depths_at_plus_offset() -> None:
     assert f.actor(a).y == f.actor(b).y == 108
     assert f.find_job(a) is not None and f.find_job(a).depth == 108
     assert f.find_job(b) is not None and f.find_job(b).depth == 108
-    f.routines["dragon_sound_0"](f, CALL)
-    f.routines["dragon_sound_1"](f, CALL)
-    assert f.sounds == list(R.sounds)
 
 
 def test_flight_negative_phase_raises_instead_of_reading_unrelated_memory() -> None:

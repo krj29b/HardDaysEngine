@@ -107,20 +107,22 @@ def counter(rules: DrakeRules, fight: Fight, call: RoutineCall) -> None:
 
 
 def _sound_pair(sounds: tuple[int, int], fight: Fight, _call: RoutineCall) -> None:
-    fight.sounds.extend(sounds)
+    for sound in sounds:
+        fight.play_sound(sound)
 
 
 def _land(turn: _Turn) -> HandlerResult:
     f, me, rules = turn.fight, turn.me, turn.rules
     me.behaviour_flags2, me.height, f.drake.flags = rules.landing_wait, 0, 0
     if s16(f.caster.aim_arc) < s16(rules.hard_arc):
-        f.sounds.append(rules.sound_soft)
+        f.play_sound(rules.sound_soft)
     else:
         f.routines[SCREEN_SHAKE](
             f,
             RoutineCall(SCREEN_SHAKE, turn.handle, me.frame_list, me.x, me.height, me.y, me.facing),
         )
-        f.sounds.extend((rules.sound_hard_first, rules.sound_hard_second))
+        f.play_sound(rules.sound_hard_first)
+        f.play_sound(rules.sound_hard_second)
     return turn.script(rules.scripts.landing)
 
 

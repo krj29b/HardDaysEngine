@@ -38,7 +38,6 @@ GUARDIAN = GuardianRules(
     release_min=2,
     hop_table=410,
     hop2_table=420,
-    sounds=(61, 62, 63, 64),
 )
 
 

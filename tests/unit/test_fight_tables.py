@@ -7,6 +7,7 @@ import pytest
 from harddaysengine.sim.actor import Actor
 from harddaysengine.sim.fight import FightError
 from harddaysengine.sim.inventory import Inventory
+from harddaysengine.sim.sound import play
 from tests.unit.knight_setup import TABLES, make_fight
 
 
@@ -54,5 +55,5 @@ def test_a_parry_sound_reaches_the_frame_output() -> None:
     job = fight.start_job(0, 1, 1, (100, 0, 100), 1, 0x0C)
     assert job is not None
     output = fight.step(0)
-    assert output.sounds == [7]
+    assert output.sounds == [play(7)]
     assert fight.step(6).sounds == []

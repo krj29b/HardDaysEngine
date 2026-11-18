@@ -15,6 +15,7 @@ from harddaysengine.sim.fight_hurt import (
     protected,
 )
 from harddaysengine.sim.inventory import Inventory
+from harddaysengine.sim.sound import play
 from tests.unit.knight_setup import RULES, TABLES, make_fight
 
 SCRIPTS = RULES.scripts
@@ -111,7 +112,7 @@ def test_the_block_stance_holds_once_until_the_latch_is_released() -> None:
 def test_a_parry_needs_the_fighters_to_face_each_other() -> None:
     blow = _blow(0x10, 8)
     assert block_check(blow)
-    assert blow.fight.sounds == [RULES.clang_sound]
+    assert blow.fight.sounds == [play(RULES.clang_sound)]
     assert not block_check(_blow(0x10, 8, attacker_facing=1))
 
 

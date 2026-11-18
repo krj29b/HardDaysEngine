@@ -69,7 +69,6 @@ class GuardianRules:
     release_min: int
     hop_table: int
     hop2_table: int
-    sounds: tuple[int, ...]
 
 
 @dataclass(slots=True)
@@ -280,10 +279,6 @@ def victim_release(rules: GuardianRules, fight: Fight, _call: RoutineCall) -> No
     fight.restart_job(fight.first, script)
 
 
-def _sounds(rules: GuardianRules, fight: Fight, _call: RoutineCall) -> None:
-    fight.sounds.extend(rules.sounds)
-
-
 def install_guardian(fight: Fight, rules: GuardianRules, knight_rules: KnightRules) -> None:
     """Register Guardian and all body/grab job routines (§10.29)."""
     fight.handlers[GUARDIAN_TYPE] = partial(guardian_handler, rules, knight_rules)
@@ -293,6 +288,5 @@ def install_guardian(fight: Fight, rules: GuardianRules, knight_rules: KnightRul
         ("guardian_body_remove", body_remove),
         ("guardian_grab_damage", partial(grab_damage, rules)),
         ("guardian_release", partial(victim_release, rules)),
-        ("guardian_fixed_sounds", partial(_sounds, rules)),
     ):
         fight.routines[name] = routine

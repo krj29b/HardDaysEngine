@@ -179,7 +179,7 @@ def test_simultaneous_stage_flags_follow_original_order_without_random_draws() -
     assert f.rng.state == before
 
 
-def test_missing_jobs_are_safe_and_fixed_sounds_preserve_order() -> None:
+def test_missing_jobs_are_safe() -> None:
     f, owner = make_guardian()
     f.kill_job(owner)
     job = f.find_job(owner)
@@ -189,5 +189,4 @@ def test_missing_jobs_are_safe_and_fixed_sounds_preserve_order() -> None:
     assert f.find_job(f.guardian.body) is None
     body_facing(f, CALL)
     body_remove(f, CALL)
-    f.routines["guardian_fixed_sounds"](f, CALL)
-    assert f.sounds == list(GUARDIAN.sounds)
+    assert f.sounds == []
