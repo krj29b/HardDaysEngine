@@ -902,3 +902,40 @@ flashes depend on the registers being written only on change, which `PaletteFxSt
 emulated. Interpreter opcodes whose memory the ending never sets up (`$C4`, `$CC`, `$D0`, `$FD`,
 table calls) raise instead of guessing. The invented VICTORY screen is removed; the ending is the
 only way a campaign is won, and it returns to the title with a fresh campaign.
+
+## ADR-047: The synth is the original sequencer driving an event-level Paula model
+**Status:** ACCEPTED (2026-11-18, T11.23b; follows ADR-035)
+**Context:** Until now `PaulaSynthMixer` guessed at the synth: it invented opcodes ($81 to $8B),
+read a "voice header" that does not exist, and picked channels by age. Sounds came out wrong or
+not at all, and release requests played their silence as a sound. The original synth is a full
+sequencer. Its timing depends on Paula: DMA edges, buffer reloads, and audio interrupts that
+reload the loop part of an instrument or switch a one-shot off. Every sound and every piece of
+music in `mog` goes through it. A cycle-exact Paula, or a per-sample Python loop, would be too
+slow.
+**Decision:**
+- `app/synth.py` implements the hunk-44 sequencer (start, tick, every command, tremolo and
+  vibrato stages, envelope, register pass, interrupt routine and fade) from §6.2, in the
+  original's register write order. It works on a copy of hunk 44, so references, the voice
+  stacks and the init wipe act on the original bytes.
+- `app/sound_front.py` implements the hunk-16 busy byte and cursor. Requests from `sim` pass
+  through it unchanged.
+- `app/paula.py` models the chip at event level. Writes happen at the start of a frame or at a
+  reload. DMA rises are latched at the end of a CPU batch. Reloads and interrupts are
+  processed in time order. Output is rendered per channel with numpy up to the moment its
+  registers change. A loop without interrupts is rendered with a modulo in one numpy call, until
+  a write to that channel or the end of the frame.
+- `assets/synth_data.py` ties the behaviour to the supported code with a CRC-32 of hunk 44
+  `$0000..$0BE7` and hunk 16 `$0000..$0133`, then reads every table address and operand at a
+  checked position. The instrument count comes from the terminator row.
+- The engine runs the synth tick, then the requests queued during the host tick, then renders.
+- The legacy synth tables in `assets/tables.py` and the invented combat SFX aliases go away
+  with the mixer.
+
+**Consequences:** Bank instruments keep their raw, unrelocated sample offsets, which read as
+silence until T11.23c loads the per-area banks and relocates them. Until then, most effects and
+all area music are silent, and only sequences on the nine waveforms sound. The fade and stop-all
+entries exist and are tested, but no host caller drives them yet (also T11.23c). A start in the
+original happens during the frame after the VBL, and ours happens at the start of that frame:
+the difference is under one frame. Bytes the original would mis-dispatch, a tempo of 0, an
+instrument past the table and reads outside hunk 44 raise `SynthError`. The game's data reaches
+none of them.

@@ -1,4 +1,7 @@
-"""Runtime executable table decoders for `program` and `mog` (ARCHITECTURE.md §5, §6.1-§6.2, §7)."""
+"""Runtime executable table decoders for `program` and `mog` (ARCHITECTURE.md §5, §7).
+
+The synth tables have their own checked decoder, `assets/synth_data.py` (§6.2).
+"""
 
 from __future__ import annotations
 
@@ -9,8 +12,6 @@ from harddaysengine.assets.hunk import (
     DecodedHunkExecutable,
     HunkFormatError,
     HunkSection,
-    SynthInstrumentRecord,
-    parse_mog_synth_instruments,
 )
 
 MOG_MAP_SITES_SECTION = 2
@@ -42,22 +43,6 @@ BUILTIN_FONT_BYTES = 1024
 BUILTIN_FONT_GLYPHS = 128
 BUILTIN_FONT_GLYPH_BYTES = 8
 
-MOG_SYNTH_TABLES_SECTION = 44
-MOG_SYNTH_BLOB_BASE = 3570
-MOG_SYNTH_RELOC_BEG = 4628
-MOG_SYNTH_RELOC_END = 4980
-MOG_SYNTH_VIB_BASE = 5046
-MOG_SYNTH_VIB_COUNT = 4
-MOG_SYNTH_VIB_STRIDE = 15
-MOG_SYNTH_ENV_BASE = 5106
-MOG_SYNTH_ENV_COUNT = 2
-MOG_SYNTH_ENV_STRIDE = 8
-MOG_SYNTH_SEQ_TABLE_OFFSET = 8788
-MOG_SYNTH_SEQ_COUNT = 168
-
-MOG_SYNTH_WAVE_SECTION = 45
-MOG_SYNTH_WAVE_BYTES = 170
-
 __all__ = [
     "BUILTIN_FONT_BYTES",
     "BUILTIN_FONT_GLYPHS",
@@ -80,20 +65,6 @@ __all__ = [
     "MOG_MAP_SITES_COUNT",
     "MOG_MAP_SITES_OFFSET",
     "MOG_MAP_SITES_SECTION",
-    "MOG_SYNTH_BLOB_BASE",
-    "MOG_SYNTH_ENV_BASE",
-    "MOG_SYNTH_ENV_COUNT",
-    "MOG_SYNTH_ENV_STRIDE",
-    "MOG_SYNTH_RELOC_BEG",
-    "MOG_SYNTH_RELOC_END",
-    "MOG_SYNTH_SEQ_COUNT",
-    "MOG_SYNTH_SEQ_TABLE_OFFSET",
-    "MOG_SYNTH_TABLES_SECTION",
-    "MOG_SYNTH_VIB_BASE",
-    "MOG_SYNTH_VIB_COUNT",
-    "MOG_SYNTH_VIB_STRIDE",
-    "MOG_SYNTH_WAVE_BYTES",
-    "MOG_SYNTH_WAVE_SECTION",
     "MOG_TABLES_SECTION",
     "PROGRAM_BOLD_FONT_SECTION",
     "BuiltinFontTable",
@@ -106,8 +77,6 @@ __all__ = [
     "MogRuntimeTables",
     "MonsterScriptTables",
     "ProgramRuntimeTables",
-    "SynthSequenceEntry",
-    "SynthSequenceTables",
     "load_mog_tables",
     "load_program_tables",
     "parse_builtin_font",
@@ -118,7 +87,6 @@ __all__ = [
     "parse_knight_script_tables",
     "parse_lair_region_metadata",
     "parse_map_sites",
-    "parse_mog_synth_sequences",
     "parse_monster_script_tables",
 ]
 
@@ -178,28 +146,6 @@ class BuiltinFontTable:
 
 
 @dataclass(slots=True, frozen=True)
-class SynthSequenceEntry:
-    """Single voice sequence pointer and bytecode stream from `mog` `S_44`."""
-
-    index: int
-    s44_offset: int
-    stream: bytes
-
-
-@dataclass(slots=True, frozen=True)
-class SynthSequenceTables:
-    """4-voice VBL synth tables, sequence streams, waveforms, and instruments (`S_44`/`S_45`)."""
-
-    blob_base: int
-    blob: bytes
-    vibrato_rows: tuple[bytes, ...]
-    envelope_rows: tuple[bytes, ...]
-    sequences: tuple[SynthSequenceEntry, ...]
-    waveforms: bytes
-    instruments: tuple[SynthInstrumentRecord, ...]
-
-
-@dataclass(slots=True, frozen=True)
 class KnightScriptTables:
     """Knight fight-script pointer tables (`mog` `S_4` offsets via `S_0`/`S_1` relocs)."""
 
@@ -239,7 +185,6 @@ class MogRuntimeTables:
     combat_actions: CombatActionTables
     lair_region: LairRegionMetadata
     builtin_font: BuiltinFontTable
-    synth: SynthSequenceTables
     knight_scripts: KnightScriptTables | None = None
     monster_scripts: tuple[MonsterScriptTables, ...] = ()
 
@@ -371,74 +316,6 @@ def parse_builtin_font(
         for idx in range(BUILTIN_FONT_GLYPHS)
     )
     return BuiltinFontTable(glyphs=glyphs)
-
-
-def _extract_synth_sequences(s44: bytes) -> tuple[SynthSequenceEntry, ...]:
-    raw_ptrs = struct.unpack_from(f">{MOG_SYNTH_SEQ_COUNT}I", s44, MOG_SYNTH_SEQ_TABLE_OFFSET)
-    sorted_starts = sorted({ptr for ptr in raw_ptrs if ptr > 0})
-    next_start_map: dict[int, int] = {}
-    for pos, start in enumerate(sorted_starts):
-        if start < MOG_SYNTH_BLOB_BASE or start >= MOG_SYNTH_SEQ_TABLE_OFFSET:
-            msg = f"Synth sequence offset {start} outside S_44 sequence region"
-            raise HunkFormatError(msg)
-        next_start = (
-            sorted_starts[pos + 1] if pos + 1 < len(sorted_starts) else MOG_SYNTH_SEQ_TABLE_OFFSET
-        )
-        next_start_map[start] = next_start
-
-    entries: list[SynthSequenceEntry] = []
-    for idx, ptr in enumerate(raw_ptrs):
-        if ptr == 0:
-            entries.append(SynthSequenceEntry(index=idx, s44_offset=0, stream=b""))
-        else:
-            entries.append(
-                SynthSequenceEntry(
-                    index=idx,
-                    s44_offset=ptr,
-                    stream=s44[ptr : next_start_map[ptr]],
-                )
-            )
-    return tuple(entries)
-
-
-def parse_mog_synth_sequences(mog_exec: DecodedHunkExecutable) -> SynthSequenceTables:
-    """Read 4-voice synth tables, sequence streams, waveforms, and instruments (`S_44`/`S_45`)."""
-    s44_min = MOG_SYNTH_SEQ_TABLE_OFFSET + MOG_SYNTH_SEQ_COUNT * 4
-    s44 = _require_section(mog_exec, MOG_SYNTH_TABLES_SECTION, s44_min).data
-    s45 = _require_section(mog_exec, MOG_SYNTH_WAVE_SECTION, MOG_SYNTH_WAVE_BYTES).data
-
-    blob_buf = bytearray(s44[MOG_SYNTH_BLOB_BASE:])
-    blob_buf[0:2] = b"\x00\x00"
-    reloc_start = MOG_SYNTH_RELOC_BEG - MOG_SYNTH_BLOB_BASE
-    reloc_end = MOG_SYNTH_RELOC_END - MOG_SYNTH_BLOB_BASE
-    blob_buf[reloc_start:reloc_end] = bytes(reloc_end - reloc_start)
-
-    vibrato_rows = tuple(
-        s44[
-            MOG_SYNTH_VIB_BASE + i * MOG_SYNTH_VIB_STRIDE : MOG_SYNTH_VIB_BASE
-            + (i + 1) * MOG_SYNTH_VIB_STRIDE
-        ]
-        for i in range(MOG_SYNTH_VIB_COUNT)
-    )
-    envelope_rows = tuple(
-        s44[
-            MOG_SYNTH_ENV_BASE + i * MOG_SYNTH_ENV_STRIDE : MOG_SYNTH_ENV_BASE
-            + (i + 1) * MOG_SYNTH_ENV_STRIDE
-        ]
-        for i in range(MOG_SYNTH_ENV_COUNT)
-    )
-    sequences = _extract_synth_sequences(s44)
-    instruments = parse_mog_synth_instruments(mog_exec)
-
-    return SynthSequenceTables(
-        blob_base=MOG_SYNTH_BLOB_BASE,
-        blob=bytes(blob_buf),
-        vibrato_rows=vibrato_rows,
-        envelope_rows=envelope_rows,
-        sequences=sequences,
-        waveforms=s45[:MOG_SYNTH_WAVE_BYTES],
-        instruments=instruments,
-    )
 
 
 def _step_s1_table_write(
@@ -611,7 +488,6 @@ def load_mog_tables(mog_exec: DecodedHunkExecutable) -> MogRuntimeTables:
         combat_actions=parse_combat_action_tables(mog_exec),
         lair_region=parse_lair_region_metadata(mog_exec),
         builtin_font=parse_builtin_font(mog_exec, MOG_BOLD_FONT_SECTION),
-        synth=parse_mog_synth_sequences(mog_exec),
         knight_scripts=knight_scripts,
         monster_scripts=monster_scripts,
     )

@@ -169,7 +169,7 @@ def test_host_dispatches_fight_sound_requests_in_order() -> None:
     output = FrameOutput(TickOutput(), [], requests)
     with patch.object(FightRuntime, "step_vbl", return_value=output):
         session.step_tick(InputFrame())
-    audio.handle_fight_sounds.assert_called_once_with([1, 2, 3])
+    audio.handle_requests.assert_called_once_with(requests)
 
 
 def test_no_disks_does_not_create_synthetic_gameplay() -> None:

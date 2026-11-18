@@ -1247,8 +1247,6 @@ class GameSession:
                 divisor=screen.rules.palette_period,
                 from_black=True,
             )
-        if stage == 0 and self.audio is not None:
-            self.audio.mixer.register_sample_bank(screen.bank)
         if screen.animation is None:
             raise ValueError("wizard stage did not start")
         self._play_requests(screen.animation.sounds)
@@ -1396,8 +1394,6 @@ class GameSession:
         elif state.phase == StonePhase.RITUAL_MESSAGE_OUT:
             state.phase = StonePhase.RITUAL
             screen.start_ritual(self.overworld.prng)
-            if self.audio is not None:
-                self.audio.mixer.register_sample_bank(screen.bank)
             self.palette_fx.set_palette([0] * 32)
             self.palette_fx.fade_to(
                 _palette_to_rgb12(screen.ritual_palette()),
@@ -1591,7 +1587,7 @@ class GameSession:
 
     def _play_requests(self, requests: Sequence[SoundRequest]) -> None:
         if self.audio is not None and requests:
-            self.audio.handle_fight_sounds([request.sound for request in requests])
+            self.audio.handle_requests(requests)
 
     def _step_service(self, frame: InputFrame) -> None:
         screen = self.service_screen
@@ -1870,7 +1866,7 @@ class GameSession:
             ports[port] = self._player_input(frame, kid).to_joystick_word()
         output = active.runtime.step_vbl(self.tick_count, ports)
         if output is not None and self.audio is not None:
-            self.audio.handle_fight_sounds([request.sound for request in output.sounds])
+            self.audio.handle_requests(output.sounds)
         if active.runtime.finished:
             self._finish_combat(active)
 
@@ -2368,7 +2364,7 @@ def run_game_window(
         disk_set=disk_set,
     )
     if session.asset_bundle is not None:
-        session.asset_bundle.preload_audio(audio)
+        session.asset_bundle.attach_synth(audio)
         title_mod = session.asset_bundle.load_title_music()
         if title_mod is not None:
             audio.play_music(title_mod)

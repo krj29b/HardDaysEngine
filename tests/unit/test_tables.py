@@ -39,20 +39,6 @@ from harddaysengine.assets.tables import (
     MOG_KNIGHT_NAMES_OFFSET,
     MOG_MAP_SITES_OFFSET,
     MOG_MAP_SITES_SECTION,
-    MOG_SYNTH_BLOB_BASE,
-    MOG_SYNTH_ENV_BASE,
-    MOG_SYNTH_ENV_COUNT,
-    MOG_SYNTH_ENV_STRIDE,
-    MOG_SYNTH_RELOC_BEG,
-    MOG_SYNTH_RELOC_END,
-    MOG_SYNTH_SEQ_COUNT,
-    MOG_SYNTH_SEQ_TABLE_OFFSET,
-    MOG_SYNTH_TABLES_SECTION,
-    MOG_SYNTH_VIB_BASE,
-    MOG_SYNTH_VIB_COUNT,
-    MOG_SYNTH_VIB_STRIDE,
-    MOG_SYNTH_WAVE_BYTES,
-    MOG_SYNTH_WAVE_SECTION,
     MOG_TABLES_SECTION,
     PROGRAM_BOLD_FONT_SECTION,
     load_mog_tables,
@@ -63,7 +49,6 @@ from harddaysengine.assets.tables import (
     parse_knight_names,
     parse_knight_script_tables,
     parse_map_sites,
-    parse_mog_synth_sequences,
     parse_monster_script_tables,
 )
 
@@ -118,43 +103,12 @@ def _build_synthetic_s4() -> bytes:
     return bytes(s4)
 
 
-def _build_synthetic_s44() -> bytes:
-    s44 = bytearray(MOG_SYNTH_SEQ_TABLE_OFFSET + MOG_SYNTH_SEQ_COUNT * 4)
-    s44[MOG_SYNTH_BLOB_BASE : MOG_SYNTH_BLOB_BASE + 2] = b"\xaa\xbb"
-    s44[MOG_SYNTH_RELOC_BEG:MOG_SYNTH_RELOC_END] = b"\xff" * (
-        MOG_SYNTH_RELOC_END - MOG_SYNTH_RELOC_BEG
-    )
-    for i in range(MOG_SYNTH_VIB_COUNT):
-        start = MOG_SYNTH_VIB_BASE + i * MOG_SYNTH_VIB_STRIDE
-        s44[start : start + MOG_SYNTH_VIB_STRIDE] = bytes([0x10 + i] * MOG_SYNTH_VIB_STRIDE)
-    for i in range(MOG_SYNTH_ENV_COUNT):
-        start = MOG_SYNTH_ENV_BASE + i * MOG_SYNTH_ENV_STRIDE
-        s44[start : start + MOG_SYNTH_ENV_STRIDE] = bytes([0x20 + i] * MOG_SYNTH_ENV_STRIDE)
-
-    seq1_ofs = 5200
-    seq2_ofs = 5216
-    s44[seq1_ofs : seq1_ofs + 4] = b"\x3c\x08\x80\x00"
-    s44[seq2_ofs : seq2_ofs + 4] = b"\x40\x10\xac\x00"
-    struct.pack_into(">I", s44, MOG_SYNTH_SEQ_TABLE_OFFSET + 1 * 4, seq1_ofs)
-    struct.pack_into(">I", s44, MOG_SYNTH_SEQ_TABLE_OFFSET + 2 * 4, seq2_ofs)
-    return bytes(s44)
-
-
-def _build_synthetic_s45() -> bytes:
-    s45 = bytearray(2016)
-    s45[:MOG_SYNTH_WAVE_BYTES] = bytes((i % 127) for i in range(MOG_SYNTH_WAVE_BYTES))
-    struct.pack_into(">hHHII", s45, 168, -1, 4, 32, 0x00000010, MOG_SYNTH_BLOB_BASE + 4)
-    return bytes(s45)
-
-
 def _build_synthetic_mog() -> DecodedHunkExecutable:
     """Create a synthetic `mog` hunk executable containing all runtime tables."""
     section_map: dict[int, tuple[int, bytes]] = {
         MOG_MAP_SITES_SECTION: (HUNK_DATA, _build_synthetic_s2()),
         MOG_TABLES_SECTION: (HUNK_DATA, _build_synthetic_s4()),
         MOG_BOLD_FONT_SECTION: (HUNK_DATA, bytes((i & 0xFF) for i in range(BUILTIN_FONT_BYTES))),
-        MOG_SYNTH_TABLES_SECTION: (HUNK_CODE, _build_synthetic_s44()),
-        MOG_SYNTH_WAVE_SECTION: (HUNK_DATA, _build_synthetic_s45()),
     }
     sections = [section_map.get(sec_idx, (HUNK_DATA, b"\x00\x00\x00\x00")) for sec_idx in range(46)]
     return parse_hunk_executable("mog", _build_synthetic_hunk_binary(sections))
@@ -201,29 +155,9 @@ def test_parse_knight_names_and_lair_metadata_synthetic() -> None:
     assert [(b.limit, b.kind) for b in bands] == [(25, 1), (50, 2), (75, 3), (100, 4)]
 
 
-def test_parse_mog_synth_and_bundle_synthetic() -> None:
-    mog = _build_synthetic_mog()
-    tables = load_mog_tables(mog)
-
+def test_load_mog_tables_bundle_synthetic() -> None:
+    tables = load_mog_tables(_build_synthetic_mog())
     assert len(tables.builtin_font.glyphs) == BUILTIN_FONT_GLYPHS
-    assert tables.synth.blob_base == MOG_SYNTH_BLOB_BASE
-    assert tables.synth.blob[:2] == b"\x00\x00"
-    rel_off = MOG_SYNTH_RELOC_BEG - MOG_SYNTH_BLOB_BASE
-    rel_end = MOG_SYNTH_RELOC_END - MOG_SYNTH_BLOB_BASE
-    assert tables.synth.blob[rel_off:rel_end] == bytes(rel_end - rel_off)
-    assert len(tables.synth.vibrato_rows) == MOG_SYNTH_VIB_COUNT
-    assert len(tables.synth.envelope_rows) == MOG_SYNTH_ENV_COUNT
-    assert len(tables.synth.sequences) == MOG_SYNTH_SEQ_COUNT
-    assert tables.synth.sequences[0].s44_offset == 0
-    assert tables.synth.sequences[0].stream == b""
-    assert tables.synth.sequences[1].s44_offset == 5200
-    assert tables.synth.sequences[1].stream[:4] == b"\x3c\x08\x80\x00"
-    assert len(tables.synth.sequences[1].stream) == 16
-    assert tables.synth.sequences[2].s44_offset == 5216
-    assert tables.synth.sequences[2].stream[:4] == b"\x40\x10\xac\x00"
-    assert len(tables.synth.waveforms) == MOG_SYNTH_WAVE_BYTES
-    assert tables.synth.instruments[0].loop_flag == -1
-    assert tables.synth.instruments[0].length_words == 32
 
 
 def test_load_program_tables_synthetic() -> None:
@@ -241,19 +175,6 @@ def test_table_decoders_reject_truncated_or_invalid_hunks() -> None:
         parse_combat_action_tables(tiny)
     with pytest.raises(HunkFormatError):
         parse_map_sites(tiny)
-    with pytest.raises(HunkFormatError):
-        parse_mog_synth_sequences(tiny)
-
-    mog = _build_synthetic_mog()
-    bad_s44 = bytearray(mog.sections[MOG_SYNTH_TABLES_SECTION].data)
-    struct.pack_into(">I", bad_s44, MOG_SYNTH_SEQ_TABLE_OFFSET + 4, 100)
-    bad_sections = [
-        (s.hunk_type, bytes(bad_s44) if s.index == MOG_SYNTH_TABLES_SECTION else s.data)
-        for s in mog.sections
-    ]
-    bad_mog = parse_hunk_executable("bad_mog", _build_synthetic_hunk_binary(bad_sections))
-    with pytest.raises(HunkFormatError):
-        parse_mog_synth_sequences(bad_mog)
 
 
 @pytest.mark.adf
@@ -284,10 +205,6 @@ def test_runtime_tables_from_real_disks(adf_dir: Path) -> None:
         (90, 3),
         (100, 4),
     ]
-    assert len(mog_tables.synth.sequences) == MOG_SYNTH_SEQ_COUNT
-    assert mog_tables.synth.sequences[0].s44_offset == 0
-    assert all(seq.s44_offset > 0 and len(seq.stream) > 0 for seq in mog_tables.synth.sequences[1:])
-    assert len(mog_tables.synth.instruments) == 131
     assert mog_tables.knight_scripts is not None
     assert len(mog_tables.knight_scripts.action_scripts) == 9
     assert len(mog_tables.knight_scripts.hurt_scripts) == 9

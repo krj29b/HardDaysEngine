@@ -409,26 +409,267 @@ AmigaDOS Hunk executables on Disk A.
   (often containing embedded IFF `FORM....8SVX` headers) for the Amiga Paula DACs.
 - **Instrument Addressing (`mog` Hunk `S_45` at `+168`, `131` records × `14` bytes):**
   - Each 14-byte `SynthInst` record has:
-    - `+0`: `BE16` `loop_flag` (`int16`: `< 0` means one-shot, `>= 0` means looping).
+    - `+0`: `BE16` `loop_flag` (`int16`: `< 0` means looping, `>= 0` means one-shot; §6.2.2).
     - `+2`: `BE16` `loop_offset` (byte offset from sample start for loop point).
     - `+4`: `BE16` `length_words` (sample length in 16-bit words; byte length = `length_words * 2`).
     - `+6`: `BE32` `sample_offset` (for instruments `0..8`, relocated offset in `S_45` `0..167`;
       for instruments `9..130`, byte offset inside one of the 5 runtime bank slots `LAB_05C7..05CB`).
-    - `+10`: `BE32` `pitch_offset` (relocated offset of the 60-entry `BE16` Paula period table).
+    - `+10`: `BE32` `pitch_offset` (relocated hunk-44 offset of the instrument's period table;
+      a note reads the word at byte offset `2 * (4 * note + transpose)`, §6.2.6).
   - **Paula Sampling Frequency:** Given a Paula period word `P` (typically `124..856`), the PAL
     sample rate is $f_s = \lfloor 3,546,895 / P \rfloor\text{ Hz}$ (for standard C-2 period `214`,
     $f_s \approx 16,574\text{ Hz}$; for period `428`, $f_s \approx 8,287\text{ Hz}$).
 
-### 6.2 4-Voice VBL Synth Sequencer (`mog` Hunk `S_44`)
-- Triggered by `sfxPlay(sound_id)` (`sound_id` in `1..168`), which looks up `BE32` offset
-  `S_44[(sound_id - 1) * 4]`.
-- A sound effect header begins with `uint8 voice_count_minus_1` (`0..3`), followed by
-  `voice_count_minus_1 + 1` 5-byte voice descriptors: `[channel_idx:u8, stream_offset:BE32]`.
-- Evaluated at 50 Hz (inside `vblTail` every VBL):
-  - Bytes `0x00..0x7F`: Note trigger (`note` followed by `duration` ticks; `0x00` = rest).
-  - Bytes `0x80..0x91`: Control opcodes (`0x80` end/loop, `0x81` select instrument, `0x82` vibrato,
-    `0x83` portamento, `0x84` volume slide, `0x85` set volume, `0x86` arpeggio, `0x88` transpose,
-    `0x8B` release envelope, etc.).
+### 6.2 Sound front end and 4-voice synth sequencer (`mog` hunks 16, 44, 45; T11.23b)
+
+Every `mog` sound, music and effects alike, is a *sequence* started on one of Paula's four
+channels. A sequence is a byte stream that the synth in hunk 44 interprets once per PAL VBL. The
+hunk-16 front end decides which channel a sound effect gets. Nothing in this subsection feeds
+back into the simulation: `sim` only reports requests (§10.32), and `app` plays them. The
+behaviour below is implemented in `app/synth.py` and `app/paula.py`; tables, cell values and
+operands come from the user's `mog` (`assets/synth_data.py`). Offsets are hunk offsets.
+
+**Supported version.** The decoder accepts `mog` only when:
+
+- its hunk-0 CRC is supported, as for every `mog` decoder;
+- the CRC-32 of hunk 44 bytes `$0000..$0BE7` (the zeroed voice records and all synth code) is
+  `$59D1AB36`;
+- the CRC-32 of hunk 16 bytes `$0000..$0133` (the front end, its two cells and the stop-all
+  routine) is `$EBA59B10`.
+
+The behaviour is implemented, not read, so it is tied to exactly that code. Operands are then
+read at checked positions: the instruction word must match, and pointers must be relocated into
+the expected hunk.
+
+#### 6.2.1 Front end (hunk 16)
+
+Two cells: the *busy byte* (`$00C2`, initially 0) has one bit per channel; the *cursor* word
+(`$00BE`, initially 0) remembers the channel used last. Both are code-hunk cells, so they keep
+their values for the session.
+
+- *Fixed* start, channel n (`$0000 + 16n`): `MOVEQ #n,D1`, set bit n of the busy byte, jump to
+  the synth start. Area music uses these, which keeps its channels away from effects.
+- *Release*, channel n (`$0040 + 18n`): AND the busy byte with a mask that clears bit n and bits
+  4 to 7, then *play* the silence sequence (`$A7`). The silence lands on the next free channel in
+  cursor order, which need not be channel n.
+- *Play* (`$0088`): if the low four busy bits are all set, nothing happens. Otherwise step the
+  cursor (`+1`, `AND 3`) until it names a channel whose busy bit is clear, and start the sequence
+  there. The channel is not marked busy, so effects take channels in turn and can cut each
+  other off.
+- *Stop all* (`$011A`): clear the busy word, then call the four releases in channel order. Since
+  nothing is busy, the four silence starts cover every channel.
+- *Init tail* (`$0110`, end of the mog sound set-up): clear the busy word. The cursor is kept.
+
+A *direct* start (§12.31, `SoundKind.START`) calls the synth start without touching the busy
+byte. Release requests carry their own mask and silence id, decoded from the caller's code
+(§10.32).
+
+#### 6.2.2 Data (hunks 44 and 45)
+
+References inside the synth are hunk-44 offsets. Read from the user's file:
+
+| Item | Source | Meaning |
+|---|---|---|
+| Sequence table | `LEA (d16,PC)` at `$06FA` (also absolute at `$0A84` and `$0B34`) | 168 longs at `$2254`, relocated into hunk 44. Entry 0 is null (an idle voice). Sequence `$A7` is silence. |
+| Instrument table | `LEA abs` at `$0710` (relocated into hunk 45); row size from `MULU #14` at `$0B0A` | 131 rows of 14 bytes at hunk-45 `$00A8`: loop word (signed), loop offset in bytes, length in words, sample address (long), pitch table (hunk-44 long). |
+| Vibrato rows | `MULU #15` at `$0A06`, `ADDI.L` at `$0A0A` (relocated) | 15 signed bytes per row, base `$13B6`. The game uses rows 0 to 6. As in the original, rows overlap the envelope rows and the first sequence. |
+| Envelope rows | `ASL #3` at `$0AF0`, `ADDI.L` at `$0AF2` (relocated) | 8 bytes per row, base `$13F2`. No sequence in the game selects one. |
+| Tempo cell | `LEA (d16,PC),A6` at `$077E` | Word at `$0BEE`, initially 0. Never reset, not even by init. |
+| Tempo dividend | `MOVE.L #750,D1` at `$09CE` | Command `$94` stores `750 / argument`. |
+| Fade cell, attenuation | `TST.W abs` at `$0B72`, `MOVE.W #16` at `$0B84` | Fade flag word `$0BE8`; per-voice attenuation 16. |
+| Rest and park buffers | `$07BC` (hunk-45 `$00A8`); `$032A` and `$06DE` (hunk-45 `$0000`) | One-word buffers. The rest buffer is the first word of the instrument table; the park buffer is the first word of waveform 0. |
+| Start period | `MOVE.W #$100` at `$072A` | Period of a freshly started voice. |
+| Init wipe | `LEA abs` at `$04F6`, `MOVE.W #$7F` at `$0500` | Init clears `4 + 4 * 128` bytes from `$0BF0`. That covers the four voice stacks (128 bytes each, tops `$0C70`, `$0CF0`, `$0D70`, `$0DF0`), the lock word and the first pitch-table word after them. |
+
+The first nine instruments are the single-cycle waveforms in hunk 45, and their sample longs are
+relocated into hunk 45. The other 122 hold offsets inside a sound bank. When an area's bank is
+loaded, a relocation routine adds the base of one of five bank buffers to each of them
+(T11.23c). Until then a bank instrument's sample address is the raw small offset, which is not
+sample memory, and our model plays silence for it.
+
+**Instrument loop word.** Negative means *looping*: after the first pass, the channel replays
+the part from the loop offset to the end. With loop offset 0, the whole sample repeats and no
+interrupt is used. Non-negative means a one-shot sample. The nine waveforms loop whole. Most bank
+samples are one-shots; ten of them loop, and seven of those start their loop at an offset.
+
+#### 6.2.3 Voice state
+
+Each channel has a voice record (hunk 44, `$94` bytes apart, zero in the file). Its fields are:
+
+- the channel's DMA and interrupt words, and an interrupt countdown;
+- the pitch table, the envelope (0 = none) and the stack pointer;
+- the instrument's sample address, loop word, loop offset and length;
+- the last note, the volume and a retrigger flag;
+- the envelope timer, on flag and phase;
+- the sequence start and position (0 = idle), the ticks left of the current note and the note
+  length;
+- the base volume, and the base and output period;
+- two tremolo delay/step counter pairs, three vibrato pairs and the loaded 15-word vibrato row;
+- the tremolo and vibrato offsets, the repeat flags (bit 0 tremolo, bit 1 vibrato), the
+  transpose and the fade attenuation.
+
+#### 6.2.4 Init (`$04CE`)
+
+Init runs once per entry into `mog`:
+
+- Paula is reset: the four channels' audio DMA, interrupts and requests are cleared, and every
+  channel is parked on the park buffer at volume 0.
+- Each voice's interrupt countdown becomes 2, its sample becomes the park buffer with length
+  8 words, and its stack pointer becomes the stack top.
+- The init wipe zeroes the stacks and the first pitch-table word.
+
+The init routine itself never touches the tempo cell. But every entry into `mog` loads the
+executable from disk again, so the voice records, the stacks, the tempo cell and the front-end
+cells all start from their values in the file. Our `Synth.init` and `SoundFront.load` model that
+reload followed by the routine. The synth keeps a working copy of hunk 44, so the wipe, the
+stacks and the original overflow behaviour all act on the same bytes as in the original.
+
+#### 6.2.5 Start a sequence on a channel (`$0698`)
+
+1. Clear the voice record from offset `$10` to `$8F`. The interrupt countdown survives;
+   transpose and fade attenuation are cleared. The stack pointer becomes the stack top.
+2. Disable the channel's interrupt, clear its request, stop its DMA, and set volume 0, the park
+   buffer, length 1 and period 1. Then enable its DMA again.
+3. Sequence start and position become the table entry for the sequence.
+4. Load instrument 0. Base and output period become the start period.
+5. Write the instrument's sample, its length and the start period to the channel.
+6. Write DMACON `$0002`. This stops **channel 1**, whatever channel was started. The quirk is
+   kept: any sound start silences whatever channel 1 was playing until that voice's next note.
+
+#### 6.2.6 Tick (`$0342` VBL job, `$076A`)
+
+The tick does nothing while a start is in progress (a lock word); our host never interleaves
+the two. Otherwise:
+
+1. Run the **voice step** of voices 0 to 3.
+2. Run the **envelope step** of voices 0 to 3.
+3. Run the **register pass** of voices 0 to 3.
+
+**Voice step.** An idle voice (position 0) is skipped completely. If the note has ticks left,
+go straight to modulation. Otherwise, if the loop offset is 0, put the channel at rest: stop its
+DMA and interrupt, clear its request, then set volume 0, the rest buffer, length 1 and period 1,
+and restart DMA. Then read the stream:
+
+- A byte below `$80` is a **note**. Store it, and put the channel at rest as above, but without
+  restarting DMA. With an envelope, set the envelope's on flag (high byte) and clear its phase,
+  the volume and the timer. The base period is the pitch-table word at byte offset
+  `2 * (4 * note + transpose)` (16-bit arithmetic, signed index). Set the retrigger flag. Reload
+  the tremolo counters and clear the tremolo offset, then do the same for the vibrato. A note
+  ends the read.
+- A byte of `$80` or more is a **command**. The jump table is indexed by `byte - $80`, so only
+  the multiples of 4 from `$80` to `$D4` exist. Any other byte is an error in our model (the
+  original would jump through a misaligned table entry).
+
+| Byte | Effect |
+|---|---|
+| `$80 v` | base volume = v |
+| `$84 x`, `$A0 x`, `$A4 x` | skip one byte |
+| `$88` | position = sequence start; read on |
+| `$8C n` | note length = n × tempo (low word of the unsigned product) |
+| `$90` | end the read |
+| `$94 d` | tempo = 750 / d (unsigned; d = 0 traps on the 68000 and is an error in our model) |
+| `$98 c b...` | note length = (sum of the next c bytes) × tempo. c = 0 means 65,536 bytes, as `DBF` counts. |
+| `$9C r` | clear repeat bits 0 and 1, load vibrato row r (15 sign-extended bytes), and clear both tremolo delays, all three vibrato delays and both offsets. The step counters are not touched. |
+| `$A8 f` | repeat flags \|= f |
+| `$AC` | stop: ticks left = 0, position and sequence start = 0, disable the interrupt, clear the request, stop DMA, clear the retrigger flag, end the read |
+| `$B0 s` | push the position (long), then jump to sequence s |
+| `$B4` | pop the position |
+| `$B8 t` | transpose += signed t; t = 0 sets the transpose to 0 |
+| `$BC t` | transpose = signed t |
+| `$C0 n` | loop start: push the position and n; n = 0 pushes a null loop |
+| `$C4` | loop end: a null loop is popped. Otherwise jump back and count down; at 0 the loop address is cleared, so the body runs n + 1 times. |
+| `$C8 e` | envelope = row e |
+| `$CC` | no envelope |
+| `$D0 i` | load instrument i (loop word, loop offset, length, sample address, pitch table) |
+| `$D4 s` | jump to sequence s (no return) |
+
+When the read ends, store the position and set ticks left = note length. A stop also takes this
+path, so its modulation and register writes still happen this tick.
+
+*Modulation.* Count ticks left down by one (16 bits). Without an envelope, run the tremolo. For
+stage 0, then stage 1:
+
+- a non-zero delay is counted down, which ends the stage search;
+- otherwise a non-zero step count is counted down, the stage's delta is added to the tremolo
+  offset and the delay is reloaded, which also ends the search.
+
+If no stage acted, clear the tremolo offset and, with repeat bit 0, reload the tremolo counters.
+The vibrato works the same way with stages 0 to 2 and repeat bit 1, except that it keeps its
+offset when no stage acts. Finally, without an envelope, volume = (base volume + tremolo offset)
+AND `$3F`. In every case, output period = base period + vibrato offset.
+
+Row layout (word index): 0 to 1 tremolo steps, 2 to 4 vibrato steps, 5 to 6 tremolo deltas,
+7 to 9 vibrato deltas, 10 to 11 tremolo delays, 12 to 14 vibrato delays. Reloading copies the
+steps and delays from the row into the counters.
+
+**Envelope step.** Skipped for an idle voice and for a voice without an envelope. A running
+timer is counted down, and the step waits until it reaches 0. With envelope bytes e0 to e7:
+
+- *Release* (on flag clear): clear the phase. If the volume is non-zero, timer = e7, and the low
+  byte of the volume drops by e6, to 0 on a borrow.
+- *Attack* (phase 0): timer = e1; add e0 to the volume's low byte. At or above the base volume
+  (unsigned word compare), clamp to it and go to phase 1.
+- *Decay* (phase 1): timer = e3; subtract e2 from the low byte, and a result of `$40` or more
+  becomes 0. If it is at or above e4, store it. Below e4, go to the next phase and fall into
+  sustain.
+- *Sustain*: volume = e4. Once the low byte of ticks left is not greater than e5 (signed bytes),
+  clear the on flag.
+
+**Register pass.** Write the output period, then volume minus the fade attenuation (at least 0).
+If the retrigger flag is set:
+
+1. Clear it, write the sample address and the length, and set the interrupt countdown to 2.
+2. Start DMA and clear the channel's request.
+3. A one-shot instrument then enables the channel's interrupt. A looping instrument with loop
+   offset 0 disables it, because it needs no reload. A looping instrument with a non-zero loop
+   offset sets the countdown to 1 and enables it.
+
+#### 6.2.7 Audio interrupt (`$0250`)
+
+While any audio request is pending (checked in channel order 0 to 3), acknowledge it. If that
+channel's interrupt is enabled, service it:
+
+- Count the interrupt countdown down.
+- Looping instrument: point the channel at the loop part (sample + loop offset, length minus
+  loop offset / 2) and disable the interrupt.
+- One-shot with countdown 0: disable the interrupt and stop DMA.
+- Any other one-shot: point the channel at the park buffer, length 1.
+- Clear the request again.
+
+A one-shot therefore takes two interrupts: one at the start of the sample (park the next buffer)
+and one when the park buffer starts (switch off).
+
+#### 6.2.8 Fade (`$0B72`)
+
+This routine runs on every step of a palette fade. If the fade flag is set, every voice's
+attenuation becomes 16, otherwise 0. The silent fade-out (`LAB_03F1` in the reference) sets the
+flag for the 36 frames of the fade, clears it, then calls *stop all*. The attenuation therefore
+remains until the next fade step, or until that voice starts a sequence (the silence starts of
+stop all reset it). Wiring each silent-fade caller in the host belongs to T11.23c.
+
+#### 6.2.9 Paula model (`app/paula.py`)
+
+This part is not original code. It turns register writes into sound:
+
+- Registers per channel: location, length (0 = 65,536 words), period and volume. A period of 0
+  means 65,536; below 124 the DMA rate limits it to 124. The volume uses its low 7 bits, and
+  64 or more plays as 64. The location ignores bit 0.
+- DMA rising edge: at the end of the CPU batch that caused it (the tick, one start, or one
+  interrupt), the channel latches location and length, raises its request and starts playing the
+  first byte. Off then on within one batch is a restart; on then off is nothing.
+- When the latched buffer runs out, the channel latches the *current* location and length
+  registers, raises its request, and continues. A raised request whose interrupt is enabled calls
+  the synth's interrupt routine at that moment.
+- Writing location or length while a buffer plays only changes the next buffer. Period and
+  volume apply from the moment of the write, and the playing position is kept.
+- The four channels mix as Amiga stereo: 0 and 3 left, 1 and 2 right. Each output sample is the
+  channel's current byte × volume, sampled at the output rate without filtering.
+- Address space: the waveform hunk and each of the five bank buffers are separate regions. Any
+  address outside a loaded region reads silence.
+- Each host VBL runs the synth tick, then that tick's start requests, then renders one fiftieth
+  of a second. The original makes its starts during the frame after the VBL, so only sub-frame
+  timing differs. ADKCON is not modelled: init writes it to clear modulation, which the synth
+  never enables.
 
 ### 6.3 `.cmp` Music Modules (`music.cmp`, `vmusic.cmp` on Disk A)
 - RNC1-compressed 4-channel, 31-sample **ProTracker (`M.K.`)** modules:

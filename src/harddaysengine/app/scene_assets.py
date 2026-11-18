@@ -2,29 +2,22 @@
 
 from __future__ import annotations
 
-import contextlib
-import struct
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from harddaysengine.app.intro_player import IntroCinematicPlayer
 from harddaysengine.assets.ai_map_rules import parse_ai_map_rules
 from harddaysengine.assets.arena import DecodedArena, composite_arena_background, decode_arena
-from harddaysengine.assets.audio import (
-    DEFAULT_SAMPLE_RATE,
-    AudioFormatError,
-    DecodedModule,
-    decode_cmp_module,
-    decode_iff_8svx,
-    decode_sample_bank,
-)
+from harddaysengine.assets.audio import DecodedModule, decode_cmp_module
 from harddaysengine.assets.cel import DecodedCel, decode_cel
 from harddaysengine.assets.fight_palette import FightPaletteTables, parse_fight_palette_tables
 from harddaysengine.assets.hit import HitSet, parse_collide_hit
 from harddaysengine.assets.hunk import HunkFormatError, parse_hunk_executable
 from harddaysengine.assets.map_rules import parse_map_rules
+from harddaysengine.assets.mog_code import MogCode
 from harddaysengine.assets.palette import RGBColor, default_combat_palette
 from harddaysengine.assets.picture import DecodedPicture, decode_picture, decode_picture_pack
+from harddaysengine.assets.synth_data import parse_front_end, parse_synth
 from harddaysengine.assets.tables import (
     MogRuntimeTables,
     ProgramRuntimeTables,
@@ -47,35 +40,6 @@ if TYPE_CHECKING:
 
 
 _LAIR_ARENAS = ("fol1.t", "gll1.t", "swl1.t", "wal1.t")
-
-COMBAT_SFX_KEYS: tuple[str, ...] = ("swing", "hit", "block", "hurt", "throw", "death")
-
-_LEGACY_SFX_ALIASES: dict[str, tuple[str, ...]] = {
-    "hit": ("hit.a", "splat.a", "swordhit.a"),
-    "hurt": ("hurt.a",),
-    "throw": ("throw.a", "swish.a", "knifethr.a"),
-    "swing": ("swing.a",),
-    "block": ("block.a",),
-    "death": ("death.a",),
-}
-
-
-def _extract_8svx_chunks(pcm: bytes) -> list[tuple[bytes, int]]:
-    chunks: list[tuple[bytes, int]] = []
-    pos = 0
-    while True:
-        idx = pcm.find(b"FORM", pos)
-        if idx < 0 or idx + 12 > len(pcm):
-            break
-        if pcm[idx + 8 : idx + 12] != b"8SVX":
-            pos = idx + 4
-            continue
-        (form_size,) = struct.unpack_from(">I", pcm, idx + 4)
-        end = min(len(pcm), idx + 8 + form_size)
-        with contextlib.suppress(AudioFormatError):
-            chunks.append(decode_iff_8svx(pcm[idx:end]))
-        pos = max(idx + 12, end)
-    return chunks
 
 
 @dataclass(slots=True)
@@ -189,47 +153,12 @@ class GameAssetBundle:
                 return arena, bg_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH], tuple(bg_pic.palette)
         return None
 
-    def preload_audio(self, audio: AudioEngine) -> None:
-        """Load available ``.a`` sample banks and register addressable combat SFX keys."""
-        bank_chunks: dict[str, list[tuple[bytes, int]]] = {}
-        for entry in self.disk_set.list_entries():
-            if not entry.name.casefold().endswith(".a"):
-                continue
-            try:
-                bank = decode_sample_bank(entry.name, self.disk_set.read_file(entry.name))
-            except ValueError:
-                continue
-            if len(bank.samples_pcm8) == 0:
-                continue
-            audio.mixer.register_sample_bank(bank)
-            stem = entry.name.rsplit(".", 1)[0].casefold()
-            chunks = _extract_8svx_chunks(bank.samples_pcm8) or [
-                (bank.samples_pcm8, DEFAULT_SAMPLE_RATE)
-            ]
-            bank_chunks[stem] = chunks
-            for idx, (pcm, rate) in enumerate(chunks):
-                audio.mixer.register_sample(f"{stem}:{idx}", pcm, sample_rate=rate)
-
-        self._register_combat_sfx_keys(audio, bank_chunks)
-        mog_tables = self.get_mog_tables()
-        if mog_tables is not None:
-            audio.mixer.set_synth_tables(mog_tables.synth)
-
-    def _register_combat_sfx_keys(
-        self,
-        audio: AudioEngine,
-        bank_chunks: dict[str, list[tuple[bytes, int]]],
-    ) -> None:
-        primary = bank_chunks.get("kn") or bank_chunks.get("he")
-        if not primary and bank_chunks:
-            primary = next(iter(bank_chunks.values()))
-        if not primary:
+    def attach_synth(self, audio: AudioEngine) -> None:
+        """Enter ``mog`` on ``audio``: its synth tables and front end (ARCHITECTURE.md §6.2)."""
+        if not self.disk_set.has_file("mog"):
             return
-        for idx, sfx_key in enumerate(COMBAT_SFX_KEYS):
-            pcm, rate = primary[idx % len(primary)]
-            audio.mixer.register_sample(sfx_key, pcm, sample_rate=rate)
-            for alias in _LEGACY_SFX_ALIASES.get(sfx_key, ()):
-                audio.mixer.register_sample(alias, pcm, sample_rate=rate)
+        mog = MogCode(parse_hunk_executable("mog", self.disk_set.read_file("mog")))
+        audio.attach_synth(parse_synth(mog), parse_front_end(mog))
 
     def load_title_music(self) -> DecodedModule | None:
         """Return unpacked ProTracker ``music.cmp`` module if present on disk."""
