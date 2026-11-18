@@ -61,6 +61,15 @@ uv run pytest -m gl                      # ModernGL rendering tests
 
 See [AGENTS.md](AGENTS.md) for contributor/agent rules and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/DECISIONS.md](docs/DECISIONS.md), and [docs/PROGRESS.md](docs/PROGRESS.md) for technical documentation.
 
+## Acknowledgements
+
+HardDaysEngine is a homage to *Moonstone: A Hard Days Knight* and to the people who created it,
+above all Rob Anderson, and to Mindscape, who published it in 1991. This project exists out of
+admiration for their work and aims to preserve it for players who own the original game.
+
+Thanks also to the authors of the `moonstone-ace` and `openmoonstone` projects, whose research
+documented much of the original behaviour.
+
 ## License
 
 MIT License — see [LICENSE](LICENSE).
