@@ -812,7 +812,9 @@ def _stone_shots(rig: AuditRig) -> Iterator[AuditShot]:
     _tap(session, PlayerInput(fire=True))
     if session.ending_request is None:
         raise ValueError("Stonehenge audit did not emit an ending request")
-    yield rig.capture(session, f"stone_program_flags_{session.ending_request.flags:02X}")
+    flags = session.ending_request.flags
+    _step(session, 40)
+    yield rig.capture(session, f"stone_program_flags_{flags:02X}")
 
 
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
