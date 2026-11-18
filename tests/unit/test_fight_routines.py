@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from pymoonstone.sim.fight import END, POOL_FIRST, FightError, HandlerResult, Restart
-from pymoonstone.sim.fight_routines import (
+from harddaysengine.sim.fight import END, POOL_FIRST, FightError, HandlerResult, Restart
+from harddaysengine.sim.fight_routines import (
     DAGGER_TYPE,
     dagger_handler,
     dagger_throw,
     hop,
     hop_step,
 )
-from pymoonstone.sim.fight_script import RoutineCall
+from harddaysengine.sim.fight_script import RoutineCall
 from tests.unit.knight_setup import HOP_WORDS, RULES, make_fight
 
 

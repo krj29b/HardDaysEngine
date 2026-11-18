@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import FightError
-from pymoonstone.sim.inventory import Inventory
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import FightError
+from harddaysengine.sim.inventory import Inventory
 from tests.unit.knight_setup import TABLES, make_fight
 
 

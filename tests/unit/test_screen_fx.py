@@ -6,9 +6,9 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-from pymoonstone.app.fight_runtime import FightRuntime
-from pymoonstone.render.scene import SceneRenderer
-from pymoonstone.sim.screen_fx import ShakeRules, ShakeState
+from harddaysengine.app.fight_runtime import FightRuntime
+from harddaysengine.render.scene import SceneRenderer
+from harddaysengine.sim.screen_fx import ShakeRules, ShakeState
 from tests.unit.knight_setup import make_fight
 from tests.unit.test_fight_scene import _scene
 

@@ -1,8 +1,8 @@
 """Explicit synthetic geometry and rule data for shared sheets (§12.26)."""
 
-from pymoonstone.sim.overworld import OverworldState
-from pymoonstone.sim.sheet_types import SheetRules, SheetState
-from pymoonstone.sim.sheets import redraw
+from harddaysengine.sim.overworld import OverworldState
+from harddaysengine.sim.sheet_types import SheetRules, SheetState
+from harddaysengine.sim.sheets import redraw
 from tests.unit.map_setup import make_world
 
 RULES = SheetRules(

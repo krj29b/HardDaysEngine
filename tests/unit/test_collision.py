@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pymoonstone.sim.collision import (
+from harddaysengine.sim.collision import (
     ARENA_MAX_X,
     ARENA_MAX_Y,
     ARENA_MIN_X,
@@ -30,7 +30,7 @@ from pymoonstone.sim.collision import (
     resolve_arena_movement,
     resolve_combat_hits,
 )
-from pymoonstone.sim.types import EntityId, Pos25D, Rect2D
+from harddaysengine.sim.types import EntityId, Pos25D, Rect2D
 
 
 def test_depth_band_gate_accepts_within_threshold_and_rejects_front_back() -> None:

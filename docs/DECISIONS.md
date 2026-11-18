@@ -3,7 +3,7 @@
 ## ADR-001: Clean room; the references are specifications
 **Status:** ACCEPTED (2026-11-14)
 **Context:** `reference/moonstone-ace` is PolyForm Noncommercial 1.0.0 and `reference/openmoonstone`
-is AGPL-3.0. Their terms can't be combined with each other or with pymoonstone's MIT licence.
+is AGPL-3.0. Their terms can't be combined with each other or with HardDaysEngine's MIT licence.
 **Decision:** Formats and behaviour are described in our own words in `docs/ARCHITECTURE.md`, and
 code is written from that document. No code is transliterated from either reference. No byte tables
 from the original executables are placed in source; such tables are read at runtime from the
@@ -616,3 +616,16 @@ instruction pairs. Independent real-disk table/RNG oracles verify startup for
 all four seed selections; host checks cover both smith callers, natural stock
 purchase/sale, no replenishment, reset and hashes. GL checks verify render
 purity and the shop audit contact sheet is reviewed. No game data is committed.
+
+## ADR-033: Project renamed from pymoonstone to HardDaysEngine
+**Status:** ACCEPTED (2026-11-18)
+**Context:** The project name `pymoonstone` contained the original game's title, which could
+read as an official or endorsed product and invite trademark complaints.
+**Decision:** The project is named **HardDaysEngine**. The Python package, distribution and
+console scripts are `harddaysengine`, `harddaysengine-extract` and `harddaysengine-inspect`; the
+ADF environment variable is `HARDDAYSENGINE_ADF_DIR`; the base renderer is `HardDaysRenderer`.
+The game's title is still used descriptively (to say what the engine is compatible with) in
+docs, docstrings and the README, which carries a non-affiliation disclaimer.
+**Consequences:** `PYMOONSTONE_ADF_DIR` is no longer read; users must rename the variable.
+Existing virtual environments need `uv sync` to install the renamed package. The GitHub
+repository and local checkout folder are renamed separately from the code.

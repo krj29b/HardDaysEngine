@@ -1,4 +1,4 @@
-"""Tests for the ``pymoonstone`` console script (cli/main.py)."""
+"""Tests for the ``harddaysengine`` console script (cli/main.py)."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone import __version__
-from pymoonstone.app.config import ADF_IMAGE_SIZE
-from pymoonstone.cli.main import main
+from harddaysengine import __version__
+from harddaysengine.app.config import ADF_IMAGE_SIZE
+from harddaysengine.cli.main import main
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -18,12 +18,12 @@ def test_version(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["--version"])
     assert exc.value.code == 0
-    assert capsys.readouterr().out.strip() == f"pymoonstone {__version__}"
+    assert capsys.readouterr().out.strip() == f"HardDaysEngine {__version__}"
 
 
 def test_no_arguments_prints_help(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     assert main(["--config", str(tmp_path / "none.toml")]) == 0
-    assert "usage: pymoonstone" in capsys.readouterr().out
+    assert "usage: harddaysengine" in capsys.readouterr().out
 
 
 def test_list_disks_complete_set(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:

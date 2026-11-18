@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pymoonstone.sim.actor import ACTOR_SIZE, Actor, RecordAccessError
+from harddaysengine.sim.actor import ACTOR_SIZE, Actor, RecordAccessError
 
 
 def test_reads_and_writes_follow_the_big_endian_layout() -> None:

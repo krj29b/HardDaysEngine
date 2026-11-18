@@ -10,17 +10,17 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 
-from pymoonstone.app.audio import AudioEngine
-from pymoonstone.app.fight_runtime import FightLoader, FightRuntime, FightUnavailableError
-from pymoonstone.app.fight_scene import FightScene
-from pymoonstone.app.game import GameScene, GameSession
-from pymoonstone.app.input import InputFrame, PlayerInput
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.cel import CelFrame, CelFrameMeta, DecodedCel
-from pymoonstone.assets.fight_program import cel_shape
-from pymoonstone.assets.palette import default_combat_palette
-from pymoonstone.render.scene import SceneRenderer, default_bitmap_font
-from pymoonstone.sim.fight import (
+from harddaysengine.app.audio import AudioEngine
+from harddaysengine.app.fight_runtime import FightLoader, FightRuntime, FightUnavailableError
+from harddaysengine.app.fight_scene import FightScene
+from harddaysengine.app.game import GameScene, GameSession
+from harddaysengine.app.input import InputFrame, PlayerInput
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.cel import CelFrame, CelFrameMeta, DecodedCel
+from harddaysengine.assets.fight_program import cel_shape
+from harddaysengine.assets.palette import default_combat_palette
+from harddaysengine.render.scene import SceneRenderer, default_bitmap_font
+from harddaysengine.sim.fight import (
     END_FIGHT,
     DrakeCells,
     Fight,
@@ -28,18 +28,18 @@ from pymoonstone.sim.fight import (
     FlyerCells,
     FrameOutput,
 )
-from pymoonstone.sim.fight_script import ScriptImage, TickOutput
-from pymoonstone.sim.overworld import EncounterTrigger, MoonPhase, TriggerKind
-from pymoonstone.sim.types import KnightId
+from harddaysengine.sim.fight_script import ScriptImage, TickOutput
+from harddaysengine.sim.overworld import EncounterTrigger, MoonPhase, TriggerKind
+from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from pymoonstone.assets.fight_defs import ArenaDef
-    from pymoonstone.sim.actor import Actor
-    from pymoonstone.sim.fight_setup import SpawnLanes
-    from pymoonstone.sim.inventory import Inventory
-    from pymoonstone.sim.rng import Rng
+    from harddaysengine.assets.fight_defs import ArenaDef
+    from harddaysengine.sim.actor import Actor
+    from harddaysengine.sim.fight_setup import SpawnLanes
+    from harddaysengine.sim.inventory import Inventory
+    from harddaysengine.sim.rng import Rng
 
 
 def _trigger() -> EncounterTrigger:

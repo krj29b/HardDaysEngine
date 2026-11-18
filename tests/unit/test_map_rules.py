@@ -5,10 +5,10 @@ import zlib
 
 import pytest
 
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.hunk import HUNK_CODE, DecodedHunkExecutable, HunkSection
-from pymoonstone.assets.map_rules import _bytes, _nodes, _palette_jobs, _pointer
-from pymoonstone.assets.mog_code import MogCode, Pointer
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.hunk import HUNK_CODE, DecodedHunkExecutable, HunkSection
+from harddaysengine.assets.map_rules import _bytes, _nodes, _palette_jobs, _pointer
+from harddaysengine.assets.mog_code import MogCode, Pointer
 
 
 def _mog(*, opcode: int = 0x41F9, target: int = 2, terminated: bool = True) -> MogCode:

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from pymoonstone.assets import (
+from harddaysengine.assets import (
     RNC1_MAGIC,
     ADFFormatError,
     ArenaFormatError,
@@ -54,8 +54,8 @@ from pymoonstone.assets import (
     picture_to_rgba,
     planar_to_indexed,
 )
-from pymoonstone.cli.extract import main as extract_cli_main
-from pymoonstone.cli.main import main as main_cli
+from harddaysengine.cli.extract import main as extract_cli_main
+from harddaysengine.cli.main import main as main_cli
 from tests.fixtures.synthetic_adf import (
     build_synthetic_arena,
     build_synthetic_audio_bank,
@@ -288,7 +288,7 @@ def test_arena_and_stile_decoding_and_compositing() -> None:
 
 
 def test_arena_region_sheet_dispatch_and_signed_coords() -> None:
-    from pymoonstone.assets.lzss import compress_lzss_literals
+    from harddaysengine.assets.lzss import compress_lzss_literals
 
     test_pics = [
         decode_picture(build_synthetic_picture(planes=5, fill_index=i + 1)) for i in range(9)

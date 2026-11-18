@@ -8,10 +8,10 @@ import zlib
 import numpy as np
 import pytest
 
-from pymoonstone.assets.cel import CelFrame, CelFrameMeta, DecodedCel
-from pymoonstone.assets.fight_defs import CelFile, CelSet
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.fight_program import (
+from harddaysengine.assets.cel import CelFrame, CelFrameMeta, DecodedCel
+from harddaysengine.assets.fight_defs import CelFile, CelSet
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.fight_program import (
     _ROUTINES,
     CREATURE_LIST,
     EFFECT_LIST,
@@ -25,9 +25,9 @@ from pymoonstone.assets.fight_program import (
     frame_lists,
     script_image,
 )
-from pymoonstone.assets.hit import HitFrame, HitPoint, HitSet
-from pymoonstone.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
-from pymoonstone.assets.mog_code import CODE_HUNK, DATA_HUNK, MogCode
+from harddaysengine.assets.hit import HitFrame, HitPoint, HitSet
+from harddaysengine.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
+from harddaysengine.assets.mog_code import CODE_HUNK, DATA_HUNK, MogCode
 
 
 def _put(buffer: bytearray, pos: int, *words: int) -> None:

@@ -8,16 +8,16 @@ import numpy as np
 import pygame
 import pytest
 
-from pymoonstone.app.audio import (
+from harddaysengine.app.audio import (
     DEFAULT_MIX_RATE,
     PAL_VBL_HZ,
     PAULA_CHANNEL_COUNT,
     AudioEngine,
     PaulaSynthMixer,
 )
-from pymoonstone.assets.audio import DecodedModule, DecodedSampleBank, ModSampleHeader
-from pymoonstone.assets.hunk import SynthInstrumentRecord
-from pymoonstone.assets.tables import (
+from harddaysengine.assets.audio import DecodedModule, DecodedSampleBank, ModSampleHeader
+from harddaysengine.assets.hunk import SynthInstrumentRecord
+from harddaysengine.assets.tables import (
     MOG_SYNTH_BLOB_BASE,
     SynthSequenceEntry,
     SynthSequenceTables,

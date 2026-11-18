@@ -6,13 +6,19 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.fight_audit import TROGG_ARENAS, fight_host_input
-from pymoonstone.app.fight_runtime import FightLoader
-from pymoonstone.app.game import GameScene, GameSession, run_headless_session
-from pymoonstone.app.input import InputFrame, PlayerInput, ReplayRecording, load_replay, save_replay
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.sim.overworld import EncounterTrigger, TriggerKind
-from pymoonstone.sim.types import KnightId
+from harddaysengine.app.fight_audit import TROGG_ARENAS, fight_host_input
+from harddaysengine.app.fight_runtime import FightLoader
+from harddaysengine.app.game import GameScene, GameSession, run_headless_session
+from harddaysengine.app.input import (
+    InputFrame,
+    PlayerInput,
+    ReplayRecording,
+    load_replay,
+    save_replay,
+)
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.sim.overworld import EncounterTrigger, TriggerKind
+from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pymoonstone.app.config import find_adf_images, resolve_adf_dir
+from harddaysengine.app.config import find_adf_images, resolve_adf_dir
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 REQUIRED_DISK_COUNT = 3

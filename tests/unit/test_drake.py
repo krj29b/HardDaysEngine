@@ -2,8 +2,8 @@
 
 import pytest
 
-from pymoonstone.sim.fight import Fight, Restart
-from pymoonstone.sim.fight_ai.drake import (
+from harddaysengine.sim.fight import Fight, Restart
+from harddaysengine.sim.fight_ai.drake import (
     FINISHED,
     FLYING,
     GRABBED,
@@ -13,9 +13,9 @@ from pymoonstone.sim.fight_ai.drake import (
     counter,
     drake_handler,
 )
-from pymoonstone.sim.fight_script import RoutineCall
-from pymoonstone.sim.m68k import s8, u16
-from pymoonstone.sim.rng import Rng
+from harddaysengine.sim.fight_script import RoutineCall
+from harddaysengine.sim.m68k import s8, u16
+from harddaysengine.sim.rng import Rng
 from tests.unit.drake_setup import DRAKE, SCRIPTS, make_drake
 from tests.unit.knight_setup import RULES
 

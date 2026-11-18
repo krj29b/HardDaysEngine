@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from pymoonstone.sim.fight import FightError, Restart, Wall
-from pymoonstone.sim.fight_routines import DAGGER_THROW, DAGGER_TYPE, HOP, HOP_STEP
-from pymoonstone.sim.fighters import KNIGHT_TYPE, knight_handler
+from harddaysengine.sim.fight import FightError, Restart, Wall
+from harddaysengine.sim.fight_routines import DAGGER_THROW, DAGGER_TYPE, HOP, HOP_STEP
+from harddaysengine.sim.fighters import KNIGHT_TYPE, knight_handler
 from tests.unit.knight_setup import RULES, TABLES, make_fight
 
 FIRE, RIGHT, LEFT, DOWN, UP = 0x10, 0x01, 0x02, 0x04, 0x08

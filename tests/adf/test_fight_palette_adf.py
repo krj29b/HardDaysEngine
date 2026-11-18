@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.game import GameSession
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.fight_palette import (
+from harddaysengine.app.game import GameSession
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.fight_palette import (
     REGION_FOREST,
     REGION_GLEN,
     REGION_SWAMP,
@@ -17,8 +17,8 @@ from pymoonstone.assets.fight_palette import (
     SCENE_DRAGON,
     FightPaletteTables,
 )
-from pymoonstone.sim.overworld import EncounterTrigger, TriggerKind
-from pymoonstone.sim.types import KnightId
+from harddaysengine.sim.overworld import EncounterTrigger, TriggerKind
+from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -114,7 +114,7 @@ def test_fight_palette_keeps_the_picture_colour_5(adf_dir: Path, arena_file: str
     _arena, picture = loaded
     from unittest.mock import patch
 
-    from pymoonstone.app.fight_runtime import FightLoader
+    from harddaysengine.app.fight_runtime import FightLoader
 
     session.fight_loader = FightLoader(session.asset_bundle)
     trogg = next(a for a in session.fight_loader.defs.arenas if a.name == "trogg_axe")

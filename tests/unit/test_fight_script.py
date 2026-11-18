@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight_script import (
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight_script import (
     CelShape,
     FrameShape,
     Job,

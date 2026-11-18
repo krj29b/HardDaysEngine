@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pymoonstone"
+name = "harddaysengine"
 version = "0.1.0"
 description = "Clean-room Python 3.12+ reimplementation of Moonstone: A Hard Days Knight (1991) with a deterministic 50Hz simulation core."
 readme = "README.md"
@@ -23,9 +23,9 @@ dependencies = [
 ]
 
 [project.scripts]
-pymoonstone = "pymoonstone.cli.main:main"
-pymoonstone-extract = "pymoonstone.cli.extract:main"
-pymoonstone-inspect = "pymoonstone.cli.inspect_assets:main"
+harddaysengine = "harddaysengine.cli.main:main"
+harddaysengine-extract = "harddaysengine.cli.extract:main"
+harddaysengine-inspect = "harddaysengine.cli.inspect_assets:main"
 
 [dependency-groups]
 dev = [
@@ -40,7 +40,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pymoonstone"]
+packages = ["src/harddaysengine"]
 
 # ============================================================================
 # RUFF: Linting, Formatting, Import Sorting & Complexity Gate
@@ -78,11 +78,11 @@ max-complexity = 10
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["T20"]
-"src/pymoonstone/cli/**/*.py" = ["T20"]
+"src/harddaysengine/cli/**/*.py" = ["T20"]
 "scripts/**/*.py" = ["T20"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["pymoonstone"]
+known-first-party = ["harddaysengine"]
 combine-as-imports = true
 
 # ============================================================================
@@ -91,7 +91,7 @@ combine-as-imports = true
 [tool.mypy]
 python_version = "3.12"
 mypy_path = "src"
-packages = ["pymoonstone"]
+packages = ["harddaysengine"]
 strict = true
 warn_unreachable = true
 warn_unused_ignores = true
@@ -121,7 +121,7 @@ addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
-    "--cov=pymoonstone",
+    "--cov=harddaysengine",
     "--cov-report=term-missing",
 ]
 markers = [
@@ -134,6 +134,6 @@ markers = [
 # VULTURE: Dead-Code Detection
 # ============================================================================
 [tool.vulture]
-paths = ["src/pymoonstone"]
+paths = ["src/harddaysengine"]
 min_confidence = 80
 sort_by_size = true

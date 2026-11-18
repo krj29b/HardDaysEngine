@@ -2,8 +2,8 @@
 
 from dataclasses import fields
 
-from pymoonstone.sim.fight import Fight
-from pymoonstone.sim.fight_ai.guardian import (
+from harddaysengine.sim.fight import Fight
+from harddaysengine.sim.fight_ai.guardian import (
     GUARDIAN_TYPE,
     GuardianRules,
     GuardianScripts,

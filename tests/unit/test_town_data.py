@@ -8,11 +8,17 @@ from dataclasses import replace
 
 import pytest
 
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.hunk import HUNK_BSS, HUNK_CODE, DecodedHunkExecutable, HunkSection
-from pymoonstone.assets.mog_code import MogCode, Pointer
-from pymoonstone.assets.town_data import _buttons, _cursor, _space_sheet, _string, parse_town_data
-from pymoonstone.sim.town_types import TownButton
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.hunk import HUNK_BSS, HUNK_CODE, DecodedHunkExecutable, HunkSection
+from harddaysengine.assets.mog_code import MogCode, Pointer
+from harddaysengine.assets.town_data import (
+    _buttons,
+    _cursor,
+    _space_sheet,
+    _string,
+    parse_town_data,
+)
+from harddaysengine.sim.town_types import TownButton
 
 
 def _mog(code: bytes, relocs: dict[int, tuple[int, ...]], data: bytes = bytes(64)) -> MogCode:

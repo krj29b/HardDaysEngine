@@ -53,13 +53,13 @@ Status lives in `PROGRESS.md`. Every task ends with a green `scripts/quality_gat
 ### Phase 1: Governance and skeleton
 - **T1.1 Scaffold:** packages for every layer, `pyproject.toml`, `.importlinter`, MIT LICENSE,
   `.gitignore` (no `.adf` or `build/`), README, `__version__`.
-  *Accept:* `uv sync` succeeds; `pymoonstone --version` prints the version.
+  *Accept:* `uv sync` succeeds; `harddaysengine --version` prints the version.
 - **T1.2 Agent governance:** `AGENTS.md`, `GEMINI.md`, `DEAD_ENDS.md`, `docs/{IMPLEMENTATION_PLAN,PROGRESS,DECISIONS}.md`.
 - **T1.3 Quality gate:** `scripts/quality_gate.py` runs all seven gates and stops at the first
   failure. Radon must actually fail on rank ≥ C. *Accept:* negative-control probes show
   import-linter, radon and the layering test each failing on a planted violation.
 - **T1.4 Config and ADF discovery:** `app/config.py` (CLI > env > `config.toml` > `./disks`),
-  `pymoonstone --list-disks`, and an `adf_dir` pytest fixture that skips without disks.
+  `harddaysengine --list-disks`, and an `adf_dir` pytest fixture that skips without disks.
 - **T1.5 68000 arithmetic:** `sim/m68k.py` covering u8/u16/u32, s8/s16/s32, truncating `c_div`/`c_mod`,
   `DIVS.W`/`DIVU.W` with overflow → `None`, and `MULS.W`/`MULU.W`.
 - **T1.6 CI:** GitHub Actions on Windows and Ubuntu, Python 3.12, running the full gate.
@@ -87,7 +87,7 @@ Status lives in `PROGRESS.md`. Every task ends with a green `scripts/quality_gat
 - **T3.3** Picture and cel decoders producing indexed numpy arrays plus palettes (RGB 4-4-4 → 8-8-8).
 - **T3.4** `collide.hit` parser and frame metadata.
 - **T3.5** 8SVX / sample bank decoder, plus the module loader.
-- **T3.6** `pymoonstone-extract`: writes `./build/assets/` with PNG/WAV outputs and a deterministic
+- **T3.6** `harddaysengine-extract`: writes `./build/assets/` with PNG/WAV outputs and a deterministic
   JSON manifest (sorted keys, SHA-256 of every source and output, no timestamps).
 - **T3.7** Headless tests: synthetic fixtures for CI; `adf` tests check real file counts,
   palette words and frame tables against values computed independently.
@@ -97,69 +97,69 @@ Status lives in `PROGRESS.md`. Every task ends with a green `scripts/quality_gat
 - **T4.2** `render/overlay.py`: GL line primitives, hurt areas in green, weapon points and boxes in red.
 - **T4.3** `app/`: window host, 50 Hz accumulator, inspector key bindings
   (next/prev asset, next/prev frame, play/pause, overlay toggle).
-- **T4.4** `pymoonstone --inspect-assets` and `pymoonstone-inspect`, with `gl`-marked smoke tests
+- **T4.4** `harddaysengine --inspect-assets` and `harddaysengine-inspect`, with `gl`-marked smoke tests
   run on a standalone context.
 
 ### Phase 5: Deterministic 50 Hz simulation foundation & executable table loaders
 *(Designed for parallel multi-agent execution — each task owns disjoint modules.)*
-- **T5.1 Simulation PRNG & fixed-point types (`src/pymoonstone/sim/prng.py`, `src/pymoonstone/sim/types.py`, `tests/unit/test_prng.py`):**
+- **T5.1 Simulation PRNG & fixed-point types (`src/harddaysengine/sim/prng.py`, `src/harddaysengine/sim/types.py`, `tests/unit/test_prng.py`):**
   - Deterministic 68k PRNG (`rand_u16`, `rand_range`, seed state) and core integer value types
     (`Pos25D`, `Rect2D`, `Direction`, `KnightId`, `EntityId`, `TickCount`).
   - *Accept:* 100% integer-only (`test_layering.py` passes); unit tests verify deterministic sequence reproduction and state serialization.
-- **T5.2 Runtime executable table decoders (`src/pymoonstone/assets/tables.py`, `tests/unit/test_tables.py`):**
+- **T5.2 Runtime executable table decoders (`src/harddaysengine/assets/tables.py`, `tests/unit/test_tables.py`):**
   - Extract runtime data tables from `program` and `mog` hunks (as specified in `ARCHITECTURE.md` §5 and §7):
     combat action-to-animation script pointer tables, creature parameter records (`mog` `S_4`/`S_33`),
     Lair/region metadata, and 4-voice synth sequence streams (`mog` `S_44`).
   - *Accept:* Pure data records (`dataclass(slots=True, frozen=True)`) passed into `sim/` without `sim/` performing I/O; verified against synthetic hunks and `@pytest.mark.adf` real-disk tests.
-- **T5.3 2.5D depth & hurtbox/hitbox collision resolver (`src/pymoonstone/sim/collision.py`, `tests/unit/test_collision.py`):**
+- **T5.3 2.5D depth & hurtbox/hitbox collision resolver (`src/harddaysengine/sim/collision.py`, `tests/unit/test_collision.py`):**
   - Implement the 2.5D depth-band gate (`abs(attacker_y - defender_y) <= depth_threshold`, default `10` px per `ARCHITECTURE.md` §4.1),
     cel bitplane hurtbox AABB & mask testing (`draw_flags & 1`), `collide.hit` attack-point vs hurtbox intersection (`draw_flags & 2`),
     and `.t` arena obstacle/boundary clamping.
   - *Accept:* Deterministic unit tests covering front/back depth rejection, mirrored sprites, obstacle blocking, and multi-target hits.
-- **T5.4 50 Hz PAL palette & VBL effect state machine (`src/pymoonstone/sim/palette_fx.py`, `tests/unit/test_palette_fx.py`):**
+- **T5.4 50 Hz PAL palette & VBL effect state machine (`src/harddaysengine/sim/palette_fx.py`, `tests/unit/test_palette_fx.py`):**
   - Pure integer simulation of the 32-colour 12-bit `$0RGB` palette state (`ARCHITECTURE.md` §8.2):
     step-toward-target fading, colour-range rotation/cycling (`cycle_step`), and lightning/blood flash overrides.
   - *Accept:* Unit tests verifying exact per-VBL `$0RGB` transitions and zero float usage.
 
 ### Phase 6: Combat bytecode VM, knight controls & monster AI
 *(Parallelizable across `sim/combat_vm.py`, `sim/knight_combat.py`, and `sim/monster_ai.py` once `T5.1`–`T5.3` complete.)*
-- **T6.1 Combat animation & bytecode VM (`src/pymoonstone/sim/combat_vm.py`, `tests/unit/test_combat_vm.py`):**
+- **T6.1 Combat animation & bytecode VM (`src/harddaysengine/sim/combat_vm.py`, `tests/unit/test_combat_vm.py`):**
   - Implement the 50 B `CombatJob` state and 6-byte frame draw / variable-length control opcode interpreter
     (`$00..$1F` draw frame with `(dx, dy)` displacement and `draw_flags`; control opcodes `$80..$D4`, `$FF` per `ARCHITECTURE.md` §7.2–§7.3)
     stepping on the 6-VBL (normal) / 5-VBL (fast) combat frame divisor.
   - *Accept:* Deterministic execution of multi-frame sequences, loop/branch opcodes, velocity integration, and sound/spawn triggers.
-- **T6.2 Knight combat controller & equipment state (`src/pymoonstone/sim/knight_combat.py`, `tests/unit/test_knight_combat.py`):**
+- **T6.2 Knight combat controller & equipment state (`src/harddaysengine/sim/knight_combat.py`, `tests/unit/test_knight_combat.py`):**
   - Implement the 132 B `Knight` record (`ARCHITECTURE.md` §7.4) and 8-direction + fire-button action decoder
     (walk, run, roll, block, overhead slash, thrust, low sweep, weapon switch, hit-stun, knockdown, and death states).
   - *Accept:* Full state-transition coverage for sword & secondary weapon moves, stamina/hit-point deduction, and invulnerability frames.
-- **T6.3 Monster AI state machines & Lair encounters (`src/pymoonstone/sim/monster_ai.py`, `tests/unit/test_monster_ai.py`):**
+- **T6.3 Monster AI state machines & Lair encounters (`src/harddaysengine/sim/monster_ai.py`, `tests/unit/test_monster_ai.py`):**
   - Implement monster perception, approach/retreat movement in 2.5D, attack selection, projectile/hazard spawning,
     and boss behaviours (Balok, Dragon, Guardians) driven by runtime tables from `T5.2`.
   - *Accept:* Deterministic N-tick battle simulations between a Knight and each monster archetype with reproducible outcomes from a fixed PRNG seed.
 
 ### Phase 7: Overworld board game & locations
 *(Independent of Phase 6 combat internals — can run in parallel after `T5.1`.)*
-- **T7.1 Overworld map, turn order & moon phase cycle (`src/pymoonstone/sim/overworld.py`, `tests/unit/test_overworld.py`):**
+- **T7.1 Overworld map, turn order & moon phase cycle (`src/harddaysengine/sim/overworld.py`, `tests/unit/test_overworld.py`):**
   - Implement the 1–4 knight board-game loop (`program` state machine): region graph and node movement,
     28-day moon phase progression, Lair key/Moonstone tracking, Dragon patrol movement on the map, and PvP encounter triggers.
   - *Accept:* Full multi-turn deterministic board simulation from campaign start to Stonehenge victory condition.
-- **T7.2 Sacred places, towns & shops (`src/pymoonstone/sim/locations.py`, `tests/unit/test_locations.py`):**
+- **T7.2 Sacred places, towns & shops (`src/harddaysengine/sim/locations.py`, `tests/unit/test_locations.py`):**
   - Implement Highwood (merchant, healer, tavern dice game), Waterdeep (mystic, spell/scroll purchase, training),
     Stonehenge (Moonstone altar ritual), and Lair loot distribution.
   - *Accept:* Unit tests covering gold/inventory transactions, stat upgrades, dice game PRNG rules, and Moonstone placement.
 
 ### Phase 8: Audio synthesizer, multi-scene presentation & full game loop
-- **T8.1 Paula 4-voice VBL synth & 8SVX mixer (`src/pymoonstone/app/audio.py`, `tests/unit/test_audio_mixer.py`):**
+- **T8.1 Paula 4-voice VBL synth & 8SVX mixer (`src/harddaysengine/app/audio.py`, `tests/unit/test_audio_mixer.py`):**
   - Implement the 50 Hz 4-voice waveform/envelope synthesizer (`mog` `S_44`/`S_45` per `ARCHITECTURE.md` §6.2),
     `.a` 8SVX sample playback triggered by combat VM opcodes, and `.cmp` ProTracker module playback via `pygame.mixer`.
   - *Accept:* Headless buffer synthesis tests verifying 4-channel PCM generation and sample mixing without requiring audio hardware in CI.
-- **T8.2 Multi-sprite 2.5D scene renderer & HUD (`src/pymoonstone/render/scene.py`, `tests/gl/test_scene_gl.py`):**
+- **T8.2 Multi-sprite 2.5D scene renderer & HUD (`src/harddaysengine/render/scene.py`, `tests/gl/test_scene_gl.py`):**
   - Extend `render/` with Y-sorted 2.5D sprite batching (shadows, corpses, projectiles, knights, monsters, foreground arena obstacles),
     bitmap font text rendering (`.f` / `.font`), and combat/overworld HUD bars.
   - *Accept:* Standalone GL 3.3 tests verifying painter's-algorithm Y-sorting, palette slot swapping, and HUD rendering.
-- **T8.3 Input router, scene coordinator & playable CLI (`src/pymoonstone/app/input.py`, `src/pymoonstone/app/game.py`, `tests/unit/test_game_session.py`):**
+- **T8.3 Input router, scene coordinator & playable CLI (`src/harddaysengine/app/input.py`, `src/harddaysengine/app/game.py`, `tests/unit/test_game_session.py`):**
   - Wire 4-player keyboard/gamepad input (`app/input.py`), scene transitions (Title → Knight Select → Overworld → Arena Combat → Victory),
-    and `uv run pymoonstone` playable entry point with deterministic replay recording/verification (`--record` / `--replay`).
+    and `uv run harddaysengine` playable entry point with deterministic replay recording/verification (`--record` / `--replay`).
   - *Accept:* End-to-end headless session test running a scripted overworld + combat encounter with 100% deterministic state hash.
 
 ### Phase 11: Original-model rebuild of fights, overworld and places
@@ -322,5 +322,5 @@ can be finished (the remaining T11.10 handlers, T11.14, T11.22 to T11.24).
 To prevent merge conflicts when running a swarm of parallel agents:
 1. **One task (`T<id>`) per worker** (or tightly coupled pair by explicit assignment), using `workspace: "share"` for authors editing code.
 2. **Disjoint file ownership:** each task in Phases 5–8 lists its target module and test file. Workers must not modify files owned by another active `IN PROGRESS` task without coordinator approval.
-3. **`docs/PROGRESS.md` & `src/pymoonstone/<layer>/__init__.py`:** workers update only their own row in `PROGRESS.md` (or report back to the coordinator to land status updates and `__init__.py` re-exports cleanly).
+3. **`docs/PROGRESS.md` & `src/harddaysengine/<layer>/__init__.py`:** workers update only their own row in `PROGRESS.md` (or report back to the coordinator to land status updates and `__init__.py` re-exports cleanly).
 4. **Full gate before handoff:** every worker must run `uv run python scripts/quality_gate.py` in its workspace before reporting completion.

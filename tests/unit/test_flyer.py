@@ -4,10 +4,10 @@ from dataclasses import replace
 
 import pytest
 
-from pymoonstone.sim.fight import Fight, Restart
-from pymoonstone.sim.fight_ai.flyer import FLYER_TYPE, FlyerRules, flyer_handler
-from pymoonstone.sim.m68k import u16
-from pymoonstone.sim.rng import Rng
+from harddaysengine.sim.fight import Fight, Restart
+from harddaysengine.sim.fight_ai.flyer import FLYER_TYPE, FlyerRules, flyer_handler
+from harddaysengine.sim.m68k import u16
+from harddaysengine.sim.rng import Rng
 from tests.unit.brawler_setup import make_trogg_fight
 from tests.unit.knight_setup import RULES
 

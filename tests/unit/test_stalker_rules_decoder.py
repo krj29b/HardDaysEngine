@@ -5,11 +5,11 @@ import zlib
 
 import pytest
 
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
-from pymoonstone.assets.mog_code import MogCode
-from pymoonstone.assets.screen_fx import shake_rules
-from pymoonstone.assets.stalker_rules import _steps
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
+from harddaysengine.assets.mog_code import MogCode
+from harddaysengine.assets.screen_fx import shake_rules
+from harddaysengine.assets.stalker_rules import _steps
 
 
 def _mog(*, right: int = 0x800, reload: int = 2, last: int = 0xFFFF) -> MogCode:

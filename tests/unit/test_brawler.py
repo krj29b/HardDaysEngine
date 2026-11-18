@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.sim.fight import END, KEEP, Fight, Restart
-from pymoonstone.sim.fight_ai.brawler import (
+from harddaysengine.sim.fight import END, KEEP, Fight, Restart
+from harddaysengine.sim.fight_ai.brawler import (
     AXE_TYPE,
     AXE_TYPE_2,
     BRAWLER_TYPES,
@@ -16,8 +16,8 @@ from pymoonstone.sim.fight_ai.brawler import (
     cooldown,
     set_cooldown,
 )
-from pymoonstone.sim.fight_moves import LEFT, RIGHT, UP
-from pymoonstone.sim.rng import Rng
+from harddaysengine.sim.fight_moves import LEFT, RIGHT, UP
+from harddaysengine.sim.rng import Rng
 from tests.unit.brawler_setup import (
     BRAWLER,
     SIDE_SCRIPTS,

@@ -2,8 +2,8 @@
 
 from dataclasses import fields
 
-from pymoonstone.sim.fight import DRAGON, Fight, ScriptTables
-from pymoonstone.sim.fight_ai.dragon import (
+from harddaysengine.sim.fight import DRAGON, Fight, ScriptTables
+from harddaysengine.sim.fight_ai.dragon import (
     DRAGON_TYPE,
     PART_TYPE,
     DragonFlight,
@@ -11,8 +11,8 @@ from pymoonstone.sim.fight_ai.dragon import (
     DragonScripts,
     install_dragon,
 )
-from pymoonstone.sim.fight_ai.effects import HitSparkRules
-from pymoonstone.sim.trajectory import FlightRules
+from harddaysengine.sim.fight_ai.effects import HitSparkRules
+from harddaysengine.sim.trajectory import FlightRules
 from tests.unit.knight_setup import RULES, make_fight
 
 SCRIPTS = DragonScripts(**{f.name: 300 + i for i, f in enumerate(fields(DragonScripts))})

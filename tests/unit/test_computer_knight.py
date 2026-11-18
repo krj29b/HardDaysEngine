@@ -4,11 +4,11 @@ from dataclasses import replace
 
 import pytest
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import KEEP, Fight, FightError, HandlerResult, Restart
-from pymoonstone.sim.fight_ai.approach import ApproachRules
-from pymoonstone.sim.fight_ai.knight import ComputerKnightRules, computer_knight_handler
-from pymoonstone.sim.rng import Rng
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import KEEP, Fight, FightError, HandlerResult, Restart
+from harddaysengine.sim.fight_ai.approach import ApproachRules
+from harddaysengine.sim.fight_ai.knight import ComputerKnightRules, computer_knight_handler
+from harddaysengine.sim.rng import Rng
 from tests.unit.knight_setup import RULES as KNIGHT, make_fight
 
 RULES = ComputerKnightRules(

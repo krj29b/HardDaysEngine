@@ -4,11 +4,11 @@ from dataclasses import asdict
 
 import pytest
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.m68k import u16
-from pymoonstone.sim.rewards import wizard_gift
-from pymoonstone.sim.turns import TurnCells, TurnResult, advance, clock, overnight
-from pymoonstone.sim.types import KnightId
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.m68k import u16
+from harddaysengine.sim.rewards import wizard_gift
+from harddaysengine.sim.turns import TurnCells, TurnResult, advance, clock, overnight
+from harddaysengine.sim.types import KnightId
 from tests.unit.map_setup import make_world
 from tests.unit.turn_setup import TURN_RULES
 

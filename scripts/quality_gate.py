@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Strict Quality Gate runner for pymoonstone.
+"""Strict Quality Gate runner for harddaysengine.
 
 Every step must exit 0. ``radon cc`` always exits 0 by itself, so its step runs radon in JSON
 mode and fails when any block is graded C or worse (cyclomatic complexity > 10).
@@ -35,7 +35,7 @@ def _command(cmd: list[str]) -> Callable[[], int]:
 def _radon_gate() -> int:
     """Fail when any function, method or class is graded C or worse by radon."""
     proc = subprocess.run(
-        ["uv", "run", "radon", "cc", "src/pymoonstone", "-j"],
+        ["uv", "run", "radon", "cc", "src/harddaysengine", "-j"],
         check=False,
         capture_output=True,
         text=True,
@@ -74,7 +74,7 @@ STEPS: tuple[GateStep, ...] = (
     GateStep("Mypy Strict Type Check", _command(["uv", "run", "mypy", "src"])),
     GateStep("Import-Linter Architectural Boundaries", _command(["uv", "run", "lint-imports"])),
     GateStep("Radon Cyclomatic Complexity Gate (Grade A/B only)", _radon_gate),
-    GateStep("Vulture Dead Code Check", _command(["uv", "run", "vulture", "src/pymoonstone"])),
+    GateStep("Vulture Dead Code Check", _command(["uv", "run", "vulture", "src/harddaysengine"])),
     GateStep("Pytest Deterministic Test Suite", _command(["uv", "run", "pytest", "-m", "not gl"])),
 )
 
@@ -87,7 +87,7 @@ def main() -> int:
             print(f"\n[FAILED] Quality Gate halted at: {step.name}", file=sys.stderr)
             return returncode
 
-    print("\n=== [PASSED] All pymoonstone Quality Gates succeeded. ===")
+    print("\n=== [PASSED] All harddaysengine Quality Gates succeeded. ===")
     return 0
 
 

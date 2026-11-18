@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from pymoonstone.app.audit import AuditRig
-from pymoonstone.app.game import GameScene, GameSession
-from pymoonstone.app.input import InputFrame, PlayerInput
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.hunk import parse_hunk_executable
-from pymoonstone.assets.shop_data import parse_shop_rules, parse_stock_rules
-from pymoonstone.sim.types import KnightId
+from harddaysengine.app.audit import AuditRig
+from harddaysengine.app.game import GameScene, GameSession
+from harddaysengine.app.input import InputFrame, PlayerInput
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.assets.shop_data import parse_shop_rules, parse_stock_rules
+from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
     from pathlib import Path

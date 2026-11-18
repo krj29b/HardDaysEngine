@@ -1,6 +1,6 @@
 """Invented loop operands for original fight setup tests (§10.24)."""
 
-from pymoonstone.sim.fight_setup import FightSetupRules
+from harddaysengine.sim.fight_setup import FightSetupRules
 
 SETUP = FightSetupRules(
     frame_vbls=4,

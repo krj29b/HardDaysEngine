@@ -4,8 +4,8 @@ from dataclasses import replace
 
 import pytest
 
-from pymoonstone.sim.fight import END, KEEP, Fight, Restart
-from pymoonstone.sim.fight_ai.caster import (
+from harddaysengine.sim.fight import END, KEEP, Fight, Restart
+from harddaysengine.sim.fight_ai.caster import (
     GRABBED,
     HOLD,
     INITIAL,
@@ -16,8 +16,8 @@ from pymoonstone.sim.fight_ai.caster import (
     THROW,
     caster_handler,
 )
-from pymoonstone.sim.fight_moves import DOWN, FIRE
-from pymoonstone.sim.m68k import u16
+from harddaysengine.sim.fight_moves import DOWN, FIRE
+from harddaysengine.sim.m68k import u16
 from tests.unit.caster_setup import CASTER, SCRIPTS, make_caster
 from tests.unit.knight_setup import RULES
 

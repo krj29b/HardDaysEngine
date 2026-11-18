@@ -9,24 +9,24 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.fight_audit import build_flyer_audit
-from pymoonstone.app.fight_runtime import FightLoader, FightRuntime
-from pymoonstone.app.game import GameSession
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.flyer_rules import parse_flyer_rules
-from pymoonstone.assets.hunk import parse_hunk_executable
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import FIGHTER_DIED, Fight, fighter_died
-from pymoonstone.sim.inventory import Inventory
-from pymoonstone.sim.m68k import s16
-from pymoonstone.sim.rng import Rng
+from harddaysengine.app.fight_audit import build_flyer_audit
+from harddaysengine.app.fight_runtime import FightLoader, FightRuntime
+from harddaysengine.app.game import GameSession
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.flyer_rules import parse_flyer_rules
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import FIGHTER_DIED, Fight, fighter_died
+from harddaysengine.sim.inventory import Inventory
+from harddaysengine.sim.m68k import s16
+from harddaysengine.sim.rng import Rng
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pymoonstone.sim.fight_script import RoutineCall
+    from harddaysengine.sim.fight_script import RoutineCall
 
 pytestmark = pytest.mark.adf
 

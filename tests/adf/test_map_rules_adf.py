@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.game import GameScene, GameSession
-from pymoonstone.app.input import InputFrame, PlayerInput
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.hunk import parse_hunk_executable
-from pymoonstone.assets.mog_code import MogCode
-from pymoonstone.sim.overworld import list_rows, scan
-from pymoonstone.sim.types import KnightId
+from harddaysengine.app.game import GameScene, GameSession
+from harddaysengine.app.input import InputFrame, PlayerInput
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.assets.mog_code import MogCode
+from harddaysengine.sim.overworld import list_rows, scan
+from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -1,6 +1,6 @@
 """Explicit synthetic map-AI prices and town targets (§11.20)."""
 
-from pymoonstone.sim.ai_map_state import MapAiRules
+from harddaysengine.sim.ai_map_state import MapAiRules
 
 AI_RULES = MapAiRules(
     engage=25,

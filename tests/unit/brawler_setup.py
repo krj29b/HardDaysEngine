@@ -6,9 +6,9 @@ passes proves the code reads the rule record, not a constant of its own.
 
 from __future__ import annotations
 
-from pymoonstone.sim.fight import Fight, ScriptTables
-from pymoonstone.sim.fight_ai.approach import ApproachRules
-from pymoonstone.sim.fight_ai.brawler import AXE_TYPE, BrawlerRules, install_brawler
+from harddaysengine.sim.fight import Fight, ScriptTables
+from harddaysengine.sim.fight_ai.approach import ApproachRules
+from harddaysengine.sim.fight_ai.brawler import AXE_TYPE, BrawlerRules, install_brawler
 from tests.unit.knight_setup import RULES, make_fight
 
 # Eight {x, y} pairs per table; phases past the third pair are distinct too.

@@ -9,21 +9,21 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.fight_audit import build_snatcher_audit
-from pymoonstone.app.fight_runtime import FightLoader, FightRuntime
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.hunk import parse_hunk_executable
-from pymoonstone.assets.snatcher_rules import parse_snatcher_rules
-from pymoonstone.sim.fight import FIGHTER_DIED, Fight, fighter_died
-from pymoonstone.sim.fight_ai.snatcher import GONE
-from pymoonstone.sim.m68k import s16
+from harddaysengine.app.fight_audit import build_snatcher_audit
+from harddaysengine.app.fight_runtime import FightLoader, FightRuntime
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.assets.snatcher_rules import parse_snatcher_rules
+from harddaysengine.sim.fight import FIGHTER_DIED, Fight, fighter_died
+from harddaysengine.sim.fight_ai.snatcher import GONE
+from harddaysengine.sim.m68k import s16
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pymoonstone.sim.fight_script import RoutineCall
+    from harddaysengine.sim.fight_script import RoutineCall
 
 pytestmark = pytest.mark.adf
 

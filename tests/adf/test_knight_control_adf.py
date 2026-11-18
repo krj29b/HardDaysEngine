@@ -16,10 +16,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.fight_defs import FightDefs, parse_fight_defs
-from pymoonstone.assets.fight_program import (
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.fight_defs import FightDefs, parse_fight_defs
+from harddaysengine.assets.fight_program import (
     KNIGHT_LIST,
     cel_files,
     cel_shapes,
@@ -28,19 +28,19 @@ from pymoonstone.assets.fight_program import (
     script_image,
     script_tables,
 )
-from pymoonstone.assets.fighter_rules import parse_knight_rules
-from pymoonstone.assets.hunk import parse_hunk_executable
-from pymoonstone.assets.mog_code import MogCode
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import POOL_FIRST, Fight, FightConstants
-from pymoonstone.sim.fighter_rules import HurtRule, KnightRules
-from pymoonstone.sim.fighters import KNIGHT_TYPE, install_knight_control
-from pymoonstone.sim.inventory import Inventory
+from harddaysengine.assets.fighter_rules import parse_knight_rules
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.assets.mog_code import MogCode
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import POOL_FIRST, Fight, FightConstants
+from harddaysengine.sim.fighter_rules import HurtRule, KnightRules
+from harddaysengine.sim.fighters import KNIGHT_TYPE, install_knight_control
+from harddaysengine.sim.inventory import Inventory
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pymoonstone.sim.fight_script import CelShape, Draw, ScriptImage
+    from harddaysengine.sim.fight_script import CelShape, Draw, ScriptImage
 
 pytestmark = pytest.mark.adf
 

@@ -4,9 +4,9 @@ from dataclasses import replace
 
 import pytest
 
-from pymoonstone.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
-from pymoonstone.sim.map_rules import MapColors, MapNode
-from pymoonstone.sim.overworld import (
+from harddaysengine.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
+from harddaysengine.sim.map_rules import MapColors, MapNode
+from harddaysengine.sim.overworld import (
     Arrival,
     MapSprite,
     boxes_touch,
@@ -16,7 +16,7 @@ from pymoonstone.sim.overworld import (
     open_menu,
     scan,
 )
-from pymoonstone.sim.types import KnightId
+from harddaysengine.sim.types import KnightId
 from tests.unit.map_setup import RULES, make_world
 
 
@@ -226,7 +226,7 @@ def test_mode_restore_and_random_spot_draw_order() -> None:
     world.start_mode(ambush=True)
     world.frame(FIRE)
     assert not world.travel and not world.ambush
-    from pymoonstone.sim.rng import Rng
+    from harddaysengine.sim.rng import Rng
 
     expected = Rng(world.prng.state)
     x, y = (expected.draw() & 255) + 32, (expected.draw() & 127) + 36

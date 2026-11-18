@@ -1,6 +1,6 @@
 """Fabricated calendar/gift/flight tables for headless tests (§11.19)."""
 
-from pymoonstone.sim.turn_rules import GiftRules, MapDragonRules, TextLine, TurnRules
+from harddaysengine.sim.turn_rules import GiftRules, MapDragonRules, TextLine, TurnRules
 
 GIFTS = GiftRules(
     ((33, 6), (66, 0), (100, 2)), (70, 71, 72) * 3, (20, 60, 95), tuple(range(0, 24, 2))

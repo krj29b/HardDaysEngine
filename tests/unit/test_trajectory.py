@@ -4,8 +4,8 @@ from dataclasses import asdict
 
 import pytest
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.trajectory import (
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.trajectory import (
     FlightRequest,
     FlightSlot,
     FlightState,

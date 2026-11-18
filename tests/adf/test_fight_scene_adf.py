@@ -7,11 +7,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from pymoonstone.app.audit import AuditRig
-from pymoonstone.app.fight_audit import TROGG_ARENAS, build_fight_audit, fight_audit_frames
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.sim.m68k import s16
+from harddaysengine.app.audit import AuditRig
+from harddaysengine.app.fight_audit import TROGG_ARENAS, build_fight_audit, fight_audit_frames
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.sim.m68k import s16
 
 if TYPE_CHECKING:
     from pathlib import Path

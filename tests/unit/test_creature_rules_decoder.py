@@ -7,10 +7,10 @@ import zlib
 
 import pytest
 
-from pymoonstone.assets.creature_rules import HELPER_HUNK, _check_helper, _moveq
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
-from pymoonstone.assets.mog_code import DATA_HUNK, MogCode
+from harddaysengine.assets.creature_rules import HELPER_HUNK, _check_helper, _moveq
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
+from harddaysengine.assets.mog_code import DATA_HUNK, MogCode
 
 _CODE = struct.pack(
     ">3H 3H H H H 3H",

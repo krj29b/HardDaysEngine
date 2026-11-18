@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight_contact import Contact, contact_scan, contact_test, depth_close, overlap
-from pymoonstone.sim.fight_script import (
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight_contact import (
+    Contact,
+    contact_scan,
+    contact_test,
+    depth_close,
+    overlap,
+)
+from harddaysengine.sim.fight_script import (
     CelShape,
     FrameShape,
     HitShape,

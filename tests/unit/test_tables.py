@@ -1,4 +1,4 @@
-"""Unit tests for runtime executable table decoders (`src/pymoonstone/assets/tables.py`)."""
+"""Unit tests for runtime executable table decoders (`src/harddaysengine/assets/tables.py`)."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import pytest
 if TYPE_CHECKING:
     from pathlib import Path
 
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.hunk import (
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.hunk import (
     HUNK_CODE,
     HUNK_DATA,
     HUNK_END,
@@ -20,7 +20,7 @@ from pymoonstone.assets.hunk import (
     HunkFormatError,
     parse_hunk_executable,
 )
-from pymoonstone.assets.tables import (
+from harddaysengine.assets.tables import (
     BUILTIN_FONT_BYTES,
     BUILTIN_FONT_GLYPHS,
     MOG_ACTION_COUNT,
@@ -296,7 +296,7 @@ def test_runtime_tables_from_real_disks(adf_dir: Path) -> None:
 
 
 def test_parse_knight_and_monster_script_tables_synthetic() -> None:
-    from pymoonstone.assets.hunk import HUNK_BSS, HunkSection
+    from harddaysengine.assets.hunk import HUNK_BSS, HunkSection
 
     # Build a synthetic S_0 with LEA S_1+100, A0; MOVE.L #S_4+400, 4(A0); RTS
     # followed by Knight init (22(A1)=S_4+400, 34(A1)=S_1+100) + RTS

@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from pymoonstone.app.audit import AUDIT_SCENARIOS, AuditRig, AuditShot, build_contact_sheet
-from pymoonstone.render.renderer import CANVAS_HEIGHT, CANVAS_WIDTH
+from harddaysengine.app.audit import AUDIT_SCENARIOS, AuditRig, AuditShot, build_contact_sheet
+from harddaysengine.render.renderer import CANVAS_HEIGHT, CANVAS_WIDTH
 
 if TYPE_CHECKING:
     from pathlib import Path

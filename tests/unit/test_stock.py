@@ -4,9 +4,9 @@ from dataclasses import asdict, replace
 
 import pytest
 
-from pymoonstone.sim.inventory import Inventory
-from pymoonstone.sim.shop_types import StockRules
-from pymoonstone.sim.stock import initialize
+from harddaysengine.sim.inventory import Inventory
+from harddaysengine.sim.shop_types import StockRules
+from harddaysengine.sim.stock import initialize
 from tests.unit.sheet_setup import sheet
 from tests.unit.turn_setup import GIFTS
 

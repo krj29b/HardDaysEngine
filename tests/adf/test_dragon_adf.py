@@ -10,27 +10,27 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.fight_audit import build_dragon_audit
-from pymoonstone.app.fight_runtime import FightLoader, FightRuntime
-from pymoonstone.app.game import GameScene, GameSession
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.dragon_rules import parse_dragon_rules
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import DRAGON, END_FIGHT, Fight, HandlerResult, Restart, end_fight
-from pymoonstone.sim.fight_ai.dragon import DRAGON_TYPE, PART_TYPE
-from pymoonstone.sim.inventory import Inventory
-from pymoonstone.sim.m68k import s16
-from pymoonstone.sim.overworld import EncounterTrigger, MoonPhase, TriggerKind
-from pymoonstone.sim.rng import Rng
-from pymoonstone.sim.types import KnightId
+from harddaysengine.app.fight_audit import build_dragon_audit
+from harddaysengine.app.fight_runtime import FightLoader, FightRuntime
+from harddaysengine.app.game import GameScene, GameSession
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.dragon_rules import parse_dragon_rules
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import DRAGON, END_FIGHT, Fight, HandlerResult, Restart, end_fight
+from harddaysengine.sim.fight_ai.dragon import DRAGON_TYPE, PART_TYPE
+from harddaysengine.sim.inventory import Inventory
+from harddaysengine.sim.m68k import s16
+from harddaysengine.sim.overworld import EncounterTrigger, MoonPhase, TriggerKind
+from harddaysengine.sim.rng import Rng
+from harddaysengine.sim.types import KnightId
 from tests.adf.test_fight_defs_adf import Walker, _arena_sets, _check
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pymoonstone.sim.fight_script import RoutineCall
+    from harddaysengine.sim.fight_script import RoutineCall
 
 pytestmark = pytest.mark.adf
 

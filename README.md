@@ -1,4 +1,4 @@
-# pymoonstone
+# HardDaysEngine
 
 A clean-room Python 3.12+ reimplementation of the 1991 Amiga game *Moonstone: A Hard Days Knight* (Mindscape / Rob Anderson), built around a deterministic 50 Hz integer simulation core and a ModernGL + `pygame-ce` presentation layer.
 
@@ -6,17 +6,17 @@ A clean-room Python 3.12+ reimplementation of the 1991 Amiga game *Moonstone: A 
 
 The codebase is organized into strict unidirectional layers (`cli -> app -> render -> assets -> sim`):
 
-- **Simulation (`src/pymoonstone/sim/`)**: deterministic 50 Hz integer/fixed-point kernel (persistent combat jobs and handlers, overworld, locations, palette FX, PRNG). No floats, no wall clock, no `random`, no I/O.
-- **Assets (`src/pymoonstone/assets/`)**: reads original Amiga `.adf` disk images (OFS) at runtime, unpacks RNC1/LZSS streams, and decodes pictures, cels, `collide.hit` attack sets, `.t` arena layouts, `program`/`mog` hunk tables, and audio banks.
-- **Render (`src/pymoonstone/render/`)**: ModernGL (OpenGL 3.3 core) `320x256` virtual canvas, indexed palette textures, optional CRT post-process, and debug hitbox overlay.
-- **App & CLI (`src/pymoonstone/app/`, `src/pymoonstone/cli/`)**: `pygame-ce` window host, 50 Hz fixed-timestep loop, keyboard/gamepad input, audio mixer, and CLI entry points.
+- **Simulation (`src/harddaysengine/sim/`)**: deterministic 50 Hz integer/fixed-point kernel (persistent combat jobs and handlers, overworld, locations, palette FX, PRNG). No floats, no wall clock, no `random`, no I/O.
+- **Assets (`src/harddaysengine/assets/`)**: reads original Amiga `.adf` disk images (OFS) at runtime, unpacks RNC1/LZSS streams, and decodes pictures, cels, `collide.hit` attack sets, `.t` arena layouts, `program`/`mog` hunk tables, and audio banks.
+- **Render (`src/harddaysengine/render/`)**: ModernGL (OpenGL 3.3 core) `320x256` virtual canvas, indexed palette textures, optional CRT post-process, and debug hitbox overlay.
+- **App & CLI (`src/harddaysengine/app/`, `src/harddaysengine/cli/`)**: `pygame-ce` window host, 50 Hz fixed-timestep loop, keyboard/gamepad input, audio mixer, and CLI entry points.
 
 ## Bring Your Own Amiga Disks
 
 This repository contains **no game data**. Place your three original Amiga disk images (901,120-byte `.adf` files, any filenames) into `./disks/`, or specify their location using:
 
 1. `--adf-dir <path>`
-2. `PYMOONSTONE_ADF_DIR` environment variable
+2. `HARDDAYSENGINE_ADF_DIR` environment variable
 3. `adf_dir = "<path>"` in `config.toml`
 
 Never commit `.adf` images or anything extracted from them.
@@ -25,8 +25,8 @@ Never commit `.adf` images or anything extracted from them.
 
 ```powershell
 uv sync                                  # install runtime + dev dependencies (Python 3.12)
-uv run pymoonstone --list-disks          # verify your three .adf images are detected
-uv run pymoonstone                       # launch the game (default 3x scale)
+uv run harddaysengine --list-disks          # verify your three .adf images are detected
+uv run harddaysengine                       # launch the game (default 3x scale)
 ```
 
 Useful CLI flags:
@@ -65,6 +65,6 @@ See [AGENTS.md](AGENTS.md) for contributor/agent rules and [docs/ARCHITECTURE.md
 
 MIT License — see [LICENSE](LICENSE).
 
-*Moonstone: A Hard Days Knight* is (c) 1991 Mindscape / Rob Anderson. This license covers the `pymoonstone` source code only, not the original game or any data extracted from it. External reference projects (`moonstone-ace` and `openmoonstone`) are not included in this repository and were consulted as specifications only (see [docs/DECISIONS.md](docs/DECISIONS.md), ADR-001).
+*Moonstone: A Hard Days Knight* is (c) 1991 Mindscape / Rob Anderson. This license covers the `harddaysengine` source code only, not the original game or any data extracted from it. External reference projects (`moonstone-ace` and `openmoonstone`) are not included in this repository and were consulted as specifications only (see [docs/DECISIONS.md](docs/DECISIONS.md), ADR-001).
 
 This is an independent, unofficial fan project. It is not affiliated with, endorsed by, or sponsored by Mindscape, Rob Anderson, or any current rights holder of *Moonstone*. All trademarks belong to their respective owners; the game's title is used only to describe compatibility. You must own the original game to use this software.

@@ -17,11 +17,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.creature_rules import parse_brawler_rules
-from pymoonstone.assets.fight_defs import ArenaDef, FightDefs, SpawnEntry, parse_fight_defs
-from pymoonstone.assets.fight_program import (
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.creature_rules import parse_brawler_rules
+from harddaysengine.assets.fight_defs import ArenaDef, FightDefs, SpawnEntry, parse_fight_defs
+from harddaysengine.assets.fight_program import (
     CREATURE_LIST,
     KNIGHT_LIST,
     cel_files,
@@ -31,11 +31,11 @@ from pymoonstone.assets.fight_program import (
     script_image,
     script_tables,
 )
-from pymoonstone.assets.fighter_rules import parse_knight_rules
-from pymoonstone.assets.hunk import parse_hunk_executable
-from pymoonstone.assets.mog_code import MogCode
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import (
+from harddaysengine.assets.fighter_rules import parse_knight_rules
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.assets.mog_code import MogCode
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import (
     FIGHTER_DIED,
     Fight,
     Handler,
@@ -44,18 +44,18 @@ from pymoonstone.sim.fight import (
     TableKeys,
     fighter_died,
 )
-from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES, BrawlerRules, install_brawler
-from pymoonstone.sim.fighters import KNIGHT_TYPE, install_knight_control
-from pymoonstone.sim.inventory import Inventory
-from pymoonstone.sim.m68k import s16
-from pymoonstone.sim.rng import Rng
+from harddaysengine.sim.fight_ai.brawler import BRAWLER_TYPES, BrawlerRules, install_brawler
+from harddaysengine.sim.fighters import KNIGHT_TYPE, install_knight_control
+from harddaysengine.sim.inventory import Inventory
+from harddaysengine.sim.m68k import s16
+from harddaysengine.sim.rng import Rng
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from pymoonstone.sim.fight_script import RoutineCall
-    from pymoonstone.sim.fighter_rules import KnightRules
+    from harddaysengine.sim.fight_script import RoutineCall
+    from harddaysengine.sim.fighter_rules import KnightRules
 
 pytestmark = pytest.mark.adf
 

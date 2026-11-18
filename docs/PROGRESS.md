@@ -7,7 +7,7 @@ and the Remediation Plan in `docs/PLAYABILITY_AUDIT.md`.
 
 | ID | Task | Deps | Status | Notes |
 |---|---|---|---|---|
-| T1.1 | Scaffold | – | DONE | Layers `cli/app/render/assets/sim`; Python pinned to 3.12; `uv sync` installs 60 packages (amitools 0.9.0 builds from sdist on Windows). The `pymoonstone-extract` / `pymoonstone-inspect` console scripts are declared but their modules land in T3.6 / T4.4. |
+| T1.1 | Scaffold | – | DONE | Layers `cli/app/render/assets/sim`; Python pinned to 3.12; `uv sync` installs 60 packages (amitools 0.9.0 builds from sdist on Windows). The `harddaysengine-extract` / `harddaysengine-inspect` console scripts are declared but their modules land in T3.6 / T4.4. |
 | T1.2 | Agent governance | T1.1 | DONE | `AGENTS.md` (protocol), `GEMINI.md` (pointer), `DEAD_ENDS.md`, plan, progress, ADRs. |
 | T1.3 | Quality gate | T1.1 | DONE | `radon cc` always exits 0, so the gate parses `radon cc -j` and fails on rank ≥ C. Ruff's McCabe misses some complexity: boolean operators aren't counted, so a probe scoring 12 in radon passed ruff C901. Removed the `ANN101`/`ANN102` ignores (rules removed from ruff, which warned). Format and lint now cover `scripts/`. The sim ban list in `.importlinter` was extended with `random`, `time`, `datetime`, `os`, `io`, `threading`, `secrets`, `uuid`. |
 | T1.4 | Config & ADF discovery | T1.1 | DONE | `app/config.py`, `--list-disks`, `adf_dir` fixture. The real disk-set test (`-m adf`) passes locally. |
@@ -26,7 +26,7 @@ and the Remediation Plan in `docs/PLAYABILITY_AUDIT.md`.
 | T3.3 | Picture & cel decoders | T2.3, T3.2 | DONE | `assets/palette.py`, `picture.py`, `cel.py`. |
 | T3.4 | collide.hit & frame metadata | T2.4 | DONE | `assets/hit.py` & `assets/arena.py`. |
 | T3.5 | Audio decoders | T2.6 | DONE | `assets/audio.py` & `assets/hunk.py`. |
-| T3.6 | Extractor & manifest | T3.1–T3.5 | DONE | `pymoonstone-extract` / `--extract-assets`. |
+| T3.6 | Extractor & manifest | T3.1–T3.5 | DONE | `harddaysengine-extract` / `--extract-assets`. |
 | T3.7 | Headless asset tests | T3.6 | DONE | Synthetic + `@pytest.mark.adf`. |
 | T4.1 | Renderer core | T3.3 | DONE | `render/renderer.py` (OpenGL 3.3, 320×256). |
 | T4.2 | Hitbox overlay | T4.1, T3.4 | DONE | `render/overlay.py`. |
@@ -59,7 +59,7 @@ Source of truth: `docs/PLAYABILITY_AUDIT.md` (Remediation Plan v2). Goal: make t
 |---|---|---|---|---|
 | T10.1 | Real `mog` fight-script pointer tables | T5.2, T6.1, T9.4 | DONE | Verified `KnightScriptTables` (`idle=0x1064`, `alt=0x1080`, 9 `action_scripts`, 9 `hurt_scripts`, `walk_scripts`) and 11 `MonsterScriptTables` decoded from `mog` `S_0`/`S_1`/`S_4`; all 12 `KnightAction`s execute real `S_4` scripts via `combat_bridge.compose_knight_pieces` & `GameSession` with multi-part draw lists (`test_tables.py`, `test_combat_bridge.py`, `test_playability_v2.py`: 34 passed). |
 | T10.2 | Multi-part knight & monster composition | T10.1, T8.2 | DONE | `compose_knight_pieces` (`KN1.ob..KN4.ob`) + multi-slot fallback when `mog_s4=None` (`_fallback_multipart_knight_pieces`), and `compose_monster_pieces` + `get_monster_cels` (`scene_assets.py`) assemble layered bodies for knights and major monsters. |
-| T10.3 | Top-left sprite anchor math | T4.1, T10.2 | DONE | Added `top_left: bool = False` to `SceneSprite`, `compute_sprite_draw_origin`, `MoonstoneRenderer.render_to_canvas`, and `cel_screen_origin`; fight-script draws position at top-left `(X+dx, Z-alt+dy)` (`tests/gl/test_scene_gl.py`, `test_renderer_gl.py`). |
+| T10.3 | Top-left sprite anchor math | T4.1, T10.2 | DONE | Added `top_left: bool = False` to `SceneSprite`, `compute_sprite_draw_origin`, `HardDaysRenderer.render_to_canvas`, and `cel_screen_origin`; fight-script draws position at top-left `(X+dx, Z-alt+dy)` (`tests/gl/test_scene_gl.py`, `test_renderer_gl.py`). |
 | T10.4 | Melee hit detection & winnable combat | T5.3, T10.2, T10.3 | DONE | Restricted `kn4` `collide.hit` matching to `cel_slot == 3` (`KN4.ob`) `DRAW_FLAG_ATTACK` pieces; kept `base.defense` in `params_from_creature_node`; verified Trogg defeat on real disks (`test_adf_knight_attacks_and_defeats_trogg`). |
 | T10.5 | Real-disk overworld graph & moves_per_turn | T7.1, T9.1 | DONE | `build_overworld_graph` populates canonical `ROAD` nodes alongside `mog` `S_2` sites + 4 lairs (`35` nodes) with `moves_per_turn = 3`; `test_adf_overworld_3_moves_and_stay_in_overworld` passes. |
 | T10.6 | Knight class & creature combat palettes | T5.4, T9.6 | DONE | `_combat_palette` patches indices `6..8` for active `KnightId` class colors and `9..15` for creature scene colors (`15` = blood red); `_overworld_palette` replaces `test[8]` magenta index `31` with a grayscale highlight matching `mi.c` frames (`test_adf_overworld_marker_frames_and_highlight_palette`). |

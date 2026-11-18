@@ -6,15 +6,15 @@ import moderngl
 import numpy as np
 import pytest
 
-from pymoonstone.assets.cel import CelFrame, CelFrameMeta, DecodedCel
-from pymoonstone.assets.palette import default_combat_palette
-from pymoonstone.render.renderer import (
+from harddaysengine.assets.cel import CelFrame, CelFrameMeta, DecodedCel
+from harddaysengine.assets.palette import default_combat_palette
+from harddaysengine.render.renderer import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
     PLAYFIELD_Y_OFFSET,
-    MoonstoneRenderer,
+    HardDaysRenderer,
 )
-from pymoonstone.render.scene import (
+from harddaysengine.render.scene import (
     LAYER_ACTOR,
     LAYER_CORPSE,
     LAYER_FOREGROUND,
@@ -32,7 +32,7 @@ from pymoonstone.render.scene import (
     render_overworld_hud,
     sort_sprites_painter,
 )
-from pymoonstone.sim.palette_fx import PaletteFxState
+from harddaysengine.sim.palette_fx import PaletteFxState
 
 pytestmark = pytest.mark.gl
 
@@ -83,7 +83,7 @@ def test_sort_sprites_painter_depth_and_layers() -> None:
 
 def test_scene_painter_overlap_altitude_and_gl_output() -> None:
     ctx = moderngl.create_standalone_context(require=330)
-    renderer = MoonstoneRenderer(ctx)
+    renderer = HardDaysRenderer(ctx)
     scene = SceneRenderer(renderer)
     try:
         palette = default_combat_palette()
@@ -116,7 +116,7 @@ def test_scene_painter_overlap_altitude_and_gl_output() -> None:
 
 def test_scene_mirrored_sprite_and_palette_fx_bridge() -> None:
     ctx = moderngl.create_standalone_context(require=330)
-    renderer = MoonstoneRenderer(ctx)
+    renderer = HardDaysRenderer(ctx)
     scene = SceneRenderer(renderer)
     try:
         asym = _make_asymmetric_frame()
@@ -150,7 +150,7 @@ def test_scene_mirrored_sprite_and_palette_fx_bridge() -> None:
 
 def test_bitmap_font_cel_loaders_and_hud_rendering_gl() -> None:
     ctx = moderngl.create_standalone_context(require=330)
-    renderer = MoonstoneRenderer(ctx)
+    renderer = HardDaysRenderer(ctx)
     scene = SceneRenderer(renderer)
     try:
         palette = default_combat_palette()
@@ -234,7 +234,7 @@ def test_scene_top_left_anchored_sprite_ignores_hotspot_and_centering() -> None:
     assert compute_sprite_draw_origin(sp) == (45, PLAYFIELD_Y_OFFSET + 63)
 
     ctx = moderngl.create_standalone_context(require=330)
-    renderer = MoonstoneRenderer(ctx)
+    renderer = HardDaysRenderer(ctx)
     scene = SceneRenderer(renderer)
     try:
         palette = default_combat_palette()

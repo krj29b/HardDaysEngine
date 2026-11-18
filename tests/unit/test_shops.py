@@ -5,10 +5,10 @@ from unittest.mock import patch
 
 import pytest
 
-from pymoonstone.sim.sheet_types import SheetRegion
-from pymoonstone.sim.sheets import click, redraw, step
-from pymoonstone.sim.shop_types import ShopRules
-from pymoonstone.sim.shops import market, smith
+from harddaysengine.sim.sheet_types import SheetRegion
+from harddaysengine.sim.sheets import click, redraw, step
+from harddaysengine.sim.shop_types import ShopRules
+from harddaysengine.sim.shops import market, smith
 from tests.unit.sheet_setup import RULES, sheet
 
 SHOP = ShopRules(
@@ -155,7 +155,7 @@ def test_sale_event_follows_redraw() -> None:
     world.inventories[1].counts[0], state.pointer_x = 1, 100
     redraw(state, SHEETS, world)
     region = next(r for r in state.regions if not r.side and r.field == 0 and not r.id)
-    with patch("pymoonstone.sim.sheets.redraw") as rebuilt:
+    with patch("harddaysengine.sim.sheets.redraw") as rebuilt:
         rebuilt.side_effect = lambda *args: state.sounds.append("redraw")
         click(state, SHEETS, world, region)
     assert state.sounds == ["redraw", "sell"]

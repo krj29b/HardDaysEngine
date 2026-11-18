@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.fight_defs import (
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.fight_defs import (
     NOT_A_SCRIPT,
     ActorInit,
     ArenaDef,
@@ -23,8 +23,8 @@ from pymoonstone.assets.fight_defs import (
     FightDefs,
     parse_fight_defs,
 )
-from pymoonstone.assets.hunk import parse_hunk_executable
-from pymoonstone.assets.mog_code import DATA_HUNK, MogCode
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.assets.mog_code import DATA_HUNK, MogCode
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

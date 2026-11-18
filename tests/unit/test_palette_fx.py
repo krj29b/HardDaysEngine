@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pymoonstone.sim.palette_fx import (
+from harddaysengine.sim.palette_fx import (
     BLACK,
     BLOOD_RED,
     FADE_MAX_STEPS,
@@ -275,7 +275,7 @@ def test_set_palette_and_set_color_and_validation_errors() -> None:
 
 
 def test_palette_fx_module_uses_zero_floats_and_zero_true_division() -> None:
-    src = Path("src/pymoonstone/sim/palette_fx.py").read_text(encoding="utf-8")
+    src = Path("src/harddaysengine/sim/palette_fx.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     for node in ast.walk(tree):
         assert not (isinstance(node, ast.Constant) and isinstance(node.value, float | complex))

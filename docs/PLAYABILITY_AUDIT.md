@@ -1,4 +1,4 @@
-# Playability Audit v2 & Remediation Plan (`pymoonstone`)
+# Playability Audit v2 & Remediation Plan (`harddaysengine`)
 
 **Date:** 2026-11-15  
 **Target Commit:** `0db1146` (`main`, post-Remediation Pass 1)  
@@ -9,18 +9,18 @@
 ## 1. Executive Summary
 
 Following the first remediation pass (`1873c05..0db1146`), several presentation and input issues from Audit v1 are demonstrably improved:
-- **Arena `.t` Backdrop Compositing (`src/pymoonstone/assets/arena.py`):** Forest (`fo1.t`), Glen (`gl1.t`), Swamp (`sw1.t`), and Wasteland (`wa1.t`) arenas now dispatch `0x0300` foreground/object tiles to `test[0]`/`test[2]`/`test[3]` and base tiles to `test[1]` with signed `dest_x`/`dest_y` clipping, eliminating the black gaps and grass-block corruption seen in Audit v1.
-- **Main Town Menu Layout (`src/pymoonstone/app/location_screens.py`):** Main town screens (`WaterDeep.PIV` on the left scroll, `HighWood.PIV` on the right scroll) now use the embedded calligraphy artwork labels and align a hollow selection rectangle over the parchment scroll instead of drawing duplicate white ASCII text over the scroll.
-- **Intro Skip & Edge-Triggered Navigation (`src/pymoonstone/app/game.py`):** `SPACE` / `RETURN` / `ESCAPE` skips the intro cleanly, and single directional/confirm taps on the overworld and menus are edge-triggered.
-- **Audio Sample Extraction (`src/pymoonstone/app/scene_assets.py`):** Embedded IFF `8SVX` chunks inside `.a` sound banks now register 59 named sample keys at `16,574 Hz`.
+- **Arena `.t` Backdrop Compositing (`src/harddaysengine/assets/arena.py`):** Forest (`fo1.t`), Glen (`gl1.t`), Swamp (`sw1.t`), and Wasteland (`wa1.t`) arenas now dispatch `0x0300` foreground/object tiles to `test[0]`/`test[2]`/`test[3]` and base tiles to `test[1]` with signed `dest_x`/`dest_y` clipping, eliminating the black gaps and grass-block corruption seen in Audit v1.
+- **Main Town Menu Layout (`src/harddaysengine/app/location_screens.py`):** Main town screens (`WaterDeep.PIV` on the left scroll, `HighWood.PIV` on the right scroll) now use the embedded calligraphy artwork labels and align a hollow selection rectangle over the parchment scroll instead of drawing duplicate white ASCII text over the scroll.
+- **Intro Skip & Edge-Triggered Navigation (`src/harddaysengine/app/game.py`):** `SPACE` / `RETURN` / `ESCAPE` skips the intro cleanly, and single directional/confirm taps on the overworld and menus are edge-triggered.
+- **Audio Sample Extraction (`src/harddaysengine/app/scene_assets.py`):** Embedded IFF `8SVX` chunks inside `.a` sound banks now register 59 named sample keys at `16,574 Hz`.
 
 **Why the game is STILL unplayable at `0db1146`:**
 An empirical frame-by-frame audit across all game states (`MAIN_MENU`, `KNIGHT_SELECT`, `OVERWORLD`, `COMBAT`, `LOCATION`, `STATUS`, `NEW_DAY`) revealed **8 root-cause defects** (5 Critical, 2 High, 1 Medium):
 
 1. **CRITICAL — `mog` Fight Script Execution Always Fails (`_run_mog_action_draws` returns `()`):**
-   - `parse_combat_action_tables` (`src/pymoonstone/assets/tables.py:248-255`) reads `kActionRight` and `kActionLeft` at `S_4[4130]` and `S_4[4152]`. Those tables do **not** contain byte offsets of fight scripts in `S_4`; they contain 11 joystick-direction-to-action-index words (`0, 4, 8, 12, 16, 20, 24, 28, 32` — byte offsets into an 9-entry `BE32` script-pointer table `ulActionScripts` at `Knight+34`).
+   - `parse_combat_action_tables` (`src/harddaysengine/assets/tables.py:248-255`) reads `kActionRight` and `kActionLeft` at `S_4[4130]` and `S_4[4152]`. Those tables do **not** contain byte offsets of fight scripts in `S_4`; they contain 11 joystick-direction-to-action-index words (`0, 4, 8, 12, 16, 20, 24, 28, 32` — byte offsets into an 9-entry `BE32` script-pointer table `ulActionScripts` at `Knight+34`).
    - Passing `28` (`0x1C`) directly as a script PC in `S_4` reads `S_4` header data (`00 6c 00 02...`) instead of the knight fight scripts (`S_4[4198..]`), returning `()` on every action.
-   - Even when pointed at the real `mog` `S_4` scripts, `src/pymoonstone/sim/combat_vm.py` implements **fictitious opcodes** (`0x80` end, `0x81` jump, `0x82` free, `0xFF` 1-byte end-of-frame, raw `cel_slot = op`) instead of the real `mog` fight-script bytecode (`[slot*4][frame][dy:s8][flags][dx:s16]`, 2-byte `$FF $00` frame marker / `$FF $FF` script-end marker, `$80` facing, `$84` jump, `$88` loop1, `$8C` motion block, `$94` loop2, `$98` gore jump, `$A0` move, `$A4` sound, `$B0` engine call, `$B4` ifdead, `$BC` kill, `$C0` frame set, `$D0` reset work, `$FD`/`$FE` loop return).
+   - Even when pointed at the real `mog` `S_4` scripts, `src/harddaysengine/sim/combat_vm.py` implements **fictitious opcodes** (`0x80` end, `0x81` jump, `0x82` free, `0xFF` 1-byte end-of-frame, raw `cel_slot = op`) instead of the real `mog` fight-script bytecode (`[slot*4][frame][dy:s8][flags][dx:s16]`, 2-byte `$FF $00` frame marker / `$FF $FF` script-end marker, `$80` facing, `$84` jump, `$88` loop1, `$8C` motion block, `$94` loop2, `$98` gore jump, `$A0` move, `$A4` sound, `$B0` engine call, `$B4` ifdead, `$BC` kill, `$C0` frame set, `$D0` reset work, `$FD`/`$FE` loop return).
 
 2. **CRITICAL — Knight & Monster Sprites Render as Single Disembodied Limb/Torso Cels:**
    - In Moonstone, both knights (`KN1.ob`..`KN4.ob`) and monsters (`TROGGSpear1.CEL`..`TROGGSpear2.CEL`, etc.) are **multi-part layered sprites** assembled each tick by executing multiple 6-byte draw instructions (`[slot*4][frame][dy:s8][flags][dx:s16]`) before `$FF $00`.
@@ -29,24 +29,24 @@ An empirical frame-by-frame audit across all game states (`MAIN_MENU`, `KNIGHT_S
      - `RUN` at `t=8` and `ROLL` draw `KN1.ob[5]` (`36×19` **detached upper torso** with no legs).
      - `BLOCK` draws `KN1.ob[7]` (`27×27` **detached upper body** with no legs).
      - `OVERHEAD_SLASH`, `THRUST`, and `LOW_SWEEP` at `t=0..5` all draw `KN1.ob[0]` (the static idle stance!).
-   - Likewise, `select_monster_frame` (`src/pymoonstone/app/scene_assets.py:421-427`) cycles raw single frame indices `(offset + (tick // 6) % 4)` in `TROGGSpear1.CEL`, rendering **disembodied Trogg legs/loincloth** with no upper body, head, or spear.
+   - Likewise, `select_monster_frame` (`src/harddaysengine/app/scene_assets.py:421-427`) cycles raw single frame indices `(offset + (tick // 6) % 4)` in `TROGGSpear1.CEL`, rendering **disembodied Trogg legs/loincloth** with no upper body, head, or spear.
 
 3. **CRITICAL — Player Attacks Still Land 0 Hits (`landed_ticks = 0`) & Monsters Stunlock the Player:**
-   - In `resolve_composed_melee_attack` (`src/pymoonstone/app/combat_bridge.py:553-593`), fallback reach (`fallback_reach_x`) is used **only** when `not attacks or not defender_Piece_list`.
+   - In `resolve_composed_melee_attack` (`src/harddaysengine/app/combat_bridge.py:553-593`), fallback reach (`fallback_reach_x`) is used **only** when `not attacks or not defender_Piece_list`.
    - When the knight swings (`OVERHEAD_SLASH`, `THRUST`, `LOW_SWEEP`), fallback `select_knight_body_frame` picks `KN1.ob[0]` (`23×54`) or `KN1.ob[2]` (`21×55`) and attaches `kn4.hit[0]` (`max_x=4, max_y=29`, points at `x=4` inside the knight's own torso) or `kn4.hit[2]` (`x=5..15`).
    - Because `attacks` is non-empty, `resolve_composed_melee_attack` skips `fallback_reach_x` and runs `contact_test` using points at `x=4..15` inside the knight's own body!
    - Meanwhile, the Trogg's melee reach (`66 px`) hits the knight from `x=206 -> 140` and `x=176 -> 140`, putting the knight into `HIT_STUN` before the Trogg ever enters the knight's body box. Over a 40-tick attack test at point-blank combat range, **0 player attacks landed**.
 
 4. **CRITICAL — Sprite Coordinate / Anchor Math Centers Cels (`-w//2, -h//2`) Instead of Top-Left `(X+dx, Y+Z+dy)`:**
-   - Both `cel_screen_origin` (`src/pymoonstone/app/combat_bridge.py:380-385`) and `MoonstoneRenderer._draw_sprite` (`src/pymoonstone/render/renderer.py:262-263`) subtract `w // 2` and `h // 2` from `(x, y)` (when `hot_x == 0`), treating `(x, y)` as the center of every cel frame.
+   - Both `cel_screen_origin` (`src/harddaysengine/app/combat_bridge.py:380-385`) and `HardDaysRenderer._draw_sprite` (`src/harddaysengine/render/renderer.py:262-263`) subtract `w // 2` and `h // 2` from `(x, y)` (when `hot_x == 0`), treating `(x, y)` as the center of every cel frame.
    - In the original Amiga engine (`combat_script.cpp:249-258`), cel frames have no per-frame hotspot in their header (`byte8` is the runtime mirror state bit `0x01`, not `hot_x`!). Every draw command places the frame's **top-left corner** at:
      - `screen_x = X + dx` when facing right, or `screen_x = X - dx - width` when mirrored (facing left).
      - `screen_y = Y + Z + dy` (where `dy` is a negative signed byte placing the cel above the ground baseline `Z`).
    - Centering by `-w//2, -h//2` causes multi-part legs, torsos, and sword blades to float at incompatible heights and misaligns all `collide.hit` coordinates.
 
 5. **CRITICAL — Overworld Still Has Only 13 Nodes and `moves_per_turn = 1` on Real Disks:**
-   - `parse_map_sites` (`src/pymoonstone/assets/tables.py:299-309`) reads `MOG_MAP_SITES_COUNT = 10` records from `mog` `S_2[100]`, hitting terminator `0xFFFF` at index 9 (`9` sites: IDs `21..28, 30`).
-   - In `build_overworld_graph_from_sites` (`src/pymoonstone/app/scene_assets.py:239-277`), `moves_per_turn` is set to `3 if len(sites) >= 20 else 1`.
+   - `parse_map_sites` (`src/harddaysengine/assets/tables.py:299-309`) reads `MOG_MAP_SITES_COUNT = 10` records from `mog` `S_2[100]`, hitting terminator `0xFFFF` at index 9 (`9` sites: IDs `21..28, 30`).
+   - In `build_overworld_graph_from_sites` (`src/harddaysengine/app/scene_assets.py:239-277`), `moves_per_turn` is set to `3 if len(sites) >= 20 else 1`.
    - Because `len(sites)` is always `9` on the real `mog` executable, `build_overworld_graph()` on real disks **still produces a 13-node graph with `moves_per_turn = 1`**. Moving a single step (`Node 22 -> Node 30`) immediately exhausts `moves_remaining`, increments `day` to `2`, and transitions to `NEW_DAY`.
 
 6. **HIGH — Combat & Overworld Knight Palette Colors Are Wrong:**
@@ -55,10 +55,10 @@ An empirical frame-by-frame audit across all game states (`MAIN_MENU`, `KNIGHT_S
 
 7. **HIGH — Town Sub-Locations (`MERCHANT`, `TAVERN`, `HEALER`, `MYSTIC`) Use Wrong Backdrop & Draw Unreadable White Text Over White Castle Spires:**
    - Entering Waterdeep (`WaterDeep.PIV`, scroll on left) and selecting `Merchant` switches `sub_location` to `"MERCHANT"`.
-   - `_backdrop_candidates` (`src/pymoonstone/app/location_screens.py:92-104`) falls back to `HighWood.PIV` (which has its Town menu scroll on the right and a bright white castle tower on the left) and draws white ASCII item prices (`+ SWORD UPGRADE 100G`, etc.) at `x = 18` directly on top of the white castle artwork where they are nearly invisible, while the unused `"Visit / Merchant / Tavern / Healer / High Temple / Exit"` scroll remains displayed on the right.
+   - `_backdrop_candidates` (`src/harddaysengine/app/location_screens.py:92-104`) falls back to `HighWood.PIV` (which has its Town menu scroll on the right and a bright white castle tower on the left) and draws white ASCII item prices (`+ SWORD UPGRADE 100G`, etc.) at `x = 18` directly on top of the white castle artwork where they are nearly invisible, while the unused `"Visit / Merchant / Tavern / Healer / High Temple / Exit"` scroll remains displayed on the right.
 
 8. **MEDIUM — `_pending_fade_in` Starts in `render_to_scene` Instead of on Scene Entry:**
-   - In `src/pymoonstone/app/game.py:1355-1357`, `_pending_fade_in` triggers `self.palette_fx.fade_in(..., from_black=True)` inside `_apply_scene_palette` during `render_to_scene()`. Any simulation ticks stepped before the first render call do not advance the fade, causing the first rendered frame of every fade-in scene (`COMBAT`, `OVERWORLD`, `MAIN_MENU`) to be 100% pitch black (`RGB = (0, 0, 0)`).
+   - In `src/harddaysengine/app/game.py:1355-1357`, `_pending_fade_in` triggers `self.palette_fx.fade_in(..., from_black=True)` inside `_apply_scene_palette` during `render_to_scene()`. Any simulation ticks stepped before the first render call do not advance the fade, causing the first rendered frame of every fade-in scene (`COMBAT`, `OVERWORLD`, `MAIN_MENU`) to be 100% pitch black (`RGB = (0, 0, 0)`).
 
 ---
 
@@ -80,7 +80,7 @@ In the original 68k engine:
 - Passing `right_offsets[slot]` (`28`) as the bytecode PC in `S_4` reads `S_4[28:52]` (`00 6c 00 02 00 00 00 24...`), which is unrelated table data near the start of `S_4`.
 
 #### Defect 1B: `combat_vm.py` Implements Invented Opcodes Instead of `mog` Fight-Script Bytecode
-Comparing `src/pymoonstone/sim/combat_vm.py` against the actual `mog` `S_4` bytecode (`S_4[4198..]`, documented in `MONSTER_KIT.md` §1.2):
+Comparing `src/harddaysengine/sim/combat_vm.py` against the actual `mog` `S_4` bytecode (`S_4[4198..]`, documented in `MONSTER_KIT.md` §1.2):
 
 | Feature | Current `combat_vm.py` (Broken) | Actual `mog` `S_4` Bytecode |
 |---|---|---|
@@ -116,7 +116,7 @@ In `mog`, a single frame of animation is composed of **multiple 6-byte draw comm
   2. `00 00 f7 01 ff f7`: slot `0` (`KN1.ob`), frame `0` (torso), `dy = -9`, `flags = 0x01` (hurtbox), `dx = -9`
   3. `0c 01 fa 01 00 04`: slot `3` (`0x0c >> 2 = 3`, `KN4.ob`), frame `1` (sword/head), `dy = -6`, `flags = 0x01`, `dx = +4`
   4. `ff ff`: end of frame & script.
-- In `MoonstoneRenderer._draw_sprite` (`src/pymoonstone/render/renderer.py:258-266`):
+- In `HardDaysRenderer._draw_sprite` (`src/harddaysengine/render/renderer.py:258-266`):
   ```python
   hot_x = meta.hot_x if meta.hot_x != 0 else w // 2
   hot_y = h // 2
@@ -124,7 +124,7 @@ In `mog`, a single frame of animation is composed of **multiple 6-byte draw comm
   y0 = sprite.y - hot_y
   ```
   Wait: `meta.hot_x` comes from `CelFrameMeta.hot_and_flags` (`rec[8]` of the 10-byte cel frame header), which in Moonstone is **always `0x01`** (the runtime unflipped state bit, `MONSTER_KIT.md` §1.1: *"byte8 is runtime state... The converter always writes $01"*)!
-  Because `meta.hot_x == 1` (`!= 0`), `MoonstoneRenderer._draw_sprite` uses `hot_x = 1` and `hot_y = h // 2`, while `combat_bridge.py:381` uses `hot_x = meta.hot_x if meta.hot_x != 0 else w // 2` (`1`) and `hot_y = h // 2`!
+  Because `meta.hot_x == 1` (`!= 0`), `HardDaysRenderer._draw_sprite` uses `hot_x = 1` and `hot_y = h // 2`, while `combat_bridge.py:381` uses `hot_x = meta.hot_x if meta.hot_x != 0 else w // 2` (`1`) and `hot_y = h // 2`!
   - Neither matches the Amiga hardware blitter! In the Amiga engine, `rec[8]` is **not** a hotspot offset; every cel is drawn with its **top-left corner** at `(screen_x, screen_y)` where:
     - When facing right (`not flipped`): `screen_x = actor_x + dx`
     - When facing left (`flipped`): `screen_x = actor_x - dx - frame_width`
@@ -144,8 +144,8 @@ In `B/collide.hit`, `kn4` has 82 frame records corresponding to the 82 frames of
 
 ### 2.4 Why Overworld Movement Ends the Day After 1 Hop (`tables.py` & `scene_assets.py`)
 
-1. `parse_map_sites` (`src/pymoonstone/assets/tables.py:299-309`) only reads 9 static landmark sites (`site_id = 21..28, 30`) from `mog` `S_2[100]`, plus 4 regional lairs (`0..3`) = 13 nodes total.
-2. In `src/pymoonstone/app/scene_assets.py:259`:
+1. `parse_map_sites` (`src/harddaysengine/assets/tables.py:299-309`) only reads 9 static landmark sites (`site_id = 21..28, 30`) from `mog` `S_2[100]`, plus 4 regional lairs (`0..3`) = 13 nodes total.
+2. In `src/harddaysengine/app/scene_assets.py:259`:
    ```python
    moves_per_turn = 3 if len(sites) >= 20 else 1
    ```
@@ -169,7 +169,7 @@ Per `MONSTER_KIT.md` §1.1 (`display_fx.cpp:142-243`):
 ### 2.6 Town Sub-Location Backdrops & Text Placement (`location_screens.py`)
 
 When entering a sub-location (`MERCHANT`, `TAVERN`, `HEALER`, `MYSTIC`, `TEMPLE`, `SAGE`):
-- `_backdrop_candidates` (`src/pymoonstone/app/location_screens.py:92-104`) falls back to `("HighWood.PIV", "WaterDeep.PIV")` when `"SHOP.PIV"` / `"TAVERN.PIV"` do not exist on disk (no such `.PIV` files exist on Disks A/B/C).
+- `_backdrop_candidates` (`src/harddaysengine/app/location_screens.py:92-104`) falls back to `("HighWood.PIV", "WaterDeep.PIV")` when `"SHOP.PIV"` / `"TAVERN.PIV"` do not exist on disk (no such `.PIV` files exist on Disks A/B/C).
 - Falling back to `HighWood.PIV` while inside `WaterDeep` switches the background from Waterdeep to Highwood and draws white text at `x = 18, y = 44..128` directly on top of Highwood's bright white castle tower, while leaving Highwood's main menu scroll (`Visit / Merchant / Tavern / Healer / High Temple / Exit`) visible on the right!
 - **Fix:** Sub-locations inside a town should either:
   1. Keep the current town's own `.PIV` backdrop (`WaterDeep.PIV` for Waterdeep, `HighWood.PIV` for Highwood) and draw a dark/parchment modal panel (or opaque shadow-backed menu box) for the shop/service items, **or**
@@ -180,18 +180,18 @@ When entering a sub-location (`MERCHANT`, `TAVERN`, `HEALER`, `MYSTIC`, `TEMPLE`
 ## 3. Prioritized Remediation Plan v2
 
 ### Phase 1: Real `mog` Fight-Script Interpreter & Multi-Part Sprite Composition (CRITICAL — P0)
-**Files:** `src/pymoonstone/sim/combat_vm.py`, `src/pymoonstone/assets/tables.py`, `src/pymoonstone/app/combat_bridge.py`, `src/pymoonstone/app/scene_assets.py`, `docs/ARCHITECTURE.md`
+**Files:** `src/harddaysengine/sim/combat_vm.py`, `src/harddaysengine/assets/tables.py`, `src/harddaysengine/app/combat_bridge.py`, `src/harddaysengine/app/scene_assets.py`, `docs/ARCHITECTURE.md`
 1. **Update `docs/ARCHITECTURE.md` §7.2** to match the verified `mog` fight-script bytecode specification:
    - Draw instruction `0x00..0x7F` (6 bytes): `slot = (op & 0x1F) >> 2`, `frame`, `dy:s8`, `flags:u8`, `dx:s16`.
    - 2-byte frame boundary markers: `$FF $00` (`pc += 2`, end frame), `$FF $FF` (end frame & end script), `$FF $FE` (end frame & loop2 step).
    - Control opcodes: `$80` (2B facing), `$84` (6B jump/arm), `$88` (2B loop1), `$8C` (8B motion block), `$94` (2B loop2), `$98` (6B gore jump), `$A0` (8B move), `$A4` (2B sound), `$A8` (8B poke), `$AC` (6B second script), `$B0` (6B engine call), `$B4` (6B ifdead), `$B8` (6B spawn), `$BC` (2B kill), `$C0` (2B frame set), `$C4` (6B facing branch), `$C8`/`$CC` (8B field branch), `$D0` (2B reset work), `$FD` (1B loop1 end), `$FE` (1B loop2 end).
-2. **Fix `src/pymoonstone/sim/combat_vm.py`** to decode the real `mog` bytecode opcodes and `slot = (op & 0x1F) >> 2`, while keeping backward compatibility if needed for `program` `S_2` intro scripts.
-3. **Fix `src/pymoonstone/assets/tables.py` & `src/pymoonstone/app/combat_bridge.py`** to extract the actual knight & creature script pointer tables from `mog` `S_4` (idle script, walk scripts, 9 action scripts, 9 hurt scripts) instead of treating `kActionRight` / `kActionLeft` (`0..32`) as script offsets.
-4. **Fix Monster Multi-Part Rendering (`src/pymoonstone/app/scene_assets.py` & `src/pymoonstone/app/game.py`):**
+2. **Fix `src/harddaysengine/sim/combat_vm.py`** to decode the real `mog` bytecode opcodes and `slot = (op & 0x1F) >> 2`, while keeping backward compatibility if needed for `program` `S_2` intro scripts.
+3. **Fix `src/harddaysengine/assets/tables.py` & `src/harddaysengine/app/combat_bridge.py`** to extract the actual knight & creature script pointer tables from `mog` `S_4` (idle script, walk scripts, 9 action scripts, 9 hurt scripts) instead of treating `kActionRight` / `kActionLeft` (`0..32`) as script offsets.
+4. **Fix Monster Multi-Part Rendering (`src/harddaysengine/app/scene_assets.py` & `src/harddaysengine/app/game.py`):**
    - Load all cel slots for the active monster (`TROGGSpear1.CEL` + `TROGGSpear2.CEL`, etc.) and compose all layered cel pieces for each animation frame (or run the creature's `mog` idle/walk/attack/hurt script draws) so monsters render as complete bodies with weapons instead of disembodied legs.
 
 ### Phase 2: Sprite Top-Left Anchor Math & Melee Hit Detection (CRITICAL — P0)
-**Files:** `src/pymoonstone/render/renderer.py`, `src/pymoonstone/app/combat_bridge.py`, `src/pymoonstone/app/game.py`
+**Files:** `src/harddaysengine/render/renderer.py`, `src/harddaysengine/app/combat_bridge.py`, `src/harddaysengine/app/game.py`
 1. **Fix Top-Left Sprite Positioning:**
    - Stop treating `CelFrameMeta.hot_and_flags` (`0x01`) as `hot_x = 1` or centering combat cels by `-w // 2, -h // 2`.
    - For fight-script draws, place each cel's top-left corner at:
@@ -203,11 +203,11 @@ When entering a sub-location (`MERCHANT`, `TAVERN`, `HEALER`, `MYSTIC`, `TEMPLE`
    - Verify with an automated test on real disks (`@pytest.mark.adf`) that a player knight walking up to a Trogg/Ratman and thrusting/slashing lands hits and kills the monster within a normal fight.
 
 ### Phase 3: Overworld Graph Road Nodes & `moves_per_turn = 3` on Real Disks (CRITICAL — P0)
-**Files:** `src/pymoonstone/app/scene_assets.py`, `src/pymoonstone/sim/overworld.py`
-1. In `build_overworld_graph_from_sites` (`src/pymoonstone/app/scene_assets.py:239-277`), when `mog` `S_2` provides the 9 landmark sites (`21..28, 30`) and 4 lairs (`0..3`), populate the connecting `ROAD` nodes (the 35-node canonical Moonstone road network) and set `moves_per_turn = 3` so real-disk gameplay matches the 35-node overworld topology and gives each knight 3 moves per day.
+**Files:** `src/harddaysengine/app/scene_assets.py`, `src/harddaysengine/sim/overworld.py`
+1. In `build_overworld_graph_from_sites` (`src/harddaysengine/app/scene_assets.py:239-277`), when `mog` `S_2` provides the 9 landmark sites (`21..28, 30`) and 4 lairs (`0..3`), populate the connecting `ROAD` nodes (the 35-node canonical Moonstone road network) and set `moves_per_turn = 3` so real-disk gameplay matches the 35-node overworld topology and gives each knight 3 moves per day.
 
 ### Phase 4: Knight Class Palette Colors, Sub-Location Readability, & Scene Entry Fade-In (HIGH/MEDIUM — P1)
-**Files:** `src/pymoonstone/app/game.py`, `src/pymoonstone/assets/arena.py`, `src/pymoonstone/app/location_screens.py`
+**Files:** `src/harddaysengine/app/game.py`, `src/harddaysengine/assets/arena.py`, `src/harddaysengine/app/location_screens.py`
 1. **Combat & Overworld Knight Palette Colors:**
    - Patch combat palette indices `6..8` with the active knight's class ramp (`KnightId.BLUE`, `RED`, `GREEN`, `YELLOW`) and indices `9..15` with the creature's scene palette colors (`index 15` = blood red).
    - Ensure overworld knight/flag sprites (`mi.c`) use the correct frame index and palette colors for each knight.
@@ -233,7 +233,7 @@ Before closing Remediation Pass 2, verify all of the following on real ADF disks
 
 ## 5. Remediation Pass 2 Verification Results (`T10.1`–`T10.9`)
 
-Verified across [tests/unit/test_playability_v2.py](file:///c:/_WORKSPACE/ANTIGRAVITY/pymoonstone/tests/unit/test_playability_v2.py), [tests/unit/test_combat_bridge.py](file:///c:/_WORKSPACE/ANTIGRAVITY/pymoonstone/tests/unit/test_combat_bridge.py), [tests/unit/test_tables.py](file:///c:/_WORKSPACE/ANTIGRAVITY/pymoonstone/tests/unit/test_tables.py), and real `.adf` disks:
+Verified across [tests/unit/test_playability_v2.py](file:///c:/_WORKSPACE/ANTIGRAVITY/harddaysengine/tests/unit/test_playability_v2.py), [tests/unit/test_combat_bridge.py](file:///c:/_WORKSPACE/ANTIGRAVITY/harddaysengine/tests/unit/test_combat_bridge.py), [tests/unit/test_tables.py](file:///c:/_WORKSPACE/ANTIGRAVITY/harddaysengine/tests/unit/test_tables.py), and real `.adf` disks:
 1. **Multi-Part Sprite Verification (`T10.1`–`T10.2`):** All 12 `KnightAction`s execute real `mog` `S_4` fight scripts (`KnightScriptTables`, `KN1.ob..KN4.ob`) and emit multi-part draw lists; `compose_knight_pieces` also provides a multi-slot (`KN1`+`KN4`) fallback when `mog_s4` is absent; all 10 `MonsterArchetype`s compose multi-part pieces across multi-slot cels (`TROGGSpear1+2`, `Balok1..3`, `Demon1..4`, etc.).
 2. **Top-Left Anchor & Combat Winnability (`T10.3`–`T10.4`):** `SceneSprite.top_left=True` anchors fight-script pieces at `(pos.x + dx, pos.y - pos.z + dy)`, `kn4` `collide.hit` attaches only to `cel_slot == 3` (`KN4.ob`) attack pieces, `params_from_creature_node` keeps `base.defense`, and `test_adf_knight_attacks_and_defeats_trogg` defeats a real Trogg (`trogg.hp == 0`).
 3. **Overworld Multi-Step Turns (`T10.5`):** `test_adf_overworld_3_moves_and_stay_in_overworld` confirms 35 nodes on real disks with `moves_remaining = 3 -> 2` on first step while staying in `GameScene.OVERWORLD`.

@@ -8,20 +8,20 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.fight_audit import TROGG_ARENAS, FightAudit
-from pymoonstone.app.fight_runtime import FightLoader, FightUnavailableError
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight_ai.brawler import BRAWLER_TYPES
-from pymoonstone.sim.inventory import Inventory
-from pymoonstone.sim.m68k import s16
-from pymoonstone.sim.rng import Rng
+from harddaysengine.app.fight_audit import TROGG_ARENAS, FightAudit
+from harddaysengine.app.fight_runtime import FightLoader, FightUnavailableError
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight_ai.brawler import BRAWLER_TYPES
+from harddaysengine.sim.inventory import Inventory
+from harddaysengine.sim.m68k import s16
+from harddaysengine.sim.rng import Rng
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pymoonstone.app.fight_runtime import FightRuntime
+    from harddaysengine.app.fight_runtime import FightRuntime
 
 pytestmark = pytest.mark.adf
 

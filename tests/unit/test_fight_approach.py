@@ -6,16 +6,16 @@ import dataclasses
 
 import pytest
 
-from pymoonstone.sim.fight import KEEP, FightError, Restart
-from pymoonstone.sim.fight_ai.approach import (
+from harddaysengine.sim.fight import KEEP, FightError, Restart
+from harddaysengine.sim.fight_ai.approach import (
     ApproachRules,
     abs_word,
     approach,
     take_step,
     walk,
 )
-from pymoonstone.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
-from pymoonstone.sim.m68k import u16
+from harddaysengine.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
+from harddaysengine.sim.m68k import u16
 from tests.unit.brawler_setup import (
     APPROACH,
     REACH,

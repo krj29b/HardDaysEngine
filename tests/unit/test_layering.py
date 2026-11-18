@@ -12,19 +12,19 @@ from pathlib import Path
 
 import pytest
 
-import pymoonstone
+import harddaysengine
 
-SRC = Path(pymoonstone.__file__).parent
+SRC = Path(harddaysengine.__file__).parent
 
-# Every package under src/pymoonstone must belong to a declared layer.
+# Every package under src/harddaysengine must belong to a declared layer.
 LAYERS = ("cli", "app", "render", "assets", "sim")
 
 FORBIDDEN_BY_LAYER: dict[str, tuple[str, ...]] = {
     "sim": (
-        "pymoonstone.assets",
-        "pymoonstone.render",
-        "pymoonstone.app",
-        "pymoonstone.cli",
+        "harddaysengine.assets",
+        "harddaysengine.render",
+        "harddaysengine.app",
+        "harddaysengine.cli",
         "pygame",
         "moderngl",
         "PIL",
@@ -42,9 +42,15 @@ FORBIDDEN_BY_LAYER: dict[str, tuple[str, ...]] = {
         "secrets",
         "uuid",
     ),
-    "assets": ("pymoonstone.render", "pymoonstone.app", "pymoonstone.cli", "pygame", "moderngl"),
-    "render": ("pymoonstone.app", "pymoonstone.cli", "pygame", "amitools"),
-    "app": ("pymoonstone.cli",),
+    "assets": (
+        "harddaysengine.render",
+        "harddaysengine.app",
+        "harddaysengine.cli",
+        "pygame",
+        "moderngl",
+    ),
+    "render": ("harddaysengine.app", "harddaysengine.cli", "pygame", "amitools"),
+    "app": ("harddaysengine.cli",),
 }
 
 
@@ -56,8 +62,8 @@ def _imported_modules(tree: ast.AST) -> list[tuple[int, str]]:
             found.extend((node.lineno, alias.name) for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             found.append((node.lineno, node.module))
-            if node.module == "pymoonstone":
-                found.extend((node.lineno, f"pymoonstone.{alias.name}") for alias in node.names)
+            if node.module == "harddaysengine":
+                found.extend((node.lineno, f"harddaysengine.{alias.name}") for alias in node.names)
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -124,12 +130,12 @@ def test_checker_catches_hidden_imports_and_floats() -> None:
         "from typing import TYPE_CHECKING\n"
         "import importlib\n"
         "if TYPE_CHECKING:\n"
-        "    from pymoonstone.render.canvas import Canvas\n"
+        "    from harddaysengine.render.canvas import Canvas\n"
         "def f():\n"
         "    import random\n"
         "    importlib.import_module('pygame.mixer')\n"
         "    return float(3) + 0.5\n"
     )
     modules = [m for _, m in _imported_modules(sample) if _matches(m, FORBIDDEN_BY_LAYER["sim"])]
-    assert modules == ["pymoonstone.render.canvas", "random", "pygame.mixer"]
+    assert modules == ["harddaysengine.render.canvas", "random", "pygame.mixer"]
     assert sorted(_float_usages(sample)) == [8, 8]

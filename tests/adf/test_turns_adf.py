@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.game import GameScene, GameSession
-from pymoonstone.app.input import InputFrame, PlayerInput
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.hunk import parse_hunk_executable
-from pymoonstone.assets.mog_code import MogCode
-from pymoonstone.sim.overworld import EncounterTrigger, TriggerKind
-from pymoonstone.sim.types import KnightId
+from harddaysengine.app.game import GameScene, GameSession
+from harddaysengine.app.input import InputFrame, PlayerInput
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.assets.mog_code import MogCode
+from harddaysengine.sim.overworld import EncounterTrigger, TriggerKind
+from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -160,7 +160,7 @@ def test_fight_receives_loaded_calendar_day_and_moon(adf_dir: Path) -> None:
 
 @pytest.mark.gl
 def test_calendar_and_flight_rendering_never_advance_replay_state(adf_dir: Path) -> None:
-    from pymoonstone.app.audit import AuditRig
+    from harddaysengine.app.audit import AuditRig
 
     rig = AuditRig(adf_dir)
     try:
@@ -200,8 +200,8 @@ def test_initial_map_job_writes_back_its_loaded_position(adf_dir: Path) -> None:
 def test_changed_map_handler_instruction_is_rejected(adf_dir: Path) -> None:
     from dataclasses import replace
 
-    from pymoonstone.assets.fight_palette import MogVersionError
-    from pymoonstone.assets.turn_rules import parse_turn_rules
+    from harddaysengine.assets.fight_palette import MogVersionError
+    from harddaysengine.assets.turn_rules import parse_turn_rules
 
     executable = parse_hunk_executable("mog", DiskSet.from_directory(adf_dir).read_file("mog"))
     sections = list(executable.sections)

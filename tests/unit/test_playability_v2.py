@@ -7,15 +7,15 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
-from pymoonstone.app.game import GameScene, GameSession
-from pymoonstone.app.input import InputFrame, PlayerInput
-from pymoonstone.assets.cel import CelFrame, CelFrameMeta, DecodedCel
-from pymoonstone.assets.palette import RGBColor, default_combat_palette
-from pymoonstone.assets.picture import DecodedPicture
-from pymoonstone.render.renderer import CANVAS_HEIGHT, CANVAS_WIDTH, PLAYFIELD_HEIGHT
-from pymoonstone.render.scene import default_bitmap_font
-from pymoonstone.sim.palette_fx import rgb12_to_rgb24
-from pymoonstone.sim.types import KnightId
+from harddaysengine.app.game import GameScene, GameSession
+from harddaysengine.app.input import InputFrame, PlayerInput
+from harddaysengine.assets.cel import CelFrame, CelFrameMeta, DecodedCel
+from harddaysengine.assets.palette import RGBColor, default_combat_palette
+from harddaysengine.assets.picture import DecodedPicture
+from harddaysengine.render.renderer import CANVAS_HEIGHT, CANVAS_WIDTH, PLAYFIELD_HEIGHT
+from harddaysengine.render.scene import default_bitmap_font
+from harddaysengine.sim.palette_fx import rgb12_to_rgb24
+from harddaysengine.sim.types import KnightId
 from tests.unit.map_setup import KINDS, RULES
 
 if TYPE_CHECKING:
@@ -23,8 +23,8 @@ if TYPE_CHECKING:
 
     import numpy.typing as npt
 
-    from pymoonstone.app.scene_assets import GameAssetBundle
-    from pymoonstone.render.scene import SceneRenderer, SceneSprite
+    from harddaysengine.app.scene_assets import GameAssetBundle
+    from harddaysengine.render.scene import SceneRenderer, SceneSprite
 
 
 @dataclass

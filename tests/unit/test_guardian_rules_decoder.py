@@ -5,10 +5,10 @@ import zlib
 
 import pytest
 
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.guardian_rules import _OPERANDS, _SCRIPT_POSITIONS, HUNK, _rules
-from pymoonstone.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
-from pymoonstone.assets.mog_code import MogCode
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.guardian_rules import _OPERANDS, _SCRIPT_POSITIONS, HUNK, _rules
+from harddaysengine.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
+from harddaysengine.assets.mog_code import MogCode
 
 
 def _mog(*, bad_step: bool = False, bad_script: bool = False) -> MogCode:

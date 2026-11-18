@@ -1,7 +1,7 @@
 # Architecture & Binary Format Specification
 
-This document is the clean-room specification for **pymoonstone** (ADR-001). Every loader,
-decompressor, simulation rule, and renderer component in `src/pymoonstone/` is implemented from
+This document is the clean-room specification for **HardDaysEngine** (ADR-001). Every loader,
+decompressor, simulation rule, and renderer component in `src/harddaysengine/` is implemented from
 this specification.
 
 ---

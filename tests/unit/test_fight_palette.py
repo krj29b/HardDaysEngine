@@ -6,7 +6,7 @@ import struct
 
 import pytest
 
-from pymoonstone.assets.fight_palette import (
+from harddaysengine.assets.fight_palette import (
     REGION_FOREST,
     REGION_GLEN,
     REGION_SWAMP,
@@ -24,7 +24,7 @@ from pymoonstone.assets.fight_palette import (
     assemble_fight_palette,
     parse_fight_palette_tables,
 )
-from pymoonstone.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
+from harddaysengine.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
 
 PICTURE = tuple(0x100 + i for i in range(32))
 

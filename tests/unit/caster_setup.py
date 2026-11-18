@@ -2,14 +2,14 @@
 
 from dataclasses import fields
 
-from pymoonstone.sim.fight import Fight
-from pymoonstone.sim.fight_ai.caster import (
+from harddaysengine.sim.fight import Fight
+from harddaysengine.sim.fight_ai.caster import (
     CASTER_TYPE,
     CasterRules,
     CasterScripts,
     install_caster,
 )
-from pymoonstone.sim.trajectory import FlightRules
+from harddaysengine.sim.trajectory import FlightRules
 from tests.unit.brawler_setup import make_trogg_fight
 from tests.unit.knight_setup import RULES
 

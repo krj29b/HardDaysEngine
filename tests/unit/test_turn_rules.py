@@ -5,11 +5,11 @@ import zlib
 
 import pytest
 
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.hunk import HUNK_CODE, DecodedHunkExecutable, HunkSection
-from pymoonstone.assets.mog_code import MogCode, Pointer
-from pymoonstone.assets.turn_rules import _texts
-from pymoonstone.sim.turn_rules import TextLine
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.hunk import HUNK_CODE, DecodedHunkExecutable, HunkSection
+from harddaysengine.assets.mog_code import MogCode, Pointer
+from harddaysengine.assets.turn_rules import _texts
+from harddaysengine.sim.turn_rules import TextLine
 
 
 def _mog(*, cycle: bool = False, zero_cycle: bool = False) -> MogCode:

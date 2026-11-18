@@ -8,23 +8,23 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.game import GameScene, GameSession
-from pymoonstone.app.input import InputFrame, PlayerInput
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.ai_map_rules import parse_ai_map_rules
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.hunk import parse_hunk_executable
-from pymoonstone.sim.ai_map import computer_frame
-from pymoonstone.sim.ai_shop import DAGGERS, SWORD, purchase, shop_wish
-from pymoonstone.sim.m68k import s16
-from pymoonstone.sim.overworld import scan
-from pymoonstone.sim.turns import TurnResult, advance
-from pymoonstone.sim.types import KnightId
+from harddaysengine.app.game import GameScene, GameSession
+from harddaysengine.app.input import InputFrame, PlayerInput
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.ai_map_rules import parse_ai_map_rules
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.sim.ai_map import computer_frame
+from harddaysengine.sim.ai_shop import DAGGERS, SWORD, purchase, shop_wish
+from harddaysengine.sim.m68k import s16
+from harddaysengine.sim.overworld import scan
+from harddaysengine.sim.turns import TurnResult, advance
+from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pymoonstone.sim.ai_map_state import MapAiRules
+    from harddaysengine.sim.ai_map_state import MapAiRules
 
 pytestmark = pytest.mark.adf
 

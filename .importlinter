@@ -1,6 +1,6 @@
 [importlinter]
 root_packages =
-    pymoonstone
+    harddaysengine
 include_external_packages = True
 
 # ----------------------------------------------------------------------------
@@ -11,11 +11,11 @@ include_external_packages = True
 name = Strict Clean Architecture Layer Topology
 type = layers
 layers =
-    pymoonstone.cli
-    pymoonstone.app
-    pymoonstone.render
-    pymoonstone.assets
-    pymoonstone.sim
+    harddaysengine.cli
+    harddaysengine.app
+    harddaysengine.render
+    harddaysengine.assets
+    harddaysengine.sim
 
 # ----------------------------------------------------------------------------
 # Contract 2: Pure 50Hz PAL Simulation Core Isolation
@@ -26,7 +26,7 @@ layers =
 name = Pure 50Hz Simulation Core (Zero Hardware/Framework Imports)
 type = forbidden
 source_modules =
-    pymoonstone.sim
+    harddaysengine.sim
 forbidden_modules =
     pygame
     moderngl
@@ -44,10 +44,10 @@ forbidden_modules =
     threading
     secrets
     uuid
-    pymoonstone.assets
-    pymoonstone.render
-    pymoonstone.app
-    pymoonstone.cli
+    harddaysengine.assets
+    harddaysengine.render
+    harddaysengine.app
+    harddaysengine.cli
 
 # ----------------------------------------------------------------------------
 # Contract 3: Headless Asset Pipeline Isolation
@@ -58,13 +58,13 @@ forbidden_modules =
 name = Headless Asset Extractor (Forbidden from importing SDL2/OpenGL)
 type = forbidden
 source_modules =
-    pymoonstone.assets
+    harddaysengine.assets
 forbidden_modules =
     pygame
     moderngl
-    pymoonstone.render
-    pymoonstone.app
-    pymoonstone.cli
+    harddaysengine.render
+    harddaysengine.app
+    harddaysengine.cli
 
 # ----------------------------------------------------------------------------
 # Contract 4: Renderer Independence from Application Host
@@ -74,9 +74,9 @@ forbidden_modules =
 name = ModernGL Renderer Independence from SDL2/Pygame Host
 type = forbidden
 source_modules =
-    pymoonstone.render
+    harddaysengine.render
 forbidden_modules =
     pygame
     amitools
-    pymoonstone.app
-    pymoonstone.cli
+    harddaysengine.app
+    harddaysengine.cli

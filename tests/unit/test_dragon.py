@@ -2,8 +2,8 @@
 
 import pytest
 
-from pymoonstone.sim.fight import DRAGON, KEEP, FightError, Restart
-from pymoonstone.sim.fight_ai.dragon import (
+from harddaysengine.sim.fight import DRAGON, KEEP, FightError, Restart
+from harddaysengine.sim.fight_ai.dragon import (
     FLIGHT,
     HIT,
     PHASE2,
@@ -13,8 +13,8 @@ from pymoonstone.sim.fight_ai.dragon import (
     linked_jobs,
     part_handler,
 )
-from pymoonstone.sim.fight_script import RoutineCall
-from pymoonstone.sim.m68k import u16
+from harddaysengine.sim.fight_script import RoutineCall
+from harddaysengine.sim.m68k import u16
 from tests.unit.dragon_setup import DRAGON_RULES as R, SCRIPTS, make_dragon
 from tests.unit.knight_setup import RULES
 

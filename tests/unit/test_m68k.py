@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from pymoonstone.sim.m68k import (
+from harddaysengine.sim.m68k import (
     DivResult,
     c_div,
     c_mod,

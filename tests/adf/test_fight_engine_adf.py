@@ -1,7 +1,7 @@
 """The fight engine on the real knight scripts (T11.8 acceptance, ARCHITECTURE.md §10.17).
 
 A knight job plays its idle script, each walk script and each of the nine action scripts in
-:class:`pymoonstone.sim.fight.Fight`. The draws of every tick are compared with the frames a
+:class:`harddaysengine.sim.fight.Fight`. The draws of every tick are compared with the frames a
 second walker computes. That walker is written here from §7.2 / §10.17 independently of
 ``sim/fight_script.py``: it expands a script into its sequence of frames, supports only the
 opcodes the knight's scripts contain, and fails on any other.
@@ -15,10 +15,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.fight_defs import FightDefs, parse_fight_defs
-from pymoonstone.assets.fight_program import (
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.fight_defs import FightDefs, parse_fight_defs
+from harddaysengine.assets.fight_program import (
     KNIGHT_LIST,
     cel_files,
     cel_shapes,
@@ -26,16 +26,16 @@ from pymoonstone.assets.fight_program import (
     frame_lists,
     script_image,
 )
-from pymoonstone.assets.hunk import parse_hunk_executable
-from pymoonstone.assets.mog_code import MogCode
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import Fight, FightConstants
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.assets.mog_code import MogCode
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import Fight, FightConstants
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from pymoonstone.sim.fight_script import CelShape, ScriptImage
+    from harddaysengine.sim.fight_script import CelShape, ScriptImage
 
 pytestmark = pytest.mark.adf
 

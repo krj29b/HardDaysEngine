@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.hunk import parse_hunk_executable
-from pymoonstone.assets.town_data import parse_town_data
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.assets.town_data import parse_town_data
 
 if TYPE_CHECKING:
     from pathlib import Path

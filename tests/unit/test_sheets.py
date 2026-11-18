@@ -5,11 +5,11 @@ from unittest.mock import patch
 
 import pytest
 
-from pymoonstone.sim.m68k import u16
-from pymoonstone.sim.rng import Rng
-from pymoonstone.sim.sheet_layout import button
-from pymoonstone.sim.sheet_types import SheetRegion, SheetState
-from pymoonstone.sim.sheets import click, close, redraw, step
+from harddaysengine.sim.m68k import u16
+from harddaysengine.sim.rng import Rng
+from harddaysengine.sim.sheet_layout import button
+from harddaysengine.sim.sheet_types import SheetRegion, SheetState
+from harddaysengine.sim.sheets import click, close, redraw, step
 from tests.unit.sheet_setup import RULES, sheet
 
 

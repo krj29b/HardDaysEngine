@@ -8,13 +8,13 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from pymoonstone.app.audit import AuditRig
-from pymoonstone.app.game import GameScene, GameSession
-from pymoonstone.app.input import InputFrame, PlayerInput
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.sim.overworld import Arrival
-from pymoonstone.sim.towns import TownAction
-from pymoonstone.sim.types import KnightId
+from harddaysengine.app.audit import AuditRig
+from harddaysengine.app.game import GameScene, GameSession
+from harddaysengine.app.input import InputFrame, PlayerInput
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.sim.overworld import Arrival
+from harddaysengine.sim.towns import TownAction
+from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
     from pathlib import Path

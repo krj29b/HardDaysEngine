@@ -4,10 +4,10 @@ from dataclasses import replace
 
 import pytest
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import Fight, FightConstants
-from pymoonstone.sim.fight_script import ScriptImage
-from pymoonstone.sim.map_dragon import (
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import Fight, FightConstants
+from harddaysengine.sim.fight_script import ScriptImage
+from harddaysengine.sim.map_dragon import (
     DragonFlight,
     attacks,
     automatic_loss,
@@ -15,8 +15,8 @@ from pymoonstone.sim.map_dragon import (
     settle,
     spawn,
 )
-from pymoonstone.sim.rng import Rng
-from pymoonstone.sim.types import KnightId
+from harddaysengine.sim.rng import Rng
+from harddaysengine.sim.types import KnightId
 from tests.unit.map_setup import make_world
 from tests.unit.turn_setup import DRAGON, TURN_RULES
 

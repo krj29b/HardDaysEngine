@@ -10,21 +10,21 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.fight_audit import build_guardian_audit
-from pymoonstone.app.fight_runtime import FightLoader, FightRuntime
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.guardian_rules import parse_guardian_rules
-from pymoonstone.sim.fight import END_FIGHT, Fight, HandlerResult, Restart, end_fight
-from pymoonstone.sim.fight_ai.guardian import GUARDIAN_TYPE
-from pymoonstone.sim.m68k import s16
+from harddaysengine.app.fight_audit import build_guardian_audit
+from harddaysengine.app.fight_runtime import FightLoader, FightRuntime
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.guardian_rules import parse_guardian_rules
+from harddaysengine.sim.fight import END_FIGHT, Fight, HandlerResult, Restart, end_fight
+from harddaysengine.sim.fight_ai.guardian import GUARDIAN_TYPE
+from harddaysengine.sim.m68k import s16
 from tests.adf.test_fight_defs_adf import Walker, _arena_sets, _check
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pymoonstone.sim.fight_script import RoutineCall
+    from harddaysengine.sim.fight_script import RoutineCall
 
 pytestmark = pytest.mark.adf
 

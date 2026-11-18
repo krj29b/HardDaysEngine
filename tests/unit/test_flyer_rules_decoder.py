@@ -5,10 +5,10 @@ import zlib
 
 import pytest
 
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.flyer_rules import _tables
-from pymoonstone.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
-from pymoonstone.assets.mog_code import MogCode
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.flyer_rules import _tables
+from harddaysengine.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
+from harddaysengine.assets.mog_code import MogCode
 
 
 def _mog(*, toggle: int = 0x5C1E, target: int = 0, opcode: int = 0x45F9) -> MogCode:

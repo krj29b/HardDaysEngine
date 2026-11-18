@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 
-from pymoonstone.app.fight_runtime import FightRuntime
-from pymoonstone.sim.fight import end_fight
-from pymoonstone.sim.fight_setup import FightWarnings
+from harddaysengine.app.fight_runtime import FightRuntime
+from harddaysengine.sim.fight import end_fight
+from harddaysengine.sim.fight_setup import FightWarnings
 from tests.unit.fight_setup_data import SETUP
 from tests.unit.test_fight_scene import _scene
 

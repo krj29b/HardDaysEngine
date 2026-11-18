@@ -4,21 +4,21 @@ from __future__ import annotations
 
 import pytest
 
-from pymoonstone.app import (
+from harddaysengine.app import (
     MAX_FRAME_DELTA_NS,
     TICK_NS,
     Accumulator50Hz,
     InspectorState,
     build_inspector_state,
 )
-from pymoonstone.assets import (
+from harddaysengine.assets import (
     DiskSet,
     OFSVolume,
     decode_cel,
     flip_cel_frame,
     parse_collide_hit,
 )
-from pymoonstone.render import (
+from harddaysengine.render import (
     HITBOX_BOX_COLOR,
     HITBOX_POINT_COLOR,
     HURTBOX_OUTER_COLOR,

@@ -9,15 +9,15 @@ import numpy as np
 import numpy.typing as npt
 import pytest
 
-from pymoonstone.app.fight_scene import FightScene
-from pymoonstone.assets.cel import CelFrame, CelFrameMeta, DecodedCel
-from pymoonstone.assets.fight_program import cel_shape
-from pymoonstone.assets.palette import default_combat_palette
-from pymoonstone.render.fight import FightCanvas
-from pymoonstone.render.scene import SceneRenderer
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import Fight, FightConstants
-from pymoonstone.sim.fight_script import Draw, ScriptImage
+from harddaysengine.app.fight_scene import FightScene
+from harddaysengine.assets.cel import CelFrame, CelFrameMeta, DecodedCel
+from harddaysengine.assets.fight_program import cel_shape
+from harddaysengine.assets.palette import default_combat_palette
+from harddaysengine.render.fight import FightCanvas
+from harddaysengine.render.scene import SceneRenderer
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import Fight, FightConstants
+from harddaysengine.sim.fight_script import Draw, ScriptImage
 
 
 def _cel(*rows: list[list[int]], shift: int = 0) -> DecodedCel:

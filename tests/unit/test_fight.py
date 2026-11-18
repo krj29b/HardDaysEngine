@@ -6,8 +6,8 @@ import struct
 
 import pytest
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import (
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import (
     DRAGON,
     END,
     IDLE_OBJECT_TYPE,
@@ -26,7 +26,7 @@ from pymoonstone.sim.fight import (
     pause_all,
     restart_from,
 )
-from pymoonstone.sim.fight_script import CelShape, FrameShape, HitShape, ScriptImage
+from harddaysengine.sim.fight_script import CelShape, FrameShape, HitShape, ScriptImage
 
 KNIGHT_TYPE = 0x0C
 BASE = 2

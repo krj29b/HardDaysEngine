@@ -5,16 +5,16 @@ from unittest.mock import patch
 
 import pytest
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.ai_map import build_roam, computer_frame, distance, pick_opponent, walk_step
-from pymoonstone.sim.ai_map_state import ShopWish, WalkLine
-from pymoonstone.sim.ai_shop import ARMOUR, DAGGERS, LIFE, SWORD, purchase, shop_wish
-from pymoonstone.sim.fight_moves import DOWN, LEFT, RIGHT, UP
-from pymoonstone.sim.inventory import Inventory
-from pymoonstone.sim.m68k import s16
-from pymoonstone.sim.overworld import Arrival, OverworldState
-from pymoonstone.sim.rng import Rng
-from pymoonstone.sim.turns import TurnResult, advance
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.ai_map import build_roam, computer_frame, distance, pick_opponent, walk_step
+from harddaysengine.sim.ai_map_state import ShopWish, WalkLine
+from harddaysengine.sim.ai_shop import ARMOUR, DAGGERS, LIFE, SWORD, purchase, shop_wish
+from harddaysengine.sim.fight_moves import DOWN, LEFT, RIGHT, UP
+from harddaysengine.sim.inventory import Inventory
+from harddaysengine.sim.m68k import s16
+from harddaysengine.sim.overworld import Arrival, OverworldState
+from harddaysengine.sim.rng import Rng
+from harddaysengine.sim.turns import TurnResult, advance
 from tests.unit.ai_map_setup import AI_RULES
 from tests.unit.map_setup import make_world
 from tests.unit.turn_setup import TURN_RULES

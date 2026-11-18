@@ -9,13 +9,13 @@ from typing import TYPE_CHECKING, cast
 import pygame
 
 if TYPE_CHECKING:
-    from pymoonstone.assets.adf import DiskSet
+    from harddaysengine.assets.adf import DiskSet
 
-from pymoonstone.app.audio import AudioEngine
-from pymoonstone.app.input import InputRouter, PlayerInput
-from pymoonstone.app.scene_assets import COMBAT_SFX_KEYS, GameAssetBundle
-from pymoonstone.assets.adf import OFSFileEntry
-from pymoonstone.sim.types import KnightId
+from harddaysengine.app.audio import AudioEngine
+from harddaysengine.app.input import InputRouter, PlayerInput
+from harddaysengine.app.scene_assets import COMBAT_SFX_KEYS, GameAssetBundle
+from harddaysengine.assets.adf import OFSFileEntry
+from harddaysengine.sim.types import KnightId
 
 
 def _build_8svx_chunk(pcm: bytes, rate: int = 8287) -> bytes:

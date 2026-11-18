@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.fight_runtime import FightLoader
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight_setup import SpawnLanes
-from pymoonstone.sim.inventory import Inventory
-from pymoonstone.sim.palette_fx import pack_rgb12
-from pymoonstone.sim.rng import Rng
+from harddaysengine.app.fight_runtime import FightLoader
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight_setup import SpawnLanes
+from harddaysengine.sim.inventory import Inventory
+from harddaysengine.sim.palette_fx import pack_rgb12
+from harddaysengine.sim.rng import Rng
 
 if TYPE_CHECKING:
     from pathlib import Path

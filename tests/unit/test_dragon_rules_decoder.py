@@ -5,10 +5,10 @@ import zlib
 
 import pytest
 
-from pymoonstone.assets.dragon_rules import _OPERANDS, _SCRIPT_POSITIONS, _rules
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
-from pymoonstone.assets.mog_code import MogCode
+from harddaysengine.assets.dragon_rules import _OPERANDS, _SCRIPT_POSITIONS, _rules
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
+from harddaysengine.assets.mog_code import MogCode
 from tests.unit.dragon_setup import DRAGON_RULES
 
 

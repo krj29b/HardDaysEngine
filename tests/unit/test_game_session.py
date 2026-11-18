@@ -8,9 +8,9 @@ from unittest.mock import patch
 import numpy as np
 import pygame
 
-from pymoonstone.app.audio import AudioEngine
-from pymoonstone.app.game import GameScene, GameSession, run_headless_session
-from pymoonstone.app.input import (
+from harddaysengine.app.audio import AudioEngine
+from harddaysengine.app.game import GameScene, GameSession, run_headless_session
+from harddaysengine.app.input import (
     InputFrame,
     InputRouter,
     PlayerInput,
@@ -18,10 +18,10 @@ from pymoonstone.app.input import (
     load_replay,
     save_replay,
 )
-from pymoonstone.app.intro_player import assemble_stile_panorama
-from pymoonstone.cli.main import main
-from pymoonstone.sim.overworld import scan
-from pymoonstone.sim.types import KnightId
+from harddaysengine.app.intro_player import assemble_stile_panorama
+from harddaysengine.cli.main import main
+from harddaysengine.sim.overworld import scan
+from harddaysengine.sim.types import KnightId
 from tests.unit.ai_map_setup import AI_RULES
 from tests.unit.map_setup import KINDS, RULES
 from tests.unit.turn_setup import TURN_RULES
@@ -31,9 +31,9 @@ if TYPE_CHECKING:
 
     import pytest
 
-    from pymoonstone.sim.ai_map_state import MapAiRules
-    from pymoonstone.sim.map_rules import MapRules
-    from pymoonstone.sim.turn_rules import TurnRules
+    from harddaysengine.sim.ai_map_state import MapAiRules
+    from harddaysengine.sim.map_rules import MapRules
+    from harddaysengine.sim.turn_rules import TurnRules
 
 
 def _frame_p1(

@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import struct
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import Fight, FightConstants, ScriptTables, TableKeys
-from pymoonstone.sim.fight_script import CelShape, FrameShape, ScriptImage
-from pymoonstone.sim.fighter_rules import (
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import Fight, FightConstants, ScriptTables, TableKeys
+from harddaysengine.sim.fight_script import CelShape, FrameShape, ScriptImage
+from harddaysengine.sim.fighter_rules import (
     ArenaClip,
     DaggerRules,
     DamageRules,
@@ -23,8 +23,8 @@ from pymoonstone.sim.fighter_rules import (
     Probes,
     WalkSteps,
 )
-from pymoonstone.sim.fighters import install_knight_control
-from pymoonstone.sim.inventory import Inventory
+from harddaysengine.sim.fighters import install_knight_control
+from harddaysengine.sim.inventory import Inventory
 
 KNIGHT = 0x0C
 HOP_TABLE = 400

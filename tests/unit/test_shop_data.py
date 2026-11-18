@@ -4,8 +4,8 @@ import struct
 
 import pytest
 
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.shop_data import _long, _price, _prices, _stock_rolls
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.shop_data import _long, _price, _prices, _stock_rolls
 from tests.unit.test_town_data import _mog
 
 

@@ -8,11 +8,11 @@ import moderngl
 import numpy as np
 import pytest
 
-from pymoonstone.assets import decode_cel, decode_picture, parse_collide_hit
-from pymoonstone.assets.cel import CelFrame, CelFrameMeta
-from pymoonstone.cli.inspect_assets import main as inspect_cli_main
-from pymoonstone.cli.main import main as main_cli
-from pymoonstone.render import CANVAS_HEIGHT, CANVAS_WIDTH, MoonstoneRenderer
+from harddaysengine.assets import decode_cel, decode_picture, parse_collide_hit
+from harddaysengine.assets.cel import CelFrame, CelFrameMeta
+from harddaysengine.cli.inspect_assets import main as inspect_cli_main
+from harddaysengine.cli.main import main as main_cli
+from harddaysengine.render import CANVAS_HEIGHT, CANVAS_WIDTH, HardDaysRenderer
 from tests.fixtures.synthetic_adf import (
     build_synthetic_arena,
     build_synthetic_cel,
@@ -28,7 +28,7 @@ pytestmark = pytest.mark.gl
 
 def test_moderngl_renderer_canvas_and_hitbox_overlay() -> None:
     ctx = moderngl.create_standalone_context(require=330)
-    renderer = MoonstoneRenderer(ctx)
+    renderer = HardDaysRenderer(ctx)
     try:
         pic = decode_picture(build_synthetic_picture(planes=5, fill_index=2))
         renderer.upload_background(pic.pixels, pic.palette)
@@ -108,7 +108,7 @@ def test_inspector_cli_headless_and_screenshot(tmp_path: Path) -> None:
 
 def test_moderngl_renderer_top_left_sprite_ignores_hotspot_and_centering() -> None:
     ctx = moderngl.create_standalone_context(require=330)
-    renderer = MoonstoneRenderer(ctx)
+    renderer = HardDaysRenderer(ctx)
     try:
         pic = decode_picture(build_synthetic_picture(planes=5, fill_index=2))
         renderer.upload_background(pic.pixels, pic.palette)

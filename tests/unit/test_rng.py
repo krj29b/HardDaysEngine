@@ -1,14 +1,14 @@
 """The original random number generator (ARCHITECTURE.md §11.2).
 
 The reference model below follows the 68000 instruction sequence step by step, with the X flag
-of ``ROXR`` kept explicitly, so it shares no code with :class:`pymoonstone.sim.rng.Rng`.
+of ``ROXR`` kept explicitly, so it shares no code with :class:`harddaysengine.sim.rng.Rng`.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from pymoonstone.sim.rng import Rng
+from harddaysengine.sim.rng import Rng
 
 _MASK = 0xFFFFFFFF
 

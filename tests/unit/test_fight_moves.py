@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import Fight, Wall
-from pymoonstone.sim.fight_moves import (
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import Fight, Wall
+from harddaysengine.sim.fight_moves import (
     ALL_DIRECTIONS,
     DOWN,
     LEFT,

@@ -2,8 +2,8 @@
 
 import pytest
 
-from pymoonstone.sim.fight import KEEP, Restart
-from pymoonstone.sim.fight_ai.guardian import (
+from harddaysengine.sim.fight import KEEP, Restart
+from harddaysengine.sim.fight_ai.guardian import (
     HOLD,
     STAGE1,
     STAGE3,
@@ -17,8 +17,8 @@ from pymoonstone.sim.fight_ai.guardian import (
     guardian_handler,
     victim_release,
 )
-from pymoonstone.sim.fight_script import RoutineCall
-from pymoonstone.sim.m68k import u16
+from harddaysengine.sim.fight_script import RoutineCall
+from harddaysengine.sim.m68k import u16
 from tests.unit.guardian_setup import GUARDIAN, SCRIPTS, make_guardian
 from tests.unit.knight_setup import RULES
 

@@ -2,8 +2,8 @@
 
 import pytest
 
-from pymoonstone.sim.town_types import TownButton, TownData
-from pymoonstone.sim.towns import TownAction, TownState, reset_pointer, step
+from harddaysengine.sim.town_types import TownButton, TownData
+from harddaysengine.sim.towns import TownAction, TownState, reset_pointer, step
 
 
 def _data() -> TownData:

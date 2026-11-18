@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.fight import END, KEEP, Fight, FightError, HandlerResult, Restart
-from pymoonstone.sim.fight_hurt import (
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.fight import END, KEEP, Fight, FightError, HandlerResult, Restart
+from harddaysengine.sim.fight_hurt import (
     Blow,
     block_check,
     contact_damage,
@@ -14,7 +14,7 @@ from pymoonstone.sim.fight_hurt import (
     knight_hurt,
     protected,
 )
-from pymoonstone.sim.inventory import Inventory
+from harddaysengine.sim.inventory import Inventory
 from tests.unit.knight_setup import RULES, TABLES, make_fight
 
 SCRIPTS = RULES.scripts

@@ -1,6 +1,6 @@
 # AGENTS.md: onboarding for AI coding agents
 
-You are working on **pymoonstone**, a clean-room Python reimplementation of *Moonstone: A Hard
+You are working on **HardDaysEngine**, a clean-room Python reimplementation of *Moonstone: A Hard
 Days Knight* (Mindscape, 1991, Amiga). It has a deterministic 50 Hz integer simulation core and a
 ModernGL + `pygame-ce` presentation layer. This file is the **entry point for every agent session**.
 Read it fully before touching code. (`GEMINI.md` only points here.)
@@ -49,7 +49,7 @@ If a task is too large for one session, split it into `T<id>a`, `T<id>b` and so 
 - Tests that need real disks use `@pytest.mark.adf` and the `adf_dir` fixture, which skips when no
   disks are found. CI tests use **synthetic** ADF images built in `tests/fixtures/`.
 
-### Determinism (`src/pymoonstone/sim/`)
+### Determinism (`src/harddaysengine/sim/`)
 - **No floats.** Integers only; fixed point where the original used it. Wrap to 16 or 32 bits where
   the 68000 relies on overflow.
 - **68000 ≠ Python arithmetic.** `DIVS`/`DIVU` truncate toward zero and Python `//` floors, so use
@@ -61,7 +61,7 @@ If a task is too large for one session, split it into `T<id>a`, `T<id>b` and so 
 
 ### Layering (`.importlinter`)
 `cli -> app -> render -> assets -> sim`. A layer may import only layers to its right.
-- `sim` imports no framework, no I/O module, and no other `pymoonstone` layer.
+- `sim` imports no framework, no I/O module, and no other `harddaysengine` layer.
 - `assets` never imports `pygame` or `moderngl`, so it runs headless in CI.
 - `render` never imports `pygame`. It receives a `moderngl.Context` from `app`.
 
@@ -89,11 +89,11 @@ uv run python scripts/quality_gate.py    # the full gate; must be green before D
 uv run pytest -m "not adf and not gl"    # tests needing neither disks nor OpenGL
 uv run pytest -m adf                     # tests needing the real disks
 uv run lint-imports                      # layering contracts only
-uv run pymoonstone --version
-uv run pymoonstone --list-disks
+uv run harddaysengine --version
+uv run harddaysengine --list-disks
 ```
 
-ADF location, in priority order: `--adf-dir`, then the `PYMOONSTONE_ADF_DIR` environment variable,
+ADF location, in priority order: `--adf-dir`, then the `HARDDAYSENGINE_ADF_DIR` environment variable,
 then `adf_dir =` in `config.toml`, then `./disks/`.
 
 ## 5. When stuck

@@ -7,16 +7,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.game import GameScene, GameSession
-from pymoonstone.app.input import InputFrame, PlayerInput
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.sim.m68k import s16
-from pymoonstone.sim.types import KnightId
+from harddaysengine.app.game import GameScene, GameSession
+from harddaysengine.app.input import InputFrame, PlayerInput
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.sim.m68k import s16
+from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pymoonstone.sim.sheet_types import SheetRegion
+    from harddaysengine.sim.sheet_types import SheetRegion
 
 pytestmark = pytest.mark.adf
 
@@ -168,7 +168,7 @@ def test_status_preserves_existing_map_dragon_and_does_not_respawn_it(adf_dir: P
 
 
 def test_natural_trogg_lair_win_opens_operable_loot(adf_dir: Path) -> None:
-    from pymoonstone.app.fight_audit import fight_host_melee_input
+    from harddaysengine.app.fight_audit import fight_host_melee_input
 
     session = GameSession(
         disk_set=DiskSet.from_directory(adf_dir),
@@ -204,7 +204,7 @@ def test_natural_trogg_lair_win_opens_operable_loot(adf_dir: Path) -> None:
 
 @pytest.mark.gl
 def test_sheet_rendering_is_read_only_and_all_icons_are_loaded(adf_dir: Path) -> None:
-    from pymoonstone.app.audit import AuditRig
+    from harddaysengine.app.audit import AuditRig
 
     rig = AuditRig(adf_dir)
     try:

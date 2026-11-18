@@ -4,8 +4,8 @@ from dataclasses import fields
 
 import pytest
 
-from pymoonstone.sim.fight import Fight, Restart
-from pymoonstone.sim.fight_ai.snatcher import (
+from harddaysengine.sim.fight import Fight, Restart
+from harddaysengine.sim.fight_ai.snatcher import (
     CARRY,
     FREE,
     GONE,
@@ -17,7 +17,7 @@ from pymoonstone.sim.fight_ai.snatcher import (
     SnatcherScripts,
     snatcher_handler,
 )
-from pymoonstone.sim.fight_moves import DOWN, FIRE
+from harddaysengine.sim.fight_moves import DOWN, FIRE
 from tests.unit.brawler_setup import make_trogg_fight
 from tests.unit.knight_setup import RULES
 

@@ -10,8 +10,8 @@ import os
 import sys
 from pathlib import Path
 
-from pymoonstone.app.audit import AUDIT_SCENARIOS, run_audit
-from pymoonstone.app.config import find_adf_images, resolve_adf_dir
+from harddaysengine.app.audit import AUDIT_SCENARIOS, run_audit
+from harddaysengine.app.config import find_adf_images, resolve_adf_dir
 
 ROOT = Path(__file__).resolve().parent.parent
 REQUIRED_DISK_COUNT = 3

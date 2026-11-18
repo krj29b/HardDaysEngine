@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.config import (
+from harddaysengine.app.config import (
     ADF_IMAGE_SIZE,
     ENV_ADF_DIR,
     ConfigError,

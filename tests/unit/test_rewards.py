@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.inventory import Inventory
-from pymoonstone.sim.rewards import (
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.inventory import Inventory
+from harddaysengine.sim.rewards import (
     GiftState,
     item_gift,
     pick_stat,
@@ -15,7 +15,7 @@ from pymoonstone.sim.rewards import (
     transfer_loot,
     wizard_gift,
 )
-from pymoonstone.sim.rng import Rng
+from harddaysengine.sim.rng import Rng
 from tests.unit.map_setup import make_world
 from tests.unit.turn_setup import GIFTS
 

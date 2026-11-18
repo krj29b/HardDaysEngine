@@ -9,22 +9,22 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.fight_audit import build_caster_audit
-from pymoonstone.app.fight_runtime import FightLoader, FightRuntime
-from pymoonstone.app.scene_assets import GameAssetBundle
-from pymoonstone.assets.adf import DiskSet
-from pymoonstone.assets.caster_rules import parse_caster_rules
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.hunk import parse_hunk_executable
-from pymoonstone.sim.fight import FIGHTER_DIED, Fight, HandlerResult, Restart, fighter_died
-from pymoonstone.sim.fight_ai.caster import CASTER_TYPE
-from pymoonstone.sim.fight_setup import lane_depth
-from pymoonstone.sim.m68k import s16
+from harddaysengine.app.fight_audit import build_caster_audit
+from harddaysengine.app.fight_runtime import FightLoader, FightRuntime
+from harddaysengine.app.scene_assets import GameAssetBundle
+from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.caster_rules import parse_caster_rules
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.sim.fight import FIGHTER_DIED, Fight, HandlerResult, Restart, fighter_died
+from harddaysengine.sim.fight_ai.caster import CASTER_TYPE
+from harddaysengine.sim.fight_setup import lane_depth
+from harddaysengine.sim.m68k import s16
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from pymoonstone.sim.fight_script import RoutineCall
+    from harddaysengine.sim.fight_script import RoutineCall
 
 pytestmark = pytest.mark.adf
 

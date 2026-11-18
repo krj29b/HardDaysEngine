@@ -7,10 +7,10 @@ import zlib
 
 import pytest
 
-from pymoonstone.assets.fight_defs import NOT_A_SCRIPT, _script_entry, _wave_reach
-from pymoonstone.assets.fight_palette import MogVersionError
-from pymoonstone.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
-from pymoonstone.assets.mog_code import (
+from harddaysengine.assets.fight_defs import NOT_A_SCRIPT, _script_entry, _wave_reach
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.hunk import HUNK_CODE, HUNK_DATA, DecodedHunkExecutable, HunkSection
+from harddaysengine.assets.mog_code import (
     BSS_HUNK,
     DATA_HUNK,
     OP_LEA_A0,

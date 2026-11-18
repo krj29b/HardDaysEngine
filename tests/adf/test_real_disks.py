@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pymoonstone.app.game import GameScene, GameSession
-from pymoonstone.app.input import InputFrame
-from pymoonstone.app.scene_assets import GameAssetBundle, build_intro_cinematic_frame
-from pymoonstone.assets import (
+from harddaysengine.app.game import GameScene, GameSession
+from harddaysengine.app.input import InputFrame
+from harddaysengine.app.scene_assets import GameAssetBundle, build_intro_cinematic_frame
+from harddaysengine.assets import (
     DiskSet,
     composite_arena_background,
     decode_arena,

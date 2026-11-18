@@ -1,11 +1,11 @@
 """Explicit synthetic map data, never a runtime fallback (§11.18)."""
 
-from pymoonstone.sim.actor import Actor
-from pymoonstone.sim.inventory import Inventory
-from pymoonstone.sim.map_rules import LairStart, MapNode, MapRules
-from pymoonstone.sim.overworld import OverworldState
-from pymoonstone.sim.rng import Rng
-from pymoonstone.sim.types import KnightId
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.inventory import Inventory
+from harddaysengine.sim.map_rules import LairStart, MapNode, MapRules
+from harddaysengine.sim.overworld import OverworldState
+from harddaysengine.sim.rng import Rng
+from harddaysengine.sim.types import KnightId
 
 KINDS = {KnightId.RED: 3, KnightId.BLUE: 0, KnightId.GREEN: 2, KnightId.YELLOW: 1}
 RULES = MapRules(

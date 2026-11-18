@@ -2,10 +2,10 @@
 
 import pytest
 
-from pymoonstone.sim.fight import END, Fight, Restart, idle_object
-from pymoonstone.sim.fight_ai.effects import HitSparkRules
-from pymoonstone.sim.fight_ai.stalker import STALKER_TYPE, StalkerRules, stalker_handler
-from pymoonstone.sim.m68k import u16
+from harddaysengine.sim.fight import END, Fight, Restart, idle_object
+from harddaysengine.sim.fight_ai.effects import HitSparkRules
+from harddaysengine.sim.fight_ai.stalker import STALKER_TYPE, StalkerRules, stalker_handler
+from harddaysengine.sim.m68k import u16
 from tests.unit.brawler_setup import make_trogg_fight
 from tests.unit.knight_setup import RULES
 

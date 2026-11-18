@@ -1,7 +1,7 @@
-# pymoonstone configuration example
+# HardDaysEngine configuration example
 # Copy to config.toml (git-ignored) and adjust.
 
 # Directory holding the three original Amiga .adf disk images (any file names).
-# Can also be set with --adf-dir or the PYMOONSTONE_ADF_DIR environment variable.
+# Can also be set with --adf-dir or the HARDDAYSENGINE_ADF_DIR environment variable.
 # Default when unset: ./disks
 adf_dir = ""

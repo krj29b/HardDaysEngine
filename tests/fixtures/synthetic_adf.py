@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from pymoonstone.assets.adf import (
+from harddaysengine.assets.adf import (
     ADF_BLOCK_SIZE,
     ADF_IMAGE_SIZE,
     ADF_ROOT_BLOCK,
@@ -20,10 +20,10 @@ from pymoonstone.assets.adf import (
     T_LIST,
     amiga_hash,
 )
-from pymoonstone.assets.hunk import HUNK_CODE, HUNK_DATA, HUNK_END, HUNK_HEADER, HUNK_RELOC32
-from pymoonstone.assets.lzss import compress_lzss_literals
-from pymoonstone.assets.picture import PICTURE_HEIGHT, PICTURE_WIDTH, indexed_to_planar
-from pymoonstone.assets.rnc import RNC1_MAGIC
+from harddaysengine.assets.hunk import HUNK_CODE, HUNK_DATA, HUNK_END, HUNK_HEADER, HUNK_RELOC32
+from harddaysengine.assets.lzss import compress_lzss_literals
+from harddaysengine.assets.picture import PICTURE_HEIGHT, PICTURE_WIDTH, indexed_to_planar
+from harddaysengine.assets.rnc import RNC1_MAGIC
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence

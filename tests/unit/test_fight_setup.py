@@ -2,7 +2,7 @@
 
 import pytest
 
-from pymoonstone.sim.fight_setup import (
+from harddaysengine.sim.fight_setup import (
     FightWarnings,
     SpawnLanes,
     lane_depth,
