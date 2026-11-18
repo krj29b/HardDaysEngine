@@ -46,6 +46,7 @@ from harddaysengine.assets.palette import default_combat_palette
 from harddaysengine.render.renderer import HardDaysRenderer
 from harddaysengine.render.scene import SceneRenderer, default_bitmap_font
 from harddaysengine.sim.overworld import EncounterTrigger, MapSprite, TriggerKind, open_menu, scan
+from harddaysengine.sim.stonehenge import StonePhase
 from harddaysengine.sim.towns import TownEntry
 from harddaysengine.sim.types import KnightId
 
@@ -711,7 +712,107 @@ def _audit_shop_click(session: GameSession, field: int, side: int, mask: int = 0
     session.step_tick(_frame(PlayerInput(fire=True)))
 
 
+def _stone_until(session: GameSession, predicate: Callable[[], bool]) -> None:
+    for _ in range(2000):
+        if predicate():
+            return
+        _step(session, 1)
+    raise ValueError("Stonehenge audit continuation did not finish")
+
+
+def _stone_phase(session: GameSession, phase: StonePhase) -> bool:
+    screen = session.stone_screen
+    return screen is not None and screen.state.phase == phase and not session.palette_fx.is_fading
+
+
+def _stone_offer(rig: AuditRig, kind: int) -> GameSession:
+    session = rig.new_session()
+    session.actors[_PRIMARY].kind = kind
+    session.actors[_PRIMARY].lives = 3
+    session.inventories[1].counts[0] = 1
+    session._open_stonehenge(_PRIMARY)
+    _stone_until(session, lambda: _stone_phase(session, StonePhase.OFFER))
+    _step(session, 10)
+    return session
+
+
+def _stone_close_sheet(session: GameSession) -> None:
+    sheet = session.sheet_screen
+    if sheet is None:
+        raise ValueError("Stonehenge audit requires its shared sheet")
+    _settle_fade(session)
+    done = next(r for r in sheet.state.regions if r.id == 7)
+    sheet.state.pointer_x, sheet.state.pointer_y = done.x, done.y
+    _tap(session, PlayerInput(fire=True))
+
+
+def _stone_ritual_shots(rig: AuditRig, kind: int) -> Iterator[AuditShot]:
+    session = _stone_offer(rig, kind)
+    if kind == 0:
+        yield rig.capture(session, "stone_offer")
+    _tap(session, PlayerInput(fire=True))
+    _stone_until(session, lambda: session.sheet_screen is not None)
+    _settle_fade(session)
+    if kind == 0:
+        yield rig.capture(session, "stone_sheet3")
+    sheet = session.sheet_screen
+    if sheet is None:
+        raise ValueError("Stonehenge audit requires offer sheet3")
+    item = next(r for r in sheet.state.regions if r.type == 12 and r.field == 0)
+    sheet.state.pointer_x, sheet.state.pointer_y = item.x, item.y
+    _tap(session, PlayerInput(fire=True))
+    _stone_until(session, lambda: _stone_phase(session, StonePhase.RITUAL_MESSAGE))
+    if kind == 0:
+        yield rig.capture(session, "stone_ritual_message")
+    _stone_until(session, lambda: _stone_phase(session, StonePhase.RITUAL))
+    yield rig.capture(session, f"stone_ritual_class{kind}")
+    if kind == 0:
+        yield from _stone_finish_shots(rig, session)
+
+
+def _stone_finish_shots(rig: AuditRig, session: GameSession) -> Iterator[AuditShot]:
+    for ticks in (120, 120, 120):
+        _step(session, ticks)
+        yield rig.capture(session, f"stone_natural_tick{session.tick_count}")
+    _stone_until(
+        session, lambda: session.sheet_screen is not None and session.sheet_screen.state.number == 9
+    )
+    _settle_fade(session)
+    yield rig.capture(session, "stone_blessed_temple")
+    _stone_close_sheet(session)
+    _stone_until(session, lambda: session.scene == GameScene.OVERWORLD)
+    _settle_fade(session)
+    yield rig.capture(session, "stone_spent_exit")
+
+
+def _stone_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    """Natural offer/ritual for all four class ramps, refusal and encoded ending (§12.34)."""
+    for kind in range(4):
+        yield from _stone_ritual_shots(rig, kind)
+    session = _stone_offer(rig, 3)
+    _tap(session, PlayerInput(fire=True))
+    _stone_until(session, lambda: session.sheet_screen is not None)
+    _stone_close_sheet(session)
+    _stone_until(
+        session, lambda: session.sheet_screen is not None and session.sheet_screen.state.number == 9
+    )
+    _settle_fade(session)
+    yield rig.capture(session, "stone_declined_temple")
+    session = rig.new_session()
+    session.overworld.moon_frame = 46
+    session.inventories[1].counts[11] = 4
+    session._open_stonehenge(_PRIMARY)
+    _stone_until(session, lambda: _stone_phase(session, StonePhase.QUEST))
+    _step(session, 30)
+    yield rig.capture(session, "stone_quest_complete")
+    _tap(session, PlayerInput(fire=True))
+    if session.ending_request is None:
+        raise ValueError("Stonehenge audit did not emit an ending request")
+    yield rig.capture(session, f"stone_program_flags_{session.ending_request.flags:02X}")
+
+
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
+    "stonehenge": _stone_shots,
     "shops": _shop_shots,
     "services": _service_shots,
     "dice": _dice_shots,

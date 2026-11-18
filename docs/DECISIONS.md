@@ -749,3 +749,32 @@ state. The existing town/sheet/service/dice models remain authoritative. Actual
 child-screen return tests replace the old mocked service-boundary checks. The
 places audit now captures both welcomes, all ten outcomes, Space sheets and
 returns; original content and generated pictures remain outside version control.
+
+## ADR-039: Stonehenge retains its caller and runs the ritual on the existing script engine
+**Status:** ACCEPTED (2026-11-18, T11.19; follows ADR-029 / ADR-035 / ADR-037)
+**Context:** The original visit branches between an item offer and a matching-moonstone
+hand-over to program. Its ritual has two hunk-42 jobs and a percent-draw sound callback;
+a separate animation or a generic victory screen would lose its script state and rules.
+**Decision:** assets/stonehenge_data.py checks executable operands, relocated text and
+asset pointers, class shade rows, spawn/handler identity, fade periods and wait lengths.
+Frozen StoneRules and RitualRules retain these values; the simulation owns the match,
+blessing and ending-code rules. RitualRun uses Fight/ScriptEngine with a fresh job pool
+and the campaign Rng. The two initial passes precede the decoded frame intervals. The
+stop handler ends its job and prevents the following engine tick, matching the original
+loop. The percent callback is local to this ritual script image and emits ordered sound
+requests without changing the fight sound decoder's scope.
+
+StoneScreen presents retained messages or ordered FightCanvas output and decodes He.a.
+GameSession keeps StoneState, ritual work and waits in replay hashes, runs the decoded
+blocking PAL fades, and retains shared sheets during their outgoing fades. An offered
+item is consumed by existing sheet3 rules; blessing occurs only after natural ritual
+completion. Sheet9 closes through the spent exit. A matching stone emits an immutable
+EndingRequest with the decoded executable filename and exact boot flags. The quest
+message remains visible in the terminal hand-over phase for T11.22 to consume; it does
+not fall through to the old wizard-picture victory renderer or return to the map.
+**Consequences:** Class colours, text, sound ids, frame waits and bit mappings come from
+user disks. Equality-only life caps, byte wrapping and the Stonehenge/damage moonstone
+pairing difference remain intact. Actual ending playback is T11.22; exact sample-address
+and synth wiring remain T11.23. The ritual bank is decoded and its requests are emitted
+through the existing audio boundary. Contact sheets cover both branches, natural ritual
+poses, all four class ramps, temple returns and program flags. No game data is committed.

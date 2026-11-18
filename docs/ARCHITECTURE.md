@@ -4259,3 +4259,62 @@ callers, both healers and Waterdeep's mystic are checked through their real
 screens and returns. The real-disk town contact sheet includes both welcomes,
 each of the ten button outcomes, Space sheets and service returns. Loading
 screens for fights and other places remain their own callers.
+
+### 12.34 Stonehenge implementation boundary (T11.19)
+
+Read the four bit/frame comparisons at hunk0 $177E/$178C/$179A/$17A8,
+phase ending-bit rows at $1822/$182C/$1836 and class ending-bit rows at
+$1844/$1850/$185C/$1868. Check instruction words and their branch forms.
+Read the final flag at $189A, the blessing cap/gain at $17F8/$1800, and
+quest wait at $1882. The offer and quest lists are reached through checked
+LEAs $17B6/$1876. The program filename is the relocated LEA at $18A4;
+the encoded hand-over is retained until T11.22 consumes it. It never returns
+to the map or reuses the wizard picture as an ending.
+
+The ritual entry at $A92A frees jobs and shows the recoloured list reached
+through $A93E (hunk42). Read filenames at $A95E/$A996, and the sound bank
+through the checked call at $A9A2 into hunk16 $1E8 and that entry's relocated
+LEA into its filename hunk. Retain the bank as decoded sample data. Actual
+sample address/sequence wiring remains T11.23c. Both spawn blocks at $A9B6
+and $A9DA supply hunk42 scripts, position, facing and type; retain this order.
+The handler installed at $A9AE must name $AAC0 and its cleared script and
+stop-word stores must be checked. It returns END for the invoking job and
+sets the ritual's done latch.
+
+Class shade rows are the checked compare/push runs at $AB74 through the
+RTS at $ABE8: three postincrement words followed by one final word, preserving
+class order and values. The palette byte offset at $AA2E is divided by two;
+the target period comes from $AA5E. Three fixed-channel sound requests are
+read at $AA3A/$AA44/$AA4E. The main frame wait is $AA96 and must agree with
+the frame-mode store at $AA6E. No original colours, sounds or scripts are
+embedded in source. The script callback at $AAA8 takes one percent draw,
+compares the threshold at $AAAE and emits the play id at $AAB4 only when
+not greater. Identify its relocated script operands in the script image;
+all other unknown callbacks raise.
+
+Ritual jobs use the existing Fight/ScriptEngine and ordered FightCanvas.
+There is one initial engine pass before palette setup, followed immediately
+by the loop's first pass; thereafter pass intervals use the decoded wait.
+Jobs continue while the four-VBL target fade runs. Stop as soon as the handler
+sets done, without inventing an input skip. The original final silent fade
+is an OUT fade: both $8B26 and $8B46 use the black target. Decode their period
+at $8B2E/$8B4E and wait at $8B36/$8B5E, and check agreement with the message
+fade period/wait at $8B7C/$8B86. These routines wait 36 PAL ticks even when
+the palette reaches its target sooner. This task's blocking phases retain
+that minimum wait as well as the palette clock; no render call advances them.
+
+The campaign retains the Stonehenge owner, phase, fire-wait cell, wait counter,
+ending request and ritual job state in hashes. An unmatched visit displays
+the offer, waits for press/release, fades out, resets last-item and opens
+sheet3. Closing sheet3 first fades its retained screen; an offered item runs
+the ritual and then the original blessing, otherwise no reward is given.
+Both paths open sheet9 and spend the turn only when it closes. A matching
+visit instead shows the quest text, waits the decoded 20 ticks after its
+message fade, waits for press/release and emits the encoded program request.
+The terminal hand-over retains that message until the ending consumer lands.
+
+Offer-region detail: only existing inventory regions whose field is below
+$14 are converted to type12. Keys, moonstones and worn equipment remain
+unchanged. The normal worn sharp-sword icon addresses actor field $58, so it
+does not expose slot4 to the offer UI. Preserve the slot4 drop handler without
+inventing a selectable region for it, just as for the market's sale fallback.

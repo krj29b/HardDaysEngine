@@ -34,6 +34,7 @@ from harddaysengine.app.scene_assets import (
 )
 from harddaysengine.app.service_screen import ServiceScreen
 from harddaysengine.app.sheet_screen import SheetScreen
+from harddaysengine.app.stonehenge_screen import StoneScreen
 from harddaysengine.app.town_screen import TownScreen
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.dice_house_data import SCRIPT_HUNK as DICE_SCRIPT_HUNK, parse_dice_house
@@ -86,6 +87,7 @@ from harddaysengine.sim.rng import DEFAULT_SEED, Rng
 from harddaysengine.sim.service_screen import ServiceWorld
 from harddaysengine.sim.service_screen_types import ServiceKind
 from harddaysengine.sim.stock import initialize as initialize_stock
+from harddaysengine.sim.stonehenge import EndingRequest, StonePhase, bless
 from harddaysengine.sim.towns import TownAction, TownEntry
 from harddaysengine.sim.turns import TurnResult, advance as advance_turn
 from harddaysengine.sim.types import KnightId
@@ -130,6 +132,7 @@ class GameScene(IntEnum):
     NEW_DAY = 8
     SERVICE = 9
     DICE = 10
+    STONEHENGE = 11
 
 
 @dataclass(slots=True, frozen=True)
@@ -219,6 +222,7 @@ class GameSession:
         self.last_defeat_mask: int = 0
         self.active_encounter: ActiveEncounter | None = None
         self.town_screen: TownScreen | None = None
+        self.stone_screen: StoneScreen | None = None
         self.palette_fx: PaletteFxState = PaletteFxState(
             _palette_to_rgb12(default_combat_palette())
         )
@@ -248,6 +252,7 @@ class GameSession:
         self.knight_combat = {kid: KnightState(knight_id=kid) for kid in KnightId}
         self.active_encounter = None
         self.town_screen = None
+        self.stone_screen = None
         self.sheet_screen = None
         self.service_screen = None
         self.dice_screen = None
@@ -299,26 +304,19 @@ class GameSession:
             self.audio.step_vbl()
 
     def _step_active_scene(self, frame: InputFrame, primary: PlayerInput) -> None:
-        if self.scene == GameScene.TITLE:
-            self._step_title(primary)
-        elif self.scene == GameScene.KNIGHT_SELECT:
-            self._step_knight_select(primary)
-        elif self.scene == GameScene.OVERWORLD:
-            self._step_overworld(frame)
-        elif self.scene == GameScene.COMBAT:
-            self._step_combat(frame)
-        elif self.scene == GameScene.LOCATION:
-            self._step_location(frame)
-        elif self.scene == GameScene.STATUS:
-            self._step_status(frame)
-        elif self.scene == GameScene.NEW_DAY:
-            self._step_new_day(primary)
-        elif self.scene == GameScene.SERVICE:
-            self._step_service(frame)
-        elif self.scene == GameScene.DICE:
-            self._step_dice(frame)
-        else:
-            self._step_end_screen(primary)
+        scenes: dict[GameScene, Callable[[], None]] = {
+            GameScene.TITLE: lambda: self._step_title(primary),
+            GameScene.KNIGHT_SELECT: lambda: self._step_knight_select(primary),
+            GameScene.OVERWORLD: lambda: self._step_overworld(frame),
+            GameScene.COMBAT: lambda: self._step_combat(frame),
+            GameScene.LOCATION: lambda: self._step_location(frame),
+            GameScene.STATUS: lambda: self._step_status(frame),
+            GameScene.NEW_DAY: lambda: self._step_new_day(primary),
+            GameScene.SERVICE: lambda: self._step_service(frame),
+            GameScene.DICE: lambda: self._step_dice(frame),
+            GameScene.STONEHENGE: lambda: self._step_stone(frame),
+        }
+        scenes.get(self.scene, lambda: self._step_end_screen(primary))()
 
     def _play_title_music(self) -> None:
         if self.audio is not None and self.asset_bundle is not None:
@@ -679,7 +677,7 @@ class GameSession:
         elif row.kind in (25, 26):
             self._open_town(kid, waterdeep=row.kind == 26)
         elif row.kind == 27:
-            self._open_stonehenge_or_victory(kid)
+            self._open_stonehenge(kid)
         else:
             self.last_status = "PLACE SCREEN UNAVAILABLE"
         if self.scene != GameScene.OVERWORLD:
@@ -743,9 +741,154 @@ class GameSession:
             screen.state.entry = TownEntry.READY
             self._begin_fade_in(screen.picture.palette)
 
-    def _open_stonehenge_or_victory(self, knight_id: KnightId) -> None:
-        """Keep the original ritual caller explicit until T11.19 installs it."""
-        self.last_status = f"{knight_id.name}: STONEHENGE UNAVAILABLE (T11.19)"
+    def _open_stonehenge(self, knight_id: KnightId) -> None:
+        """Original offer or moonstone match, following the visit prologue (§12.34)."""
+        if self.asset_bundle is None:
+            self.last_status = "ORIGINAL DISKS REQUIRED FOR STONEHENGE"
+            return
+        owner = int(knight_id) + 1
+        self.stone_screen = StoneScreen(
+            self.asset_bundle,
+            owner,
+            self.actors[owner - 1],
+            self.inventories[owner],
+            self.overworld.moon_frame,
+        )
+        palette = self._overworld_target_palette()
+        self.overworld.setup_turn()
+        self.overworld.colors.active = False
+        self._clear_map_jobs()
+        self._map_key = 0
+        self.scene = GameScene.STONEHENGE
+        self.palette_fx.set_palette(_palette_to_rgb12(palette))
+        self._stone_fade(out=True)
+
+    @property
+    def ending_request(self) -> EndingRequest | None:
+        """Encoded program hand-over, consumed by the ending host in T11.22 (§12.34)."""
+        return None if self.stone_screen is None else self.stone_screen.state.request
+
+    def _stone_snapshot(self) -> dict[str, object] | None:
+        return None if self.stone_screen is None else self.stone_screen.snapshot()
+
+    def _stone_fade(self, *, out: bool) -> None:
+        screen = self.stone_screen
+        if screen is None:
+            raise ValueError("Stonehenge fade requires its visit")
+        screen.state.wait = screen.rules.fade_wait
+        if out:
+            self.palette_fx.fade_out(divisor=screen.rules.fade_period)
+        else:
+            self.palette_fx.fade_in(
+                _palette_to_rgb12(screen.message_palette()),
+                divisor=screen.rules.fade_period,
+                from_black=True,
+            )
+
+    def _stone_message(self, phase: StonePhase) -> None:
+        screen = self.stone_screen
+        if screen is None:
+            raise ValueError("Stonehenge message requires its visit")
+        screen.state.phase, screen.state.fire_held = phase, False
+        self._stone_fade(out=False)
+        if phase == StonePhase.QUEST:
+            screen.state.wait += screen.rules.quest_wait
+
+    def _step_stone(self, frame: InputFrame) -> None:
+        screen = self.stone_screen
+        if screen is None:
+            raise ValueError("Stonehenge scene has no visit")
+        state = screen.state
+        if state.phase == StonePhase.RITUAL:
+            self._step_stone_ritual(screen)
+            return
+        state.wait = max(0, state.wait - 1)
+        if state.wait or self.palette_fx.is_fading:
+            return
+        kid = KnightId(state.knight - 1)
+        inp = self._player_input(frame, kid)
+        self._stone_continue(screen, inp.fire or inp.confirm)
+
+    def _stone_continue(self, screen: StoneScreen, fire: bool) -> None:
+        state = screen.state
+        if state.phase == StonePhase.MAP_OUT:
+            self._stone_message(StonePhase.QUEST if state.matched else StonePhase.OFFER)
+        elif state.phase in (StonePhase.OFFER, StonePhase.QUEST):
+            if not state.released(fire):
+                return
+            if state.phase == StonePhase.QUEST:
+                state.phase = StonePhase.HAND_OVER
+                state.request = EndingRequest(screen.rules.program, state.ending)
+            else:
+                state.phase = StonePhase.OFFER_OUT
+                self._stone_fade(out=True)
+        else:
+            self._stone_transition(screen)
+
+    def _stone_transition(self, screen: StoneScreen) -> None:
+        state = screen.state
+        if state.phase == StonePhase.OFFER_OUT:
+            self.last_sheet_item = 65535
+            state.phase = StonePhase.OFFER_SHEET
+            self._open_sheet(3)
+        elif state.phase == StonePhase.RITUAL_MESSAGE:
+            state.phase = StonePhase.RITUAL_MESSAGE_OUT
+            self._stone_fade(out=True)
+        elif state.phase == StonePhase.RITUAL_MESSAGE_OUT:
+            state.phase = StonePhase.RITUAL
+            screen.start_ritual(self.overworld.prng)
+            if self.audio is not None:
+                self.audio.mixer.register_sample_bank(screen.bank)
+            self.palette_fx.set_palette([0] * 32)
+            self.palette_fx.fade_to(
+                _palette_to_rgb12(screen.ritual_palette()),
+                divisor=screen.rules.ritual.palette_period,
+            )
+            self._step_stone_ritual(screen)
+        elif state.phase == StonePhase.RITUAL_OUT:
+            bless(self.actors[state.knight - 1], self.inventories[state.knight], screen.rules)
+            self._stone_temple(screen)
+
+    def _step_stone_ritual(self, screen: StoneScreen) -> None:
+        done = screen.advance_ritual(self.tick_count)
+        if screen.run is None:
+            raise ValueError("Stonehenge ritual did not start")
+        self._play_requests(screen.run.sounds)
+        if done:
+            screen.state.phase = StonePhase.RITUAL_OUT
+            self._stone_fade(out=True)
+
+    def _stone_temple(self, screen: StoneScreen) -> None:
+        screen.state.phase = StonePhase.TEMPLE
+        self._open_sheet(9)
+
+    def _close_stone_sheet(self, sheet: SheetScreen) -> None:
+        screen = self.stone_screen
+        if screen is None:
+            raise ValueError("Stonehenge sheet has no visit")
+        state = screen.state
+        if state.phase in (StonePhase.OFFER_SHEET, StonePhase.TEMPLE):
+            state.phase = (
+                StonePhase.OFFER_CLOSING
+                if state.phase == StonePhase.OFFER_SHEET
+                else StonePhase.TEMPLE_CLOSING
+            )
+            self._stone_fade(out=True)
+            return
+        state.wait = max(0, state.wait - 1)
+        if state.wait or self.palette_fx.is_fading:
+            return
+        self.last_sheet_item = sheet.state.last_item
+        self.sheet_screen = None
+        if state.phase == StonePhase.TEMPLE_CLOSING:
+            self.stone_screen = None
+            self.overworld.spent = self.overworld.budget
+            self._reenter_map()
+        elif self.last_sheet_item == 65535:
+            self._stone_temple(screen)
+        else:
+            self.scene = GameScene.STONEHENGE
+            self._stone_message(StonePhase.RITUAL_MESSAGE)
 
     def _handle_overworld_triggers(
         self,
@@ -760,7 +903,7 @@ class GameSession:
                 self._open_town(knight_id, waterdeep=trig.node_id == 26)
                 return
             if trig.kind == TriggerKind.STONEHENGE_RITUAL:
-                self._open_stonehenge_or_victory(knight_id)
+                self._open_stonehenge(knight_id)
                 return
             if trig.kind in (
                 TriggerKind.WANDERING_MONSTER,
@@ -960,6 +1103,9 @@ class GameSession:
         screen = self.sheet_screen
         if screen is None:
             raise ValueError("no shared sheet to close")
+        if self.stone_screen is not None:
+            self._close_stone_sheet(screen)
+            return
         self.last_sheet_item = screen.state.last_item
         if screen.state.lair >= 0:
             if screen.state.read_only:
@@ -1237,6 +1383,7 @@ class GameSession:
             "map_key": self._map_key,
             "calendar_phase": self._calendar_phase,
             "town": asdict(self.town_screen.state) if self.town_screen else None,
+            "stone": self._stone_snapshot(),
             "sheet": asdict(self.sheet_screen.state) if self.sheet_screen else None,
             "service": asdict(self.service_screen.state) if self.service_screen else None,
             "dice": self.dice_screen.run.snapshot() if self.dice_screen else None,
@@ -1408,12 +1555,21 @@ class GameSession:
             GameScene.NEW_DAY: lambda: self._render_new_day(scene_renderer, font),
             GameScene.SERVICE: lambda: self._render_service_scene(scene_renderer),
             GameScene.DICE: lambda: self._render_dice_scene(scene_renderer),
+            GameScene.STONEHENGE: lambda: self._render_stone_scene(scene_renderer, font),
         }
         scenes.get(self.scene, lambda: self._render_end_scene(scene_renderer, font))()
 
         if self.palette_fx.is_fading or self.palette_fx.is_flashing:
             scene_renderer.set_palette_fx(self.palette_fx.current_palette())
         scene_renderer.flush_to_fbo()
+
+    def _render_stone_scene(self, renderer: SceneRenderer, font: BitmapFont) -> None:
+        if self.stone_screen is None:
+            raise ValueError("Stonehenge scene has no visit")
+        if self.stone_screen.state.phase == StonePhase.MAP_OUT:
+            self._render_overworld_scene(renderer, font)
+        else:
+            self.stone_screen.render(renderer)
 
     def _render_dice_scene(self, renderer: SceneRenderer) -> None:
         screen = self.dice_screen
