@@ -4472,6 +4472,69 @@ expires. Missing original disks leave the map unchanged with an availability
 message, as for other original place callers. Valley setup/rewards and meetings
 remain T11.21b/c; they must not inherit this village reward or spent-exit policy.
 
+### 12.38 Valley caller, Guardian background and rewards (T11.21b)
+
+This completes §12.17 from the supported mog caller at hunk 0 $16C0..$1768,
+the Guardian loader $4908 and hunk 36 $065E..$0686. Read operands and text from
+the user's executable after checking instruction forms, relocations and helper
+identities. The keys comparison at $16CA tests byte +20 for exact equality to
+the runtime mask, not containment. The missing-key text is the relocated list
+at $16D2; the victory list at $1748 uses the shared recoloured message palette
+of §12.34. Both use message.piv, the shared message loader's bold.f, and the
+existing map character map. The writer's font check at $933A detects this bold
+font and ORs style bit 3 into each record ($9350): subtract three pixels from
+each glyph's advance for both alignment and drawing. Apply this to ordinary
+and victory messages too, not only the rotating loading text; otherwise the
+longer centred lines clip at both edges. Decode/check that style instruction.
+
+Retain the active owner through all waits, combat and optional temple. Entry
+uses the same map OUT fade/reset as §12.37. Missing keys show the normal message,
+wait through its blocking IN fade, then wait for a fresh fire press and release;
+OUT and re-enter the map without spending any remaining budget. No RNG is drawn
+by this branch (apart from the usual later map dragon spawn, when applicable).
+
+Complete keys select the Guardian scene (MOVEQ at $4908), show the shared rotating
+loading message ($4910), then load the original arena and run the existing fixed
+Guardian fight (§10.29), with the campaign's actor/inventory/RNG and spawn lane.
+Loading shares the campaign cursor, voices and blocking IN/OUT waits of §12.36.
+The loader at $3214 copies the Test picture whose runtime pointer is slot 8
+(displacement 32 at $3226). In the pack's format mapping (§3.1), this is picture
+index 5, without a .t compositor overlay. It is not map picture index 8. Region
+does not replace the Guardian palette (§10.13). The default obstacle reset is
+a relocated call to **hunk 12**, $03DA, not hunk 0: five MOVE.W immediates supply
+one segment count and its x1, x2, y, unused fields. Its y is also written as the
+floor edge at hunk14 +78. Validate that equality. Decode these values and pass
+them through the existing arena/fight boundary; do not invent a regional .t.
+
+On fight completion clear bad luck and settle the normal knight defeat first
+(restore HP, lose one life, §10.24). Preserve the last combat frame during OUT.
+On loss run turn setup and pick_stat using the existing gift table/RNG **before**
+subtracting the extra life amount at $171A. If the pick is nonzero, compare its
+byte with the floor at $1720 and subtract the amount at $1728 only when unequal;
+keep §12.17's omission of the unrelated-record write when the pick is zero.
+Bytes wrap, including a zero stat decrement to $FF. Open shared sheet9, retain
+its OUT fade, then spend the budget and re-enter the map. Sheet redraw performs
+the existing derived-stat recalculation. The total supported life loss is three.
+The spent tail copies the pre-reentry budget; if endurance dropped, the next
+map setup can reduce budget below spent. Preserve that order rather than forcing
+spent to equal the newly computed budget.
+
+On win add the decoded word at $1738 to progress with 16-bit wrap, and clear keys
+using the byte store at $1742, before showing the recoloured victory message.
+After its blocking IN fade, wait for press and release, then exactly the MOVEQ
+count at $175A (10 PAL ticks). Run the shared OUT fade before replacing the
+message, clear map input and run turn setup, then make one campaign RNG draw.
+The AND.I.L at hunk36 $0670 supplies the moonstone-bit mask; BSET at $0680
+addresses inventory byte +22. OR that bit with existing moonstones and re-enter
+the map, including when the draw is zero, without spending the turn. No reward
+roll occurs during rendering or while fire is still held.
+
+Serialize owner, keys-match decision, phase, wait, press latch and combat result;
+the active encounter already serializes every Guardian/job/RNG cell. Reset clears
+the caller. Keep palette effects installed through black blocking-wait tails.
+The dedicated background extends the existing fight loader; it does not create
+another combat engine. Exact sound-bank instrument wiring remains T11.23.
+
 ### 12.39 The ending pass of `program` (T11.22)
 
 Stonehenge with the matching moonstones stores the ending code (§12.16) in the boot flags word

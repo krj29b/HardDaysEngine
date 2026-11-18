@@ -606,7 +606,7 @@ def _host_input(session: GameSession, *, melee: bool) -> InputFrame:
         j.owner
         for j in runtime.fight.engine.jobs
         if j.active
-        and j.type in (*BRAWLER_TYPES, CASTER_TYPE)
+        and j.type in (*BRAWLER_TYPES, CASTER_TYPE, GUARDIAN_TYPE)
         and s16(runtime.fight.actor(j.owner).hp) > 0
     ]
     word = 0

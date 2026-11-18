@@ -832,6 +832,23 @@ parent remains open until Valley and meeting acceptance also pass. Tests cover
 synthetic operands, signed boundaries, all village/visitor combinations, natural
 temple input, replay and rendering. No disk-derived assets are tracked.
 
+## ADR-043: The Valley retains its caller across the existing Guardian fight
+**Status:** ACCEPTED (2026-11-18, T11.21b)
+**Context:** Guardian jobs already work, but a Valley visit needs a dedicated
+packed background/default obstacle, original messages and loading, and different
+win/loss turn accounting. A regional lair arena and generic spent fight exit
+would change the encounter.
+**Decision:** Decode Valley rules/messages and the default arena operands. Extend
+the existing fight loader's background selection with the original unpacked
+Guardian stage. Retain a Valley caller through fades, the active encounter,
+victory input/wait/reward or loss temple, using the authoritative campaign state.
+Reuse loading text/cursor, stat picker, shared sheet and map return. Rewards run
+once; no-key and victory returns retain spent, loss spends only after the temple.
+**Consequences:** Preserve the original extra two-life penalty, wrapping fields
+and one moonstone draw. Keep §12.17's bounded no-stat behavior and guaranteed map
+re-entry on a zero moonstone draw. Natural combat, original operands, render
+purity and replay traces verify the integration; no assets or tables are embedded.
+
 ## ADR-044: The ending is decoded from `program` code into a step plan
 **Status:** ACCEPTED (2026-11-18, T11.22a)
 **Context:** The quest ending is the second pass of `program`: a caption, a loader, four scene

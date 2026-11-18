@@ -11,6 +11,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from harddaysengine.app.fight_scene import FightScene
+from harddaysengine.assets.arena import DecodedArena
 from harddaysengine.assets.caster_rules import parse_caster_rules
 from harddaysengine.assets.computer_knight_rules import parse_computer_knight_rules
 from harddaysengine.assets.creature_rules import parse_brawler_rules
@@ -38,6 +39,7 @@ from harddaysengine.assets.screen_fx import parse_shake_rules
 from harddaysengine.assets.snatcher_rules import parse_snatcher_rules
 from harddaysengine.assets.sound_rules import parse_sound_rules
 from harddaysengine.assets.stalker_rules import parse_stalker_rules
+from harddaysengine.assets.valley_data import valley_arena
 from harddaysengine.render.scene import palette_fx_to_rgb
 from harddaysengine.sim.fight import (
     DRAGON,
@@ -76,6 +78,7 @@ if TYPE_CHECKING:
     from harddaysengine.app.scene_assets import GameAssetBundle
     from harddaysengine.assets.cel import DecodedCel
     from harddaysengine.assets.fight_defs import CelFile, CelSet
+    from harddaysengine.assets.picture import DecodedPicture
     from harddaysengine.sim.actor import Actor
     from harddaysengine.sim.fight import FrameOutput
     from harddaysengine.sim.inventory import Inventory
@@ -331,6 +334,16 @@ class FightLoader:
             loaded[name] = cel
         return loaded
 
+    def _background(self, name: str) -> tuple[DecodedArena, DecodedPicture] | None:
+        """The Valley uses the original packed picture and default wall, without tiles (§12.38)."""
+        if name != "valley":
+            return self.bundle.get_arena(name)
+        stage = valley_arena(self.mog)
+        picture = self.bundle.get_test_picture(stage.picture)
+        if picture is None:
+            raise FightUnavailableError("missing original Guardian backdrop")
+        return DecodedArena("valley", 3, False, stage.obstacles, ()), picture
+
     def _scene(
         self,
         arena_cels: CelSet,
@@ -343,7 +356,7 @@ class FightLoader:
         first: int,
         second: int = 0,
     ) -> FightScene:
-        loaded = self.bundle.get_arena(arena_name)
+        loaded = self._background(arena_name)
         hits, palettes = self.bundle.get_hit_sets(), self.bundle.get_fight_palette_tables()
         if loaded is None or hits is None or palettes is None:
             raise FightUnavailableError("missing arena, collide.hit or fight palette tables")

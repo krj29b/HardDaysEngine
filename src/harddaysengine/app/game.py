@@ -36,6 +36,7 @@ from harddaysengine.app.service_screen import ServiceScreen
 from harddaysengine.app.sheet_screen import SheetScreen
 from harddaysengine.app.stonehenge_screen import StoneScreen
 from harddaysengine.app.town_screen import TownScreen
+from harddaysengine.app.valley_screen import ValleyScreen
 from harddaysengine.app.wizard_screen import WizardScreen
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.dice_house_data import SCRIPT_HUNK as DICE_SCRIPT_HUNK, parse_dice_house
@@ -93,6 +94,12 @@ from harddaysengine.sim.stonehenge import EndingRequest, StonePhase, bless
 from harddaysengine.sim.towns import TownAction, TownEntry
 from harddaysengine.sim.turns import TurnResult, advance as advance_turn
 from harddaysengine.sim.types import KnightId
+from harddaysengine.sim.valley import (
+    ValleyPhase,
+    defeat as valley_defeat,
+    moonstone as valley_moonstone,
+    victory as valley_victory,
+)
 from harddaysengine.sim.village import VillagePhase, VillageVisit, reward as village_reward
 from harddaysengine.sim.wizard import WizardPhase
 
@@ -139,6 +146,7 @@ class GameScene(IntEnum):
     STONEHENGE = 11
     WIZARD = 12
     VILLAGE = 13
+    VALLEY = 14
 
 
 @dataclass(slots=True, frozen=True)
@@ -231,6 +239,7 @@ class GameSession:
         self.stone_screen: StoneScreen | None = None
         self.wizard_screen: WizardScreen | None = None
         self.village_visit: VillageVisit | None = None
+        self.valley_screen: ValleyScreen | None = None
         self.loading_cycle = 0
         self.palette_fx: PaletteFxState = PaletteFxState(
             _palette_to_rgb12(default_combat_palette())
@@ -264,6 +273,7 @@ class GameSession:
         self.stone_screen = None
         self.wizard_screen = None
         self.village_visit = None
+        self.valley_screen = None
         self.loading_cycle = 0
         self.sheet_screen = None
         self.service_screen = None
@@ -329,6 +339,7 @@ class GameSession:
             GameScene.STONEHENGE: lambda: self._step_stone(frame),
             GameScene.WIZARD: lambda: self._step_wizard(frame),
             GameScene.VILLAGE: self._step_village,
+            GameScene.VALLEY: lambda: self._step_valley(frame),
         }
         scenes.get(self.scene, lambda: self._step_end_screen(primary))()
 
@@ -694,6 +705,8 @@ class GameSession:
             self._open_town(kid, waterdeep=row.kind == 26)
         elif row.kind == 27:
             self._open_stonehenge(kid)
+        elif row.kind == 28:
+            self._open_valley(kid)
         elif row.kind == 30:
             self._open_wizard(kid)
         else:
@@ -785,6 +798,162 @@ class GameSession:
     def ending_request(self) -> EndingRequest | None:
         """Encoded program hand-over, consumed by the ending host in T11.22 (§12.34)."""
         return None if self.stone_screen is None else self.stone_screen.state.request
+
+    def _open_valley(self, knight_id: KnightId) -> None:
+        """Retain the original Valley caller through messages, fight and rewards (§12.38)."""
+        if self.asset_bundle is None:
+            self.last_status = "ORIGINAL DISKS REQUIRED FOR THE VALLEY"
+            return
+        owner = int(knight_id) + 1
+        screen = ValleyScreen(
+            self.asset_bundle, owner, self.inventories[owner].byte(20), self.loading_cycle
+        )
+        self.valley_screen = screen
+        palette = self._overworld_target_palette()
+        self.overworld.setup_turn()
+        self.overworld.colors.active = False
+        self._clear_map_jobs()
+        self._map_key = 0
+        self._pending_fade_in = False
+        self.scene = GameScene.VALLEY
+        self.last_status = "VALLEY OF THE GODS"
+        self.palette_fx.set_palette(_palette_to_rgb12(palette))
+        self._valley_fade(screen, out=True)
+
+    def _valley_fade(self, screen: ValleyScreen, *, out: bool) -> None:
+        screen.state.wait = screen.rules.fade_wait
+        if out:
+            self.palette_fx.fade_out(divisor=screen.rules.fade_period)
+        else:
+            self.palette_fx.fade_in(
+                _palette_to_rgb12(screen.palette()),
+                divisor=screen.rules.fade_period,
+                from_black=True,
+            )
+
+    def _valley_message(self, screen: ValleyScreen, phase: ValleyPhase) -> None:
+        screen.state.phase, screen.state.fire_held = phase, False
+        if phase == ValleyPhase.LOADING:
+            self.loading_cycle = (self.loading_cycle + 1) % len(screen.data.loading.messages)
+            self._play_requests(screen.data.loading.sounds)
+        self._valley_fade(screen, out=False)
+
+    def _step_valley(self, frame: InputFrame) -> None:
+        screen = self.valley_screen
+        if screen is None:
+            raise ValueError("Valley scene has no visit")
+        state = screen.state
+        state.wait = max(0, state.wait - 1)
+        if state.wait or self.palette_fx.is_fading:
+            return
+        if state.phase in (ValleyPhase.MISSING, ValleyPhase.VICTORY):
+            inp = self._player_input(frame, KnightId(state.knight - 1))
+            if state.released(inp.fire or inp.confirm):
+                self._valley_fire(screen)
+            return
+        self._valley_transition(screen)
+
+    def _valley_fire(self, screen: ValleyScreen) -> None:
+        if screen.state.won:
+            screen.state.phase = ValleyPhase.REWARD_WAIT
+            screen.state.wait = screen.rules.reward_wait
+        else:
+            screen.state.phase = ValleyPhase.EXIT_OUT
+            self._valley_fade(screen, out=True)
+
+    def _valley_transition(self, screen: ValleyScreen) -> None:
+        state = screen.state
+        if state.phase == ValleyPhase.MAP_OUT:
+            self._valley_message(
+                screen, ValleyPhase.LOADING if state.matched else ValleyPhase.MISSING
+            )
+        elif state.phase == ValleyPhase.LOADING:
+            state.phase = ValleyPhase.LOADING_OUT
+            self._valley_fade(screen, out=True)
+        elif state.phase == ValleyPhase.LOADING_OUT:
+            self._valley_combat(screen)
+        elif state.phase == ValleyPhase.COMBAT_OUT:
+            self.active_encounter = None
+            if state.won:
+                self._valley_message(screen, ValleyPhase.VICTORY)
+            else:
+                state.phase = ValleyPhase.TEMPLE
+                self._open_sheet(9)
+        elif state.phase == ValleyPhase.REWARD_WAIT:
+            state.phase = ValleyPhase.EXIT_OUT
+            self._valley_fade(screen, out=True)
+        elif state.phase == ValleyPhase.EXIT_OUT:
+            self._valley_return(screen)
+
+    def _valley_combat(self, screen: ValleyScreen) -> None:
+        kid = KnightId(screen.state.knight - 1)
+        self.overworld.setup_turn()
+        self._sync_legacy_actor(kid)
+        screen.state.phase = ValleyPhase.COMBAT
+        self._start_combat(
+            EncounterTrigger(
+                TriggerKind.VALLEY_OF_THE_GODS,
+                kid,
+                -1,
+                self.overworld.day,
+                self.overworld.moon_phase,
+                creature_type=8,
+            ),
+            kid,
+        )
+
+        if self.active_encounter is None:
+            self._valley_return(screen)
+
+    def _finish_valley_combat(self, active: ActiveEncounter) -> None:
+        screen = self.valley_screen
+        if screen is None:
+            raise ValueError("Valley fight has no caller")
+        state = screen.state
+        self.last_defeat_mask = settle_defeats(active.runtime.fight, active.runtime.opponent)
+        state.won = not self.last_defeat_mask & 1
+        actor, inv = self.actors[state.knight - 1], self.inventories[state.knight]
+        self.bad_luck = 0
+        active.runtime.release()
+        if state.won:
+            valley_victory(actor, inv, screen.rules)
+        else:
+            self.overworld.setup_turn()
+            valley_defeat(actor, self.overworld.prng, self._turn_rules().gifts, screen.rules)
+        self._sync_legacy_actor(KnightId(state.knight - 1))
+        self.scene, state.phase = GameScene.VALLEY, ValleyPhase.COMBAT_OUT
+        self.palette_fx.set_palette(_palette_to_rgb12(active.runtime.scene.palette))
+        self._valley_fade(screen, out=True)
+
+    def _valley_return(self, screen: ValleyScreen) -> None:
+        self._map_key = 0
+        self.overworld.setup_turn()
+        if screen.state.won:
+            valley_moonstone(
+                self.inventories[screen.state.knight], self.overworld.prng, screen.rules
+            )
+        self._sync_legacy_actor(KnightId(screen.state.knight - 1))
+        self.valley_screen = None
+        self._reenter_map()
+
+    def _close_valley_sheet(self, sheet: SheetScreen) -> None:
+        screen = self.valley_screen
+        if screen is None:
+            raise ValueError("Valley temple has no caller")
+        if screen.state.phase == ValleyPhase.TEMPLE:
+            screen.state.phase = ValleyPhase.TEMPLE_OUT
+            self._valley_fade(screen, out=True)
+            return
+        screen.state.wait = max(0, screen.state.wait - 1)
+        if screen.state.wait or self.palette_fx.is_fading:
+            return
+        self.last_sheet_item = sheet.state.last_item
+        self.sheet_screen, self.valley_screen = None, None
+        self.overworld.spent = self.overworld.budget
+        self._reenter_map()
+
+    def _valley_snapshot(self) -> dict[str, object] | None:
+        return None if self.valley_screen is None else self.valley_screen.snapshot()
 
     def _open_village(self, knight_id: KnightId) -> None:
         """Retain the original village caller through map OUT and sheet 9 (§12.37)."""
@@ -1298,6 +1467,9 @@ class GameSession:
         if self.village_visit is not None:
             self._close_village_sheet(screen)
             return
+        if self.valley_screen is not None:
+            self._close_valley_sheet(screen)
+            return
         if self.wizard_screen is not None:
             self._close_wizard_sheet(screen)
             return
@@ -1350,6 +1522,8 @@ class GameSession:
             self._play_title_music()
 
     def _arena_name_for_trigger(self, trigger: EncounterTrigger) -> str:
+        if trigger.kind == TriggerKind.VALLEY_OF_THE_GODS:
+            return "valley"
         if trigger.kind == TriggerKind.LAIR_BOSS and self.overworld.lairs:
             return self.overworld.lairs[trigger.lair_index].arena
         return _REGION_ARENAS.get(self.overworld.region_code, "fo1.t")
@@ -1498,6 +1672,9 @@ class GameSession:
 
     def _finish_combat(self, active: ActiveEncounter) -> None:
         """Settle original defeat/lair records; original caller sheets remain T11.15 (§10.24)."""
+        if active.trigger.kind == TriggerKind.VALLEY_OF_THE_GODS:
+            self._finish_valley_combat(active)
+            return
         fight = active.runtime.fight
         self.last_defeat_mask = settle_defeats(fight, active.runtime.opponent)
         won = not self.last_defeat_mask & 1
@@ -1584,6 +1761,7 @@ class GameSession:
             "stone": self._stone_snapshot(),
             "wizard": self._wizard_snapshot(),
             "village": self._village_snapshot(),
+            "valley": self._valley_snapshot(),
             "loading_cycle": self.loading_cycle,
             "sheet": asdict(self.sheet_screen.state) if self.sheet_screen else None,
             "service": asdict(self.service_screen.state) if self.service_screen else None,
@@ -1759,6 +1937,7 @@ class GameSession:
             GameScene.STONEHENGE: lambda: self._render_stone_scene(scene_renderer, font),
             GameScene.WIZARD: lambda: self._render_wizard_scene(scene_renderer, font),
             GameScene.VILLAGE: lambda: self._render_overworld_scene(scene_renderer, font),
+            GameScene.VALLEY: lambda: self._render_valley_scene(scene_renderer, font),
         }
         scenes.get(self.scene, lambda: self._render_end_scene(scene_renderer, font))()
 
@@ -1767,9 +1946,21 @@ class GameSession:
             or self.palette_fx.is_flashing
             or self.wizard_screen is not None
             or self.village_visit is not None
+            or (self.valley_screen is not None and self.scene != GameScene.COMBAT)
         ):
             scene_renderer.set_palette_fx(self.palette_fx.current_palette())
         scene_renderer.flush_to_fbo()
+
+    def _render_valley_scene(self, renderer: SceneRenderer, font: BitmapFont) -> None:
+        screen = self.valley_screen
+        if screen is None:
+            raise ValueError("Valley scene has no visit")
+        if screen.state.phase == ValleyPhase.MAP_OUT:
+            self._render_overworld_scene(renderer, font)
+        elif screen.state.phase == ValleyPhase.COMBAT_OUT:
+            self._render_combat_scene(renderer, font)
+        else:
+            screen.render(renderer)
 
     def _render_wizard_scene(self, renderer: SceneRenderer, font: BitmapFont) -> None:
         if self.wizard_screen is None:
