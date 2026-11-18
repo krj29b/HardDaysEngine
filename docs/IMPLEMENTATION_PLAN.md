@@ -295,6 +295,12 @@ Rules for the whole phase:
 - **T11.18 Dice house, healer, mystic:** `tav.piv` / `dice.piv` / `dice.cel` with the payout table;
   `hea.piv` with donation and rest; `mys.piv` with `mys.cel`. *Accept:* each screen shows its
   animation cels and applies its rule; sheets reviewed.
+  Split into **T11.18a**, runtime healer prices/cap, mystic donation bands and dice payout
+  decoding plus pure donation/service transactions (synthetic edge cases and independent
+  real-disk table/RNG checks), and **T11.18b**, original animated screen loops, text/scripts,
+  input/waits, host snapshots and town returns with reviewed contact sheets. The three
+  screen loops plus executable decoding and transaction rules exceed one session. Parent
+  acceptance remains unchanged and requires both subtasks.
 - **T11.19 Stonehenge:** the offer sheet, the ritual screen (`hen1.p`, `hen1.c`, `he.a`, timed
   fades), the win condition (the moonstone of the current phase) and the hand-over to the ending.
 - **T11.20 Wizard's tower:** `WI2.P`, `WI1.P`, `Wi1.C`, `wz.a`, then the temple sheet; the visit

@@ -3971,3 +3971,49 @@ Do not clamp the knight, tile or table values and do not invent padding.
 This corrects the earlier §11.18 model of a 1000-byte allocation without
 changing movement, clipping, PRNG calls or map scheduling. Synthetic rules may
 omit the suffix and continue to reject accesses outside their supplied data.
+
+### 12.30 Service rule boundary (T11.18a)
+
+The service rules operate on the existing Actor, Inventory and shared Rng. They
+do not own screens or advance jobs. Donation state retains unsigned word purse
+and donation cells. Moving one gold tests the source for exact zero, then wraps
+both words. Leaving clears these cells without writing actor gold; accepting
+writes the purse. Screen input and two-frame repeat waits belong to T11.18b.
+
+For the supported mog CRC, the healer's minimum and HP debit are checked word
+operands at hunk0 $9ED4 and $9EFA and must agree. The life debit is $9F16,
+the byte cap comparison $9F08 (actor +73), and the small-donation reply threshold
+$9F24. Both debits must be positive signed words so the bounded loop progresses.
+Preserve the equality-only life cap, byte wrapping and signed donation test.
+Return remaining donation and the original change bits (curse, HP, life).
+
+The mystic's bonus table is reached by the checked LEA at $9D92, in hunk0.
+The MOVEQ at $9D98 gives its row count minus one. Each row is two signed words,
+upper donation bound and bonus; require strictly increasing bounds. Check the
+four-byte advance at $9D9E and DBRA at $9DA0. The win comparison is $9DAA.
+Constitution HP addition/subtraction at $9CA8/$9CE8 must agree; read the HP
+floor from $9CF0 and the byte stat floor from $9CCC. Pick the stat before the
+percent draw, even when none is pickable. Compare the wrapped signed sum with
+the win threshold. On a win, add to the stat, add constitution HP, then
+recalculate HP and endurance; on a loss at the floor, return unchanged, otherwise
+subtract, clamp constitution HP by signed word comparison, then recalculate
+endurance and HP. A no-stat loss returns unchanged and performs those latter
+recalculations. Do not reproduce the stale A1 write into unmodeled memory.
+Beyond the last donation band use zero bonus, as specified in §12.19.
+
+The dice payout LEA is at $A7CA, into hunk42. The checked MOVEQ at $A7D0
+contains 11: read that many six-byte rows (three face bytes, zero key pad,
+multiplier byte, unused byte). The original DBRA compares one extra row beyond
+the table; omit that read, which cannot change a valid dice result (§12.21).
+Check the six-byte table advance at $A7DA and DBRA at $A7E0. Read the random
+mask at $A730 and accepted face maximum at $A734. Reject unsorted, duplicate or
+unreachable table keys, truncated tables and zero multipliers. Roll three dice
+in order, retaining their unsorted display order; lookup uses a sorted copy.
+Stake affordability uses signed words; debit and payout wrap actor gold to a
+word, while the returned product retains the unsigned word multiplication.
+Bound rejection loops and raise if supplied data cannot terminate.
+
+These immutable decoded rule records and pure transactions are T11.18a.
+T11.18b supplies original assets/text/scripts, screen phases, host snapshots,
+town returns and real-disk contact-sheet acceptance. No service is exposed as
+playable until those callers are implemented.

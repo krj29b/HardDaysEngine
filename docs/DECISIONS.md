@@ -629,3 +629,27 @@ docs, docstrings and the README, which carries a non-affiliation disclaimer.
 **Consequences:** `PYMOONSTONE_ADF_DIR` is no longer read; users must rename the variable.
 Existing virtual environments need `uv sync` to install the renamed package. The GitHub
 repository and local checkout folder are renamed separately from the code.
+
+## ADR-034: Service transactions precede their three animated screen callers
+**Status:** ACCEPTED (2026-11-18, T11.18a; follows ADR-029 / ADR-031)
+**Context:** The original dice house, healer and mystic require three screen loops,
+executable tables, transaction rules, script jobs and suspended town continuations.
+This exceeds one session. Existing town requests already report unavailable pending
+the complete original screens; there is no legacy model to retain or replace here.
+**Decision:** Split T11.18 into a (checked runtime rule data and pure transactions)
+and b (animated screens, text/scripts, input/waits, replay state, town returns and
+contact sheets). assets/service_data.py reads checked operands and relocated tables
+into frozen sim/service_types.py records. sim/services.py operates on persistent
+Actor/Inventory/Rng records and exposes donation cells plus service outcomes for the
+later caller. Stat selection and derived values reuse the existing reward helpers.
+No new state machine or host route is introduced by part a.
+**Consequences:** Preserve equality-only healer life caps, donation overdraft,
+signed comparisons, word/byte wrapping, mystic stat-before-percent draw order,
+larger-donation penalties, dice rejection/display order and uncapped payouts.
+Following the existing bounded-memory policy, omit the mystic's stale-pointer
+write when no stat is selected and the dice search's unreachable twelfth row.
+Retain the specified zero bonus above the mystic table. Invalid data and bounded
+rejection exhaustion raise. Part b still owns actual playability and presentation
+acceptance; the parent stays open and town services remain unavailable until then.
+Independent local-disk reads and a separate random recurrence check tables and
+draw order without committing original strings, tables, extracted assets or images.
