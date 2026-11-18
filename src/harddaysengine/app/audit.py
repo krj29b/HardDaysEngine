@@ -44,7 +44,7 @@ from harddaysengine.app.input import InputFrame, PlayerInput
 from harddaysengine.app.map_scene import compose_map
 from harddaysengine.app.meeting_audit import meeting_shots
 from harddaysengine.app.valley_audit import valley_shots
-from harddaysengine.app.village_audit import village_shots
+from harddaysengine.app.village_audit import village_exit, village_shots, village_temple
 from harddaysengine.app.wizard_audit import wizard_shots
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.palette import default_combat_palette
@@ -185,7 +185,13 @@ def _menu_and_map_shots(rig: AuditRig) -> Iterator[AuditShot]:
         _tap(session, PlayerInput(dx=1))
         _tap(session, PlayerInput(confirm=True))
         _step(session, 30)
-        yield rig.capture(session, f"map_move{move}_{session.scene.name.lower()}")
+        name = f"map_move{move}_{session.scene.name.lower()}"
+        village = session.scene == GameScene.VILLAGE
+        if village:
+            village_temple(session)
+        yield rig.capture(session, name)
+        if village:
+            village_exit(session)
     for scene in _END_SCENES:
         session.scene = scene
         _step(session, 20)
