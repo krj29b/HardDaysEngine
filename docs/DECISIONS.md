@@ -831,3 +831,20 @@ introduced. Hash ownership and wait state; clear them on campaign reset. The
 parent remains open until Valley and meeting acceptance also pass. Tests cover
 synthetic operands, signed boundaries, all village/visitor combinations, natural
 temple input, replay and rendering. No disk-derived assets are tracked.
+
+## ADR-044: The ending is decoded from `program` code into a step plan
+**Status:** ACCEPTED (2026-11-18, T11.22a)
+**Context:** The quest ending is the second pass of `program`: a caption, a loader, four scene
+bodies and a closing text. The existing intro player is a hand-written timeline with scene
+offsets and frame counts typed in, which ADR-001 forbids repeating for new work. The scene bodies
+are straight-line code made of a dozen instruction forms.
+**Decision:** `assets/ending_data.py` walks the top level, the loader, the palette tweaks, the
+scene bodies, the spawn helpers, the pairs set-up, the bare-tick loop, the caption recolour and
+the fade operands. It accepts only the forms in §12.39 and names routines and cells by their
+checked addresses. The result is a frozen `EndingPlan` of typed steps (`sim/ending_types.py`).
+It reuses `MogCode` for relocated reads, with a separate CRC gate for `program` hunk 0. The
+player is a separate task (T11.22b) and executes the plan; it does not reuse the intro timeline.
+**Consequences:** No ending value, file name, colour or script offset is embedded in source; a
+different `program` build raises instead of playing a wrong ending. `MogCode` error text says
+"mog" for some failures on `program`; the ending decoder's own messages say "program". The intro
+player stays as it is until someone rewrites it on the same decoder.

@@ -4471,3 +4471,147 @@ the fade palette even after its last interpolation step until the blocking wait
 expires. Missing original disks leave the map unchanged with an availability
 message, as for other original place callers. Valley setup/rewards and meetings
 remain T11.21b/c; they must not inherit this village reward or spent-exit policy.
+
+### 12.39 The ending pass of `program` (T11.22)
+
+Stonehenge with the matching moonstones stores the ending code (§12.16) in the boot flags word
+and starts `program` again (§12.34). `program` copies that word into its own flags cell
+(hunk0 $0190, from $3E0 at $001E) and tests one bit at $0064..$0072: `MOVE.W flags,D0 ;
+ANDI.W #bit ; CMP.W #bit ; BEQ.W $0120`. The bit is read from those operands ($80). When it is
+set, the ending below runs instead of the intro. It never returns to the map and always ends by
+loading `mog` again, which starts at the title with a fresh campaign. `assets/ending_data.py`
+decodes everything in this section into `sim/ending_types.EndingPlan`; the player is T11.22b.
+
+**12.39.1 Top level ($0120..$0172).** Each line is checked by instruction word and call target.
+
+1. Caption screen (§12.39.7) with the loading text list (hunk2 $0004, `LEA` at $0120, call
+   $11CA).
+2. The ending loader, hunk8 $0500 (§12.39.3).
+3. `gap = 2` (long store at $0132).
+4. The four scene bodies at hunk0 $0938, $0ABA, $0BD8 and $0D2E, called in that order.
+5. Caption screen with the closing list (hunk0 $0176, one centred line); wait 25 ticks ($0160);
+   the standard fade out (hunk10 $0C50).
+6. `BRA.W` back to $0114: `LEA` of the next program's name (`Mog`) and `JMP` to the loader.
+
+**12.39.2 Buffers and palette tables.** The scenes name ten picture buffers by long cells hunk2
+$0212 + 4n (n = 0 is the *shown* buffer the scene frames draw from, 1..9 are stored pictures
+P1..P9) and two screens: hunk30 $0000 (the displayed screen at scene start) and $0004 (the
+work screen). *Show Pn* copies 40000 bytes (one 5-plane 320×200 picture) from Pn into the shown
+buffer (hunk10 $0D6A); *Select Pn* only replaces the shown pointer. *Prepare* (hunk10 $0CC4)
+copies the shown buffer to both screens. Eight 32-colour palette tables live at hunk9
+$0006 + $40·k (k = 0..7); the stage palette and *PaletteTo* name them by k.
+
+**12.39.3 Loader (hunk8 $0500).** One block per picture: draw target = buffer, load the picture
+file into it, copy its palette into table k, then the optional tweaks. Decoded order:
+
+| File | Buffer | Table | Tweaks |
+|---|---|---|---|
+| `bg5.piv` | P5 | 3 | class |
+| `bg5a.piv` | P6 | 4 | class |
+| `bg3.piv` | P7 | 5 | class |
+| `bg2a.piv` | P9 | 7 | moon, then class |
+| (clear P2) | | | |
+| `bg7.piv` | P2 | 0 | |
+| `bg8.piv` | P3 | 1 | |
+
+Cels are placed one behind another in the cel area and their base addresses are written to a
+six-slot frame table (hunk11 $00DE); draw opcodes select a slot as `(op & $1F) >> 2`. Load order
+and slots: `dg1` 0, `li1` 1, `ha1` 3, `co1` 2, `da1` 4, then `klift1` 5, which is loaded into
+buffer P4 (hunk2 $0222) instead of the cel area. `ov1.cel` is loaded into buffer P8 (hunk2
+$0232), whose address becomes the overlay cel pointer (hunk3 $0092). Then `co.stile` (1000
+bytes, the block map of the reverse wipe, same format as `intro.stile` in §7.4) and `vmusic.cmp`
+(61344 packed bytes, RNC-unpacked in place). The decoder follows these placements symbolically
+and refuses any other instruction.
+
+*Moon tweak* (hunk8 $0938, before the class tweak of table 7): on the flags word, the first set
+bit among the blocks `BTST #1`, `#0`, `#2` (in that order) writes three colours into table 7
+(entries 12, 15 and 23, from `MOVE.W #c,d(A0)` with entry = d/2) and three *ramp colours* into
+the hunk9 words $0000/$0002/$0004 (zero by default). Each block is `BTST ; BEQ.S next ; stores ;
+BRA.W end`; the decoder checks that every skip lands on the next block.
+
+*Class tweak* (hunk8 $09DE): `ADDA.L #16,A0` (first entry 8), then blocks for bits 4, 5, 3 and
+6 (in that order), each writing four colours to entries 8..11. Bits 3..6 are the knight kinds of
+the ending code (§12.16) and bits 0..2 the moon frames.
+
+**12.39.4 Scene primitives.** Scene bodies are runs of these forms only:
+
+| Form | Step |
+|---|---|
+| `JSR` hunk10 $0264 / $0BF8 / $0C50 / $0C92 / $0CC4 | jobs reset / blackout (all black now) / fade out (black table, period 2, then 36 ticks) / flip / prepare |
+| `JSR` hunk1 $0000 | start the music (once) |
+| `JSR` hunk0 $01BA / $0292 | frame loop / stage palette now |
+| `JSR` hunk31 $068A / $071C | reverse wipe, set-up half / running half |
+| `JSR` hunk0 $0862 | sub-scene, inlined (five left then five right spawns) |
+| `MOVE.W #v,cell` / `MOVE.L #v,cell` | store to a scene cell (below) |
+| `MOVE.L #table,hunk3 $0084` | stage palette = table k |
+| `MOVE.L Pn,shown` | select |
+| `MOVEA.L Pn,A0 ; MOVEA.L shown,A1 ; JSR $0D6A` | show |
+| `MOVEA.L #script,A0 ; JSR $02E4 / $030A` | spawn left / right; the script is a hunk2 offset |
+| `MOVEA.L buf,A0 ; JSR hunk29 $05E0` | clear a buffer |
+| `MOVE.L slot,D0 ; JSR hunk31 $005A` | release colour ramp 0..2 (hunk0 $092C + 4i) |
+| `MOVE.L buf,D0 ; JSR hunk10 $0D9A` | draw target |
+| `MOVE.L #n,D0` or `MOVEQ #n,D0 ; JSR hunk29 $0658` | wait n ticks |
+| `LEA table,A0 ; JSR hunk10 $0C70` | PaletteTo k: fade at the shared period (hunk10 $0C8C, 2), then wait period·16 ticks |
+| `LEA list,A0 ; JSR hunk12 $0132` | print a text list on the draw target (`bold.f`, §7.4) |
+| `LEA black,A0 ; MOVEQ #p,D0 ; JSR hunk31 $001A` | fade to black with period p, no wait |
+| pairs set-up + `BSR $0508` | pairs (§12.39.5) |
+| `MOVEQ #n,D0` + inline loop + `DBF` | n+1 bare ticks (§12.39.5) |
+
+Scene cells: credits overlay on (hunk2 $0246), overlay phase (hunk0 $0EC2; 2 skips the last two
+overlay cels), stage mode (hunk3 $0088), staged (hunk3 $008A), stop (hunk3 $008E), speed (long,
+hunk2 $023E), gap (long, hunk3 $009A), left/right depth (hunk2 $2DC6/$2DC8).
+
+**12.39.5 Frame loop, spawns, pairs and bare ticks.**
+
+*Frame loop* (hunk0 $01BA), repeated until it returns: stamp the tick counter; run the job
+handlers of finished scripts; if `stop` is set, return; run every job's script one frame (§7.4
+interpreter; scripts set `stop` through their `$B4` call of hunk0 $02CC); if `credits` is set,
+draw the overlay cels; flip; restore the dirty rectangles; if `staged` is clear, set it and apply
+the stage palette by `stage mode` (2: fade to the stage table at period 2; 3: fade to black;
+5: blackout; otherwise write it at once); wait until `speed + gap` ticks have passed since the
+stamp (never a negative wait).
+
+*Spawns* read their start record from the helpers: left x 160, y 0, z 100 + left depth, flags 1;
+right x 120, y 0, z 100 + right depth, flags 3 (mirrored). Both use the shared frame table and
+handler 0 (operands at hunk0 $02E4 and $030A).
+
+*Pairs* (hunk0 $0508): set-up stores index 0, the table pointer, the count (5) and a spare word
+(cleared, not read by this routine). For each entry it toggles the side word (hunk0 $0600, never
+reset, initially 0), spawns the entry on the left when the toggle becomes 1 and on the right when
+it becomes 0, then runs the counted frame loop (hunk0 $0206: the frame loop without the stop
+test, until its counter at $0604 reaches the operand at $0248, 16). The ending's table
+(hunk0 $0D06) repeats one script.
+
+*Bare ticks*: n+1 passes of stamp, handlers, scripts, flip, restore and the pacing wait; there is
+no stop test, overlay or stage palette.
+
+**12.39.6 Script callbacks the ending uses.** The colour-ramp callback (hunk0 $08DC) creates three
+ramps (hunk31 $0060, with the entry, a colour from the ramp-colour words of §12.39.3 and rate 5)
+and stores their slots at $092C/$0930/$0934. The first scene releases them before its fade. The
+callback operands are decoded as `RampSpec`. The interpreter, its other callbacks (the flash
+helpers of §7.4 and the stop routine), the colour-ramp effect and the reverse wipe over
+`co.stile` are specified and implemented with the player in T11.22b.
+
+**12.39.7 Caption screen (hunk0 $11CA).** Blackout; clear and target the displayed screen; copy
+the raw `message.piv` image to the work screen and decode it; print the list; overwrite palette
+entries 1..5 with the decoded words at $122E (a dark red ramp; the first entry comes from
+`ADDA.L #2`); PaletteTo that palette (period 2, wait 32 ticks).
+
+**12.39.8 Decoded sequence.** Loading caption; loader; gap 2.
+- Scene 1: credits on, phase 2, jobs reset, fade out, flip, show P9 (`bg2a`), prepare, stage
+  table 7 by fade, speed 6, one left script, music, frames. Then release the three ramps, fade
+  out, credits off, gap 4, show P7 (`bg3`), stage table 5, speed 8, the ten-spawn sub-scene plus
+  one left script, frames, speed 6.
+- Scene 2: gap 0, show P5 (`bg5`), stage table 3 set at once, two left scripts, speed 6, depths
+  5/15, five pairs, 41 bare ticks, depths 0, speed 8, jobs reset, two left scripts, frames.
+- Scene 3: P6, P5 and P6 in turn (stage tables 4, 3, 4) with one, two and one scripts and a
+  frame loop each; then clear the shown buffer and the work screen.
+- Scene 4: blackout, jobs reset, select P1, wipe set-up, stage table 0 at once, wait 15, gap 0,
+  speed 6, one left script, wipe run, frames, fade out, jobs reset, select P3 (`bg8`), prepare,
+  PaletteTo 1, wait 100, target the work screen, print the five-line closing text, flip, wait
+  500, fade to black at period 6, wait 90.
+
+Then the closing caption, wait 25, fade, and `mog`.
+
+**Version gate.** `program` hunk 0 must have CRC-32 $3064C4E2. Every operand above is still read
+and checked, so a different build fails loudly instead of playing a wrong ending.
