@@ -778,3 +778,21 @@ pairing difference remain intact. Actual ending playback is T11.22; exact sample
 and synth wiring remain T11.23. The ritual bank is decoded and its requests are emitted
 through the existing audio boundary. Contact sheets cover both branches, natural ritual
 poses, all four class ramps, temple returns and program flags. No game data is committed.
+
+## ADR-040: Wizard dialogue uses the result of the shared reward roll
+**Status:** ACCEPTED (2026-11-18, T11.20a)
+**Context:** The wizard visit spans three animated screen stages and a temple
+continuation. Its existing reward implementation serves computer knights but
+discards the selected stat-table row, so a caller cannot choose the original
+speech without changing the random stream or guessing among duplicate stat rows.
+**Decision:** Split T11.20 into a (immutable reward results and checked runtime
+dialogue) and b (animation, remaining screen data, host/hash integration, temple
+exit and contact sheet). The existing reward functions return their selected
+item/stat row and wizard outcome; callers that only need mutations keep using
+the same functions. Decode counted speeches and their relocated tables from mog,
+retaining field positions for item/gold substitutions without modifying data.
+**Consequences:** No extra random draws, parallel reward model or screen route is
+introduced. Message cycles remain campaign-owned. Synthetic boundary checks and
+independent real-disk reads verify row identity, ordering and field locations.
+Parent T11.20 remains open; the tower is not playable until b, which also removes
+the wizard picture from the legacy victory presentation. No game data is tracked.

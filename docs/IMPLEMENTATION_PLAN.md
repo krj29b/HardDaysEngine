@@ -311,6 +311,11 @@ Rules for the whole phase:
   fades), the win condition (the moonstone of the current phase) and the hand-over to the ending.
 - **T11.20 Wizard's tower:** `WI2.P`, `WI1.P`, `Wi1.C`, `wz.a`, then the temple sheet; the visit
   uses up the turn. `WI1.P` stops being the victory picture.
+  Split into **T11.20a**, exact gift result records and checked runtime dialogue (including
+  the selected stat-table row and shared item/gold message cycles), and **T11.20b**, the
+  three animated stages, assets/scripts, PAL waits, host/hash integration, spent temple
+  return and reviewed real-disk contact sheet. The complete screen and its decoding exceed
+  one session. Parent acceptance is unchanged and requires both parts.
 - **T11.21 Valley, home villages, meetings:** the guardian fight and its reward, the life granted
   at a home village, knight-meets-knight duel with the scroll dialog, meeting and exchange sheets,
   the dragon hoard sheet.

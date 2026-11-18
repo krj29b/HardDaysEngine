@@ -4318,3 +4318,56 @@ $14 are converted to type12. Keys, moonstones and worn equipment remain
 unchanged. The normal worn sharp-sword icon addresses actor field $58, so it
 does not expose slot4 to the offer UI. Preserve the slot4 drop handler without
 inventing a selectable region for it, just as for the market's sale fallback.
+
+### 12.35 Wizard gift result and dialogue boundary (T11.20a)
+
+The visit's reward and the computer knight's daily reward call the same routine
+at hunk0 $9884. They must share one implementation and the campaign's GiftState.
+Return an immutable result as well as updating the actor/inventory: kind 1 item,
+2 gold, 3 stat, 4 curse; item slot or amount; stat offset and the selected stat-row
+index; and the updated item/gold message-cycle index. There is no additional draw
+for dialogue. Preserve the row, rather than searching for its stat offset after
+the roll: several rows raise the same stat but point at different speeches.
+The existing rejection loops, wrapped recency addition and derived-stat effects
+of §12.12 are unchanged. The item cycle increments before indexing and masks
+with 3 ($9930/$9938); the gold cycle increments before indexing and wraps at 3
+($98F6/$98FE/$9908). The curse branch leaves both cycles and last-item memory
+alone. Stat selection's rejected candidates consume their draws before the final
+row is returned. A saturated stat roll restarts the whole reward roll.
+
+**Counted speeches.** These are not linked TextLine records. The printer at
+$A262 reads an unsigned byte count, followed by that many NUL-terminated ASCII
+strings. It adds the immediate word at $A2A2 to y after each string (10 pixels
+on the supported file). Decode within hunk4, rejecting an empty count, pointers
+outside the data, unterminated strings and non-ASCII text. Empty lines are valid.
+
+Read the greeting through the checked LEA at $9602. The gift's item-pointer
+table is reached through LEA $9948 and has four relocated entries (mask operand
+$9938 plus one); the gold-pointer table through LEA $9918 has three (compare
+operand $98FE). Check the increment and reset instructions/cells too. The nine
+stat rows reached through LEA $99E4 are `{stat long, speech pointer}`. The
+long compare operand at $99F6 gives the last row index (8); each stat must be actor offset
+70, 71 or 72. The curse speech comes from the immediate relocated pointer in
+the `MOVE.L #pointer,cell` at $98E2; check that its destination agrees with
+the indexed message stores at $991E/$994E/$9968. No text or pointer table is
+embedded in source.
+
+**Farewells.** The initial relocated `MOVEA.L #pointer,A0` at $97D0 supplies
+the omen default. The four compare/branch/pointer runs at $97D6, $97E6,
+$97F6 and $9806 override it by kind. Preserve their order and decoded keys;
+unknown kinds keep the omen. The item and gold farewells contain writable
+fields. Find the item field through LEA $9B52, the gold field through both
+LEAs $9A4C/$9A58 (which must agree). Retain the line index and character
+offset of each field in a frozen speech record. Rendering substitutes into a
+copy, truncating the original line at the field because the original write
+includes a terminator. Never mutate executable bytes. Each field must be inside
+exactly one counted line of the corresponding farewell. Item names and numeric
+formatting remain the animated caller's responsibility in T11.20b.
+
+The animated caller remains T11.20b. Its fire loops sample held fire after each
+5/6/4-VBL frame wait, as checked at $9680/$9764/$985C; they are not
+press-then-release waits. The first stage has an engine pass before the palette
+target and another at loop entry. The gift-to-farewell change has no fade-out:
+it replaces the picture and directly installs the class palette. The final
+recency store is the byte operand at $9876 (70). These details refine §12.20;
+T11.20a adds no host route or alternative screen loop.

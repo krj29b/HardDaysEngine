@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import TYPE_CHECKING
 
 from harddaysengine.sim.m68k import s8, s16, u8, u16
@@ -23,6 +24,24 @@ class GiftState:
     gold_cycle: int = 0
 
 
+class GiftKind(IntEnum):
+    ITEM = 1
+    GOLD = 2
+    STAT = 3
+    CURSE = 4
+
+
+@dataclass(slots=True, frozen=True)
+class GiftResult:
+    """Reward and original message index, without another random draw (§12.35)."""
+
+    kind: GiftKind
+    message: int = 0
+    stat: int = 0
+    item: int = 0
+    amount: int = 0
+
+
 def recalc_hp(actor: Actor, inventory: Inventory) -> None:
     """Word arithmetic, signed cap and forced sharp sword (§9.3)."""
     bonus = {28: 10, 29: 20, 30: 30}.get(actor.armour, 0)
@@ -40,20 +59,25 @@ def recalc_endurance(actor: Actor) -> None:
 
 def pick_stat(actor: Actor, rng: Rng, rules: GiftRules) -> int:
     """Pick a decoded stat row, rejecting exact-five bytes (§12.9)."""
+    return pick_stat_row(actor, rng, rules)[1]
+
+
+def pick_stat_row(actor: Actor, rng: Rng, rules: GiftRules) -> tuple[int, int]:
+    """Keep the chosen table row for the wizard's distinct stat speeches (§12.35)."""
     if all(s8(actor.read(offset, 1)) >= 5 for offset in (70, 71, 72)):
-        return 0
+        return -1, 0
     for _ in range(4096):
         row = rng.draw() & 15
         row = row - 7 if row > 8 else row
         offset = rules.stats[row]
         if actor.read(offset, 1) != 5:
-            return offset
+            return row, offset
     raise ValueError("stat selection did not terminate")
 
 
 def item_gift(
     actor: Actor, inventory: Inventory, rng: Rng, rules: GiftRules, state: GiftState
-) -> None:
+) -> int:
     """Preserve last-gift memory even when rejecting a duplicate sharp sword (§12.12)."""
     slot = inventory_gift(inventory, rng, rules, state)
     if slot == 4:
@@ -61,6 +85,7 @@ def item_gift(
     if slot == 6:
         actor.hp = u16(actor.hp + 20)
         recalc_hp(actor, inventory)
+    return slot
 
 
 def inventory_gift(inventory: Inventory, rng: Rng, rules: GiftRules, state: GiftState) -> int:
@@ -89,29 +114,30 @@ def _stat_gift(actor: Actor, inventory: Inventory, offset: int) -> None:
 
 def wizard_gift(
     actor: Actor, inventory: Inventory, rng: Rng, rules: GiftRules, state: GiftState
-) -> None:
-    """Wizard's original roll, shared with computer day turnover (§12.12)."""
+) -> GiftResult:
+    """Wizard's original roll and dialogue result, shared with AI (§12.12/35)."""
     item_limit, stat_limit, gold_limit = rules.limits
     for _ in range(4096):
         roll = u8(rng.percent() + actor.recency)
         if roll <= item_limit:
-            item_gift(actor, inventory, rng, rules, state)
+            slot = item_gift(actor, inventory, rng, rules, state)
             state.item_cycle = (state.item_cycle + 1) & 3
-            return
+            return GiftResult(GiftKind.ITEM, state.item_cycle, item=slot)
         if roll <= stat_limit:
-            offset = pick_stat(actor, rng, rules)
+            row, offset = pick_stat_row(actor, rng, rules)
             if not offset:
                 continue
             _stat_gift(actor, inventory, offset)
-            return
+            return GiftResult(GiftKind.STAT, row, stat=offset)
         if roll <= gold_limit:
             gold = rng.draw() & 31
-            actor.gold = u16(actor.gold + (gold - 10 if gold > 21 else gold) + 10)
+            amount = (gold - 10 if gold > 21 else gold) + 10
+            actor.gold = u16(actor.gold + amount)
             state.gold_cycle = (state.gold_cycle + 1) % 3
-            return
+            return GiftResult(GiftKind.GOLD, state.gold_cycle, amount=amount)
         if actor.recency != 255:
             actor.frog_days = 3
-            return
+            return GiftResult(GiftKind.CURSE)
     raise ValueError("wizard gift did not terminate")
 
 
