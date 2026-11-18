@@ -14,6 +14,7 @@ import moderngl
 import numpy as np
 from PIL import Image, ImageDraw
 
+from harddaysengine.app.ending_audit import ending_shots
 from harddaysengine.app.fight_audit import (
     TROGG_ARENAS,
     build_caster_audit,
@@ -71,7 +72,6 @@ _NO_NODE = -1
 _END_SCENES: tuple[GameScene, ...] = (
     GameScene.STATUS,
     GameScene.NEW_DAY,
-    GameScene.VICTORY,
     GameScene.GAME_OVER,
 )
 
@@ -815,6 +815,7 @@ def _stone_shots(rig: AuditRig) -> Iterator[AuditShot]:
 
 
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
+    "ending": ending_shots,
     "valley": valley_shots,
     "villages": village_shots,
     "wizard": wizard_shots,

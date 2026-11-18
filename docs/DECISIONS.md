@@ -865,3 +865,23 @@ player is a separate task (T11.22b) and executes the plan; it does not reuse the
 different `program` build raises instead of playing a wrong ending. `MogCode` error text says
 "mog" for some failures on `program`; the ending decoder's own messages say "program". The intro
 player stays as it is until someone rewrites it on the same decoder.
+
+## ADR-046: The ending player is a VBL generator over the plan with a pixel-free canvas
+**Status:** ACCEPTED (2026-11-18, T11.22b)
+**Context:** The ending's control flow nests frame loops, pairs, bare ticks, a wipe loop and
+script callbacks that wait in the middle of a job pass. A hand-written state machine for every
+nesting level would be large and easy to get wrong. The simulation layer may not hold pixels.
+**Decision:** `sim/ending.EndingRun` runs the plan as a Python generator that yields once per
+VBL after the palette tick. Callbacks are generators too, so a flash inside a job pass stalls
+the frame as in the original. Every screen change is a call on an `EndingCanvas` protocol, made
+in the original order; `app/ending_screen.EndingPixels` implements it with numpy buffers. The
+generator cannot be serialised, so determinism is shown by hashing an explicit snapshot (step,
+tick, cells, jobs, palette, picture cell, wipe and ramp state) at the same points in replays.
+The dirty-rectangle restore is modelled as a full copy of the shown buffer, and the incremental
+wipe scroll as a window into the block panorama; both give the same image (§12.39.10). The
+program palette gets its own model (live palette, registers, one fade, six ramps) because
+flashes depend on the registers being written only on change, which `PaletteFxState` does not do.
+**Consequences:** No save or restore in the middle of the ending. The disk loading time is not
+emulated. Interpreter opcodes whose memory the ending never sets up (`$C4`, `$CC`, `$D0`, `$FD`,
+table calls) raise instead of guessing. The invented VICTORY screen is removed; the ending is the
+only way a campaign is won, and it returns to the title with a fresh campaign.

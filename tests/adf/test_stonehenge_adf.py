@@ -175,7 +175,8 @@ def test_matching_stone_hands_over_exact_program_flags_and_never_returns(
     assert session.sheet_screen is None and screen.run is None
     for _ in range(40):
         _tick(session, fire=True)
-    assert session.ending_request == request and session.scene == GameScene.STONEHENGE
+    assert session.ending_request == request and session.scene == GameScene.ENDING
+    assert session.ending_screen is not None and session.ending_screen.run.flags == request.flags
 
 
 def test_visit_hash_replays_through_script_and_includes_work_and_wait_cells(adf_dir: Path) -> None:

@@ -179,7 +179,7 @@ def test_campaign_navigation_and_replay_determinism_without_disks(tmp_path: Path
     assert run1.final_hash == run2.final_hash
     assert run1.session.overworld.rules is None
     assert run1.session.last_status == "ORIGINAL DISKS REQUIRED"
-    assert run1.scene in (GameScene.OVERWORLD, GameScene.COMBAT, GameScene.VICTORY)
+    assert run1.scene in (GameScene.OVERWORLD, GameScene.COMBAT)
 
 
 def test_menu_roster_and_overworld_pause() -> None:
@@ -295,7 +295,7 @@ def test_status_and_proximity_location_transitions() -> None:
     assert session.overworld.day == 0
 
 
-def test_victory_and_game_over_reset_to_menu_and_music() -> None:
+def test_game_over_resets_to_menu_and_music() -> None:
     calls: list[str] = []
 
     class _FakeBundle:
@@ -311,10 +311,6 @@ def test_victory_and_game_over_reset_to_menu_and_music() -> None:
         def get_test_picture(self, index: int) -> None:
             return None
 
-        def load_victory_music(self) -> None:
-            calls.append("victory")
-            return None
-
         def load_title_music(self) -> None:
             calls.append("title")
             return None
@@ -326,10 +322,9 @@ def test_victory_and_game_over_reset_to_menu_and_music() -> None:
     )
     with patch.object(session, "asset_bundle", _FakeBundle()):
         session.overworld.game_over = True
-        session.overworld.winner = KnightId.RED
+        session.overworld.turn_rules = None
         session.step_tick(_frame_p1())
-        assert session.scene == GameScene.VICTORY
-        assert "victory" in calls
+        assert session.scene == GameScene.GAME_OVER
 
         session.step_tick(_frame_p1(confirm=True))
         assert session.scene == GameScene.KNIGHT_SELECT

@@ -49,7 +49,6 @@ class TriggerKind(IntEnum):
     PVP_DUEL = 4
     TOWN_VISIT = 5
     STONEHENGE_RITUAL = 6
-    VICTORY = 7
     HOME_CASTLE = 8
     VALLEY_OF_THE_GODS = 9
     MATHS_TOWER = 10
@@ -220,7 +219,6 @@ class OverworldState:
     moon_subcount: int = 0
     total_turns: int = 0
     claimed_moonstones_mask: int = 0
-    winner: KnightId | None = None
     game_over: bool = False
     names: list[str] = field(default_factory=list)
 

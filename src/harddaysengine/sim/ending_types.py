@@ -253,6 +253,77 @@ class SpawnSide:
 
 
 @dataclass(slots=True, frozen=True)
+class OverlayDraw:
+    frame: int
+    x: int
+    y: int
+
+
+@dataclass(slots=True, frozen=True)
+class Overlay:
+    """Credit overlay cels; the tail after ``kept`` is skipped while the phase is ``skip_phase``."""
+
+    draws: tuple[OverlayDraw, ...]
+    kept: int
+    skip_phase: int
+
+
+@dataclass(slots=True, frozen=True)
+class RampSetup:
+    """Script callback: create the three colour ramps of ``EndingPlan.ramps`` (§12.39.6)."""
+
+
+@dataclass(slots=True, frozen=True)
+class Flash:
+    """Script callback: show ``colours`` now, wait, then show the live palette again."""
+
+    colours: tuple[int, ...]
+    ticks: int
+
+
+@dataclass(slots=True, frozen=True)
+class FlashSeries:
+    """Script callback: before each flash wait ``waits[i]`` ticks, then wait ``tail``."""
+
+    waits: tuple[int, ...]
+    flash: Flash
+    tail: int
+
+
+@dataclass(slots=True, frozen=True)
+class WipeSlow:
+    """Script callback: the reverse wipe's step word drops by ``amount``."""
+
+    amount: int
+
+
+@dataclass(slots=True, frozen=True)
+class WipeStop:
+    """Script callback: the running half of the reverse wipe ends."""
+
+
+Callback = RampSetup | Flash | FlashSeries | WipeSlow | WipeStop
+
+
+@dataclass(slots=True, frozen=True)
+class ScriptHunk:
+    """The script hunk's bytes and the hunk each relocated long points into."""
+
+    data: bytes
+    relocs: tuple[tuple[int, int], ...]
+
+
+@dataclass(slots=True, frozen=True)
+class TextFont:
+    """Text font file and routine operands: charmap offset in the script hunk, bias, width."""
+
+    file: str
+    charmap: int
+    bias: int
+    width: int
+
+
+@dataclass(slots=True, frozen=True)
 class EndingPlan:
     """The whole ending pass of ``program`` (§12.39)."""
 
@@ -271,3 +342,23 @@ class EndingPlan:
     fade_wait: int
     palette_period: int
     next_program: str
+    overlay: Overlay
+    callbacks: tuple[tuple[tuple[int, int], Callback], ...]
+    scripts: ScriptHunk
+    font: TextFont
+    job_slots: int
+    wipe: WipeSpec
+    stage_period: int
+    message: str
+    palette_cell: tuple[int, ...]
+
+
+@dataclass(slots=True, frozen=True)
+class WipeSpec:
+    """Reverse-wipe operands: start progress, step, pacing cells and the floor (§12.39.8)."""
+
+    start: int
+    step: int
+    speed: int
+    gap: int
+    floor: int

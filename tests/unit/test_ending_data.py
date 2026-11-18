@@ -11,19 +11,22 @@ from harddaysengine.assets.ending_data import (
     _buffer,
     _class_tweaks,
     _palette,
-    _Program,
     _Scene,
     _tweak_blocks,
 )
+from harddaysengine.assets.ending_runtime_data import flash, flash_series, overlay
 from harddaysengine.assets.fight_palette import MogVersionError
 from harddaysengine.assets.hunk import HUNK_CODE, DecodedHunkExecutable, HunkSection
 from harddaysengine.assets.mog_code import Pointer
+from harddaysengine.assets.program_code import ProgramCode
 from harddaysengine.sim.ending_types import (
     Buffer,
     Call,
     Cell,
     ClassTweak,
     Invoke,
+    Overlay,
+    OverlayDraw,
     Pairs,
     Spawn,
     SpawnKind,
@@ -56,7 +59,7 @@ class _Image:
         self.relocs[hunk].setdefault(target, []).append(pos)
         return self.long(hunk, pos, offset)
 
-    def program(self) -> _Program:
+    def program(self) -> ProgramCode:
         sections = tuple(
             HunkSection(
                 index=i,
@@ -68,7 +71,7 @@ class _Image:
             for i in range(34)
         )
         executable = DecodedHunkExecutable("synthetic", sections)
-        return _Program(executable, supported=(zlib.crc32(bytes(self.data[0])),))
+        return ProgramCode(executable, supported=(zlib.crc32(bytes(self.data[0])),))
 
 
 def _jsr(image: _Image, pos: int, hunk: int, offset: int) -> int:
@@ -193,3 +196,59 @@ def test_tweak_blocks_reject_a_wrong_skip_and_a_missing_end() -> None:
     image.words(8, pos, 0x4E71)
     with pytest.raises(MogVersionError, match="class tweak end"):
         _tweak_blocks(image.program(), 0x9EA, 16, "class tweak")
+
+
+def _flash(image: _Image, pos: int, table: int, ticks: int) -> None:
+    image.ref(0, image.words(0, pos, 0x41F9), 0, table)
+    _jsr(image, pos + 6, 29, 0x788)
+    image.words(0, pos + 12, 0x7000 | ticks)
+    _jsr(image, pos + 14, 29, 0x658)
+    image.ref(0, image.words(0, pos + 20, 0x2079), 32, 0xA)
+    _jsr(image, pos + 26, 29, 0x788)
+    image.words(0, pos + 32, 0x4E75)
+
+
+def test_flash_series_reads_waits_one_flash_target_and_its_table() -> None:
+    image = _Image()
+    for index in range(32):
+        image.words(0, 0x400 + 2 * index, index)
+    _flash(image, 0x300, 0x400, 2)
+    pos = 0x200
+    for ticks in (20, 5):
+        image.words(0, pos, 0x7000 | ticks)
+        _jsr(image, pos + 2, 29, 0x658)
+        image.words(0, pos + 8, 0x6100 | (0x300 - (pos + 10)))
+        pos += 10
+    image.words(0, pos, 0x7032)
+    _jsr(image, pos + 2, 29, 0x658)
+    image.words(0, pos + 8, 0x4E75)
+    series = flash_series(image.program(), 0x200)
+    assert series.waits == (20, 5) and series.tail == 50
+    assert series.flash.ticks == 2 and series.flash.colours == tuple(range(32))
+    image.words(0, 0x400, 0x1000)
+    with pytest.raises(MogVersionError, match="RGB12"):
+        flash(image.program(), 0x300)
+
+
+def _overlay_block(image: _Image, pos: int, frame: int, y: int, x: int) -> int:
+    image.ref(0, image.words(0, pos, 0x2079), 3, 0x92)
+    image.words(0, pos + 6, 0x303C, frame, 0x7400, 0x143C, (y - 0x64) & 0xFF, 0x0602, 0x64)
+    image.words(0, pos + 20, 0x323C, (x - 0xA0) & 0xFFFF, 0x0641, 0xA0)
+    _jsr(image, pos + 28, 23, 0x22C)
+    return pos + 34
+
+
+def test_overlay_wraps_its_byte_and_word_sums_and_finds_the_phase_skip() -> None:
+    image = _Image()
+    image.ref(0, image.words(0, 0xE1C, 0x33FC, 1), 24, 0x18)
+    pos = _overlay_block(image, 0xE24, 0, 56, 0)
+    pos = image.words(0, pos, 0x0C79, 2)
+    pos = image.ref(0, pos, 0, 0xEC2)
+    skip = pos
+    pos = image.words(0, pos, 0x6700, 0)
+    pos = _overlay_block(image, pos, 2, 82, 297)
+    image.words(0, skip + 2, pos - (skip + 2))
+    image.ref(0, image.words(0, pos, 0x33FC, 0), 24, 0x18)
+    image.words(0, pos + 8, 0x4E75)
+    result = overlay(image.program())
+    assert result == Overlay((OverlayDraw(0, 0, 56), OverlayDraw(2, 297, 82)), 1, 2)

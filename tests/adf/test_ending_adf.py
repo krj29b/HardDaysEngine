@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import TYPE_CHECKING
 
 import pytest
 
+from harddaysengine.app.ending_audit import reach_ending
+from harddaysengine.app.ending_screen import EndingScreen
+from harddaysengine.app.game import GameScene, GameSession
+from harddaysengine.app.input import InputFrame
+from harddaysengine.app.scene_assets import GameAssetBundle
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.ending_data import parse_ending_plan
 from harddaysengine.assets.hunk import parse_hunk_executable
@@ -95,3 +102,54 @@ def test_palette_tweaks_ramps_and_spawn_sides_are_bounded(adf_dir: Path) -> None
     assert plan.pair_frames == 16
     assert [e for e, _ in plan.caption_entries] == [1, 2, 3, 4, 5]
     assert (plan.fade_period, plan.fade_wait, plan.palette_period) == (2, 36, 2)
+
+
+def _trail(adf_dir: Path, flags: int) -> tuple[list[str], EndingScreen]:
+    screen = EndingScreen(GameAssetBundle(DiskSet.from_directory(adf_dir)), flags)
+    trail = []
+    while not screen.advance():
+        if screen.run.tick % 250 == 0:
+            payload = json.dumps(screen.snapshot(), sort_keys=True, default=str)
+            trail.append(hashlib.sha256(payload.encode()).hexdigest())
+    return trail, screen
+
+
+def test_whole_ending_replays_identically_and_hands_back(adf_dir: Path) -> None:
+    first, screen = _trail(adf_dir, 0x80 | 0x01 | 0x10)
+    second, _ = _trail(adf_dir, 0x80 | 0x01 | 0x10)
+    assert first == second and len(first) > 10
+    run = screen.run
+    assert run.done and run.music and run.tick == 4090
+    assert run.step_index == len(run.plan.steps) - 1
+    assert run.ramp_colours == list(run.plan.ending_tweaks[1].ramp_colours)
+    assert run.palette.regs == [0] * 32
+
+
+def test_boot_flags_choose_moon_and_class_colours(adf_dir: Path) -> None:
+    blue, _ = _trail(adf_dir, 0x80 | 0x02 | 0x10)
+    red, red_screen = _trail(adf_dir, 0x80 | 0x02 | 0x08)
+    assert blue != red
+    plan = red_screen.run.plan
+    knight = red_screen.run.tables[7][plan.class_first : plan.class_first + 4]
+    assert knight == plan.class_tweaks[2].colours
+    assert red_screen.run.tables[7][12] == plan.ending_tweaks[0].entries[0][1]
+
+
+def test_session_plays_the_ending_then_starts_again_at_the_title(adf_dir: Path) -> None:
+    hashes = []
+    for _ in range(2):
+        session = GameSession(disk_set=DiskSet.from_directory(adf_dir))
+        reach_ending(session, frame=49, bit=0, kind=2)
+        assert session.ending_screen is not None and session.ending_screen.run.flags & 0x40
+        trail = []
+        for tick in range(5000):
+            if session.scene != GameScene.ENDING:
+                break
+            session.step_tick(InputFrame())
+            if tick % 500 == 0:
+                trail.append(session.state_hash())
+        hashes.append(trail)
+        assert session.scene == GameScene.TITLE
+        assert session.ending_screen is None and session.stone_screen is None
+        assert session.inventories[1].counts[11] == 0
+    assert hashes[0] == hashes[1]

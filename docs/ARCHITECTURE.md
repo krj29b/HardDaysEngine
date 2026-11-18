@@ -4627,9 +4627,11 @@ hunk2 $023E), gap (long, hunk3 $009A), left/right depth (hunk2 $2DC6/$2DC8).
 **12.39.5 Frame loop, spawns, pairs and bare ticks.**
 
 *Frame loop* (hunk0 $01BA), repeated until it returns: stamp the tick counter; run the job
-handlers of finished scripts; if `stop` is set, return; run every job's script one frame (§7.4
-interpreter; scripts set `stop` through their `$B4` call of hunk0 $02CC); if `credits` is set,
-draw the overlay cels; flip; restore the dirty rectangles; if `staged` is clear, set it and apply
+handlers of finished scripts; if `stop` is set, return; run every job's script one frame (§12.39.9). `stop` is set by
+handler 0: the handler pass calls it for every active job whose script has ended, and the entry
+code installs it at $0052 as hunk0 $02CC (`MOVE.W #1,stop ; A0 = 0 ; RTS`, so the job is also
+freed). A loop therefore ends one frame after the first of its jobs ends. If `credits` is set,
+draw the overlay cels (§12.39.10); flip; restore the dirty rectangles; if `staged` is clear, set it and apply
 the stage palette by `stage mode` (2: fade to the stage table at period 2; 3: fade to black;
 5: blackout; otherwise write it at once); wait until `speed + gap` ticks have passed since the
 stamp (never a negative wait).
@@ -4648,12 +4650,19 @@ test, until its counter at $0604 reaches the operand at $0248, 16). The ending's
 *Bare ticks*: n+1 passes of stamp, handlers, scripts, flip, restore and the pacing wait; there is
 no stop test, overlay or stage palette.
 
-**12.39.6 Script callbacks the ending uses.** The colour-ramp callback (hunk0 $08DC) creates three
-ramps (hunk31 $0060, with the entry, a colour from the ramp-colour words of §12.39.3 and rate 5)
-and stores their slots at $092C/$0930/$0934. The first scene releases them before its fade. The
-callback operands are decoded as `RampSpec`. The interpreter, its other callbacks (the flash
-helpers of §7.4 and the stop routine), the colour-ramp effect and the reverse wipe over
-`co.stile` are specified and implemented with the player in T11.22b.
+**12.39.6 Script callbacks the ending uses.** A scan of every script reachable from the
+ending's spawns finds only selector-0 `$B4` calls, to five routines. Each is decoded:
+
+| Routine | Effect |
+|---|---|
+| hunk0 $08DC | create three colour ramps (hunk31 $0060: entry, the ramp colour of §12.39.3, rate 5, repeat 0) and store their slots at $092C/$0930/$0934; the first scene releases them |
+| hunk0 $0EC4 | flash: write the 32 colours of the table it names (hunk0 $0F4E) to the colour registers, wait 8 ticks, write the live palette back |
+| hunk0 $0EE6 | flash series: six times wait (20, 2, 20, 5, 10, 5 ticks) then a flash of 2 ticks with the table at $0F8E (the `BSR.S` target); then wait 50 |
+| hunk31 $0788 | `SUBI.W #1` on the reverse wipe's step word (hunk31 $0850): the wipe slows down |
+| hunk31 $077E | set the wipe's stop word (hunk33 $0F5A): its running half ends |
+
+The waits run inside the job pass, so the whole frame stalls while the palette keeps ticking.
+A table call (selector non-zero) or any other routine raises.
 
 **12.39.7 Caption screen (hunk0 $11CA).** Blackout; clear and target the displayed screen; copy
 the raw `message.piv` image to the work screen and decode it; print the list; overwrite palette
@@ -4675,6 +4684,81 @@ entries 1..5 with the decoded words at $122E (a dark red ramp; the first entry c
   500, fade to black at period 6, wait 90.
 
 Then the closing caption, wait 25, fade, and `mog`.
+
+**12.39.9 Job pool and script interpreter.** The pool has 40 slots (`MOVEQ #39,D7` of the
+allocator, hunk10 $0198). Spawning takes the first inactive slot and clears its loop state; jobs
+reset clears the pool. Before every script pass the pool is bubble-sorted by depth (neighbours
+swap while the next one has the smaller z), so draw order follows depth. Each active job's
+script runs until an `$FF` marker. Draws: `op & $1F` is a byte offset into the frame table (only
+multiples of 4), then frame, signed dy, flags d3, dx. Not mirrored: x = job x + dx; mirrored (job
+flags bit 1): x = job x − dx − frame width; y = dy + y + z, all 16-bit. d3 bit 4 also stamps the
+cel into the shown picture buffer; bit 5 only selects the CPU masked copy (no visible
+difference). Control opcodes used by the ending: `$84` (mode 3 jumps now, otherwise at the end of
+the frame), `$88` (loop; count 0 takes the tick counter's low 5 bits, at least 1), `$94` with
+`$FE` (second loop) and `$B4`. Also implemented because their effect is fully known: `$80`,
+`$8C`, `$A0` (move: bit 6 absolute; otherwise x adds when bit 0 is set, inverted for flags 3;
+y subtracts with bit 3; z with bit 5), `$A4`, `$B8`/`$BC`/`$C8` (skips), `$C0` (free the job; the
+pass goes on), `$D4` (clear loop state). `$C4`, `$CC`, `$D0` and `$FD` read memory the ending
+never sets up and raise. End of frame: a running first loop jumps back while its count lasts;
+then a deferred jump; then `$FF $FE` repeats the second loop, `$FF $00` continues, and `$FF $FF`
+ends the script (unless the second loop still runs).
+
+**12.39.10 Player model (T11.22b).** `sim/ending.EndingRun` executes the plan. One
+`advance()` is one VBL: the palette ticks, then the tick counter advances. Every wait, pacing gap
+and callback wait yields once per VBL. Instant steps take no time, and that includes the loader:
+the original's disk time is not emulated, so the loading caption shows only for its own fade
+(32 ticks) and the fade-out that follows.
+
+*Palette* (`sim/ending_palette`): a live palette, the 32 colour registers, one fade (target,
+period, counter starting at the period; a step moves each component by one toward the target
+when the counter reaches 0; with no change the fade ends) and six ramp slots (colour, target,
+period, counter, the colour to return to, repeat; on arrival target and return colour swap, and
+a non-zero repeat frees the slot when it runs out). A tick writes the live palette to the
+registers only when something moved, so a flash lasts until the next fade or ramp step or until
+it is written back. Blackout zeroes both; stage-now writes the table to the registers and the
+live palette. Pictures load their palette words into one shared cell (hunk26 $0146, initially
+zero), with the rule checked in both of program's picture decoders (hunk20 $015C and $01C6): a
+4-plane picture fills 16 words and any other 32; a word with bit 15 set keeps its low 15 bits,
+otherwise it is shifted left once. Words a 16-colour picture does not fill keep the previous
+picture's. Tables are copies of that cell after each load, with the tweaks applied.
+
+*Screens* (`app/ending_screen.EndingPixels`): ten 320×200 picture buffers and two screens.
+Buffer 10 is the displayed screen and 11 the work screen; flip swaps them and makes the work
+screen the draw target. The dirty-rectangle restore after a frame-loop flip is modelled as
+copying the shown buffer to the new work screen. That gives the same image, because only job
+draws differ from the shown buffer on a work screen inside a loop, and the overlay is redrawn on
+top every frame. The overlay draws the `ov1` frames at the positions decoded from hunk0 $0E1C:
+four draws whose y is a byte sum and x a word sum of two immediates, with the last two skipped
+while the overlay phase equals the `CMPI` operand (2). Text uses the program font (`bold.f`,
+loaded by $1176 together with `message.piv`) and the character map at hunk2 $2DE0; each glyph
+advances by width − 2, and style 1 centres the line on 320 (operands at hunk12 $0184, $01B0,
+$021A).
+
+*Reverse wipe* (`LOADING_A` / `LOADING_B`, hunk31 $068A / $071C). Set-up: flip, clear the
+displayed screen, take the shown buffer as the wipe picture, store speed 2 and gap 0, progress
+1000, step 9 (operands at $06C4..$0700), draw the wipe picture for progress 1000, copy it to the
+work screen and flip. Running half, while the stop word is clear: stamp; progress −= step
+(clamped at 0); redraw the wipe picture; copy it to the work screen; the handler pass; the job
+pass; flip; pacing; leave once progress is below the floor (`CMPI #200` at $074E). Afterwards the
+displayed screen is copied to the work screen and to the shown buffer. The wipe picture for a
+progress is the 200-line window at that offset into the block panorama that the 960-byte
+`co.stile` builds over the pictures in P2..P4 (§7.4 format). Only `bg7` (P2) is referenced; a map
+naming P4, which holds `klift1.cel`, raises. The original scrolls incrementally (shift by the step,
+then redraw the two top rows); the window is the image that scrolling produces.
+
+*Stage palette*: the mode chain at $0262..$028E is checked (2 fade at the period from $02B2,
+4 write now, 5 blackout, 3 fade to black at the period from hunk10 $0C22; any other value writes
+now).
+
+*Hand-over.* A matching Stonehenge visit releases fire on the quest text, emits the
+`EndingRequest`, and the session switches to the ending scene. The ending runs with
+`request.flags` as the boot flags; input is ignored (the intro's skip is not armed in the ending
+pass). When the run ends the campaign is reset and the session goes to the title, as `mog`
+restarts from its entry. The music step starts `vmusic.cmp` through the existing module player
+(its exact effect subset is T11.23c). The ending scene's snapshot (step, tick, cells, jobs,
+palette, picture cell, wipe and ramp state) is part of the session hash; rendering never
+advances it. The invented VICTORY screen and the overworld `winner` field are removed: nothing
+in the original reaches them.
 
 **Version gate.** `program` hunk 0 must have CRC-32 $3064C4E2. Every operand above is still read
 and checked, so a different build fails loudly instead of playing a wrong ending.

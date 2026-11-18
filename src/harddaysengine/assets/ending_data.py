@@ -13,9 +13,10 @@ import struct
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from harddaysengine.assets import ending_runtime_data as runtime
 from harddaysengine.assets.fight_palette import MogVersionError
-from harddaysengine.assets.mog_code import MogCode, Pointer
-from harddaysengine.assets.turn_rules import text_list
+from harddaysengine.assets.mog_code import Pointer
+from harddaysengine.assets.program_code import ProgramCode, key as _key
 from harddaysengine.sim.ending_types import (
     Buffer,
     Call,
@@ -52,9 +53,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from harddaysengine.assets.hunk import DecodedHunkExecutable
-    from harddaysengine.sim.turn_rules import TextLine
-
-PROGRAM_CODE_CRC32 = 0x3064C4E2
 
 _CODE = 0
 _LOADER = 8
@@ -107,10 +105,6 @@ _FLAGS = (0, 0x190)
 _SCENES = (0x938, 0xABA, 0xBD8, 0xD2E)
 
 
-def _key(pointer: Pointer) -> tuple[int, int]:
-    return pointer.hunk, pointer.offset
-
-
 def _buffer(pointer: Pointer, what: str) -> Buffer:
     if pointer.hunk == 30 and pointer.offset in (0, 4):
         return Buffer.SCREEN if pointer.offset == 0 else Buffer.WORK
@@ -127,66 +121,11 @@ def _palette(pointer: Pointer, what: str) -> int:
     return index
 
 
-class _Program:
-    """Hunk-aware checked reads over :class:`MogCode` (§12.39.1)."""
-
-    def __init__(
-        self, executable: DecodedHunkExecutable, supported: tuple[int, ...] = (PROGRAM_CODE_CRC32,)
-    ) -> None:
-        self.code = MogCode(executable, supported=supported)
-
-    def word(self, hunk: int, pos: int) -> int:
-        return self.code.hunk_word(hunk, pos)
-
-    def long(self, hunk: int, pos: int) -> int:
-        value: int = struct.unpack_from(">I", self.code.hunk_data(hunk), pos)[0]
-        return value
-
-    def sword(self, hunk: int, pos: int) -> int:
-        value: int = struct.unpack_from(">h", self.code.hunk_data(hunk), pos)[0]
-        return value
-
-    def expect(self, hunk: int, pos: int, opcode: int, what: str) -> None:
-        found = self.word(hunk, pos)
-        if found != opcode:
-            raise MogVersionError(
-                f"program: {what}: expected ${opcode:04X} at hunk {hunk} offset {pos:#x}, "
-                f"found ${found:04X}"
-            )
-
-    def pointer(self, hunk: int, pos: int, what: str) -> Pointer:
-        return self.code.pointer(pos, what, hunk)
-
-    def call(self, hunk: int, pos: int, what: str) -> tuple[int, int]:
-        self.expect(hunk, pos, _JSR, what)
-        return _key(self.pointer(hunk, pos + 2, what))
-
-    def name(self, hunk: int, pos: int, what: str) -> str:
-        self.expect(hunk, pos, _LEA_A0, what)
-        value = self.code.cstring(self.pointer(hunk, pos + 2, what), what)
-        if not value:
-            raise MogVersionError(f"program: empty {what}")
-        return value
-
-    def lines(self, pointer: Pointer, what: str) -> tuple[TextLine, ...]:
-        return text_list(self.code, pointer, what)
-
-    def branch(self, hunk: int, pos: int, opcode: int, what: str) -> int:
-        self.expect(hunk, pos, opcode, what)
-        return pos + 2 + self.sword(hunk, pos + 2)
-
-    def short_branch(self, hunk: int, pos: int, what: str) -> int:
-        found = self.word(hunk, pos)
-        if found & 0xFF00 != _BEQ or found & 0xFF == 0:
-            raise MogVersionError(f"program: {what}: expected BEQ.S at {pos:#x}")
-        return pos + 2 + (found & 0xFF)
-
-
 @dataclass(slots=True)
 class _Scene:
     """Walks one scene body in hunk 0 into steps (§12.39.4)."""
 
-    prog: _Program
+    prog: ProgramCode
     steps: list[Step] = field(default_factory=list)
     pairs: dict[tuple[int, int], int] = field(default_factory=dict)
 
@@ -354,7 +293,7 @@ class _Scene:
         return pos + 4
 
 
-def _flag_bit(prog: _Program) -> int:
+def _flag_bit(prog: ProgramCode) -> int:
     prog.expect(_CODE, 0x1E, 0x33F9, "boot flag copy")
     if prog.long(_CODE, 0x20) != 0x3E0 or _key(prog.pointer(_CODE, 0x24, "flags")) != _FLAGS:
         raise MogVersionError("program: boot flags are copied elsewhere")
@@ -371,7 +310,7 @@ def _flag_bit(prog: _Program) -> int:
     return bit
 
 
-def _top_level(prog: _Program) -> tuple[tuple[Step, ...], str]:
+def _top_level(prog: ProgramCode) -> tuple[tuple[Step, ...], str]:
     """The ending sequence from $0120 to its jump back to the next program (§12.39.1)."""
     for pos in (0x120, 0x154):
         prog.expect(_CODE, pos, _LEA_A0, "caption text")
@@ -396,7 +335,7 @@ def _top_level(prog: _Program) -> tuple[tuple[Step, ...], str]:
     return (*steps, *_closing(prog)), _hand_back(prog)
 
 
-def _closing(prog: _Program) -> tuple[Step, ...]:
+def _closing(prog: ProgramCode) -> tuple[Step, ...]:
     """The closing caption, its wait and the final fade (§12.39.1)."""
     caption = Caption(prog.lines(prog.pointer(_CODE, 0x156, "caption"), "closing caption"))
     if prog.call(_CODE, 0x15A, "closing caption screen") != _CAPTION:
@@ -409,7 +348,7 @@ def _closing(prog: _Program) -> tuple[Step, ...]:
     return caption, Wait(prog.long(_CODE, 0x162)), Invoke(Call.FADE_OUT)
 
 
-def _hand_back(prog: _Program) -> str:
+def _hand_back(prog: ProgramCode) -> str:
     """Name of the program the ending starts next (§12.39.1)."""
     if prog.branch(_CODE, 0x172, _BRA, "hand back") != 0x114:
         raise MogVersionError("program: the ending does not return to the program loader")
@@ -418,7 +357,7 @@ def _hand_back(prog: _Program) -> str:
     return name
 
 
-def _picture(prog: _Program, pos: int) -> tuple[PictureLoad, int]:
+def _picture(prog: ProgramCode, pos: int) -> tuple[PictureLoad, int]:
     prog.expect(_LOADER, pos, _MOVE_L_ABS_D0, "loader target")
     buffer = _buffer(prog.pointer(_LOADER, pos + 2, "loader buffer"), "loader buffer")
     if prog.call(_LOADER, pos + 6, "loader target") != _TARGET:
@@ -451,7 +390,7 @@ def _picture(prog: _Program, pos: int) -> tuple[PictureLoad, int]:
 class _CelWalk:
     """Symbolic run of the loader's cel placement (§12.39.3)."""
 
-    prog: _Program
+    prog: ProgramCode
     table: dict[int, object] = field(default_factory=dict)
     a0: object = None
     a1: object = None
@@ -529,7 +468,7 @@ class _CelWalk:
         return tuple(slots), overlay
 
 
-def _data_file(prog: _Program, pos: int, what: str) -> tuple[str, int, int]:
+def _data_file(prog: ProgramCode, pos: int, what: str) -> tuple[str, int, int]:
     name = prog.name(_LOADER, pos, what)
     if prog.call(_LOADER, pos + 6, f"{what} open") != (18, 0x8C):
         raise MogVersionError(f"program: {what} is opened by another routine")
@@ -544,7 +483,7 @@ def _data_file(prog: _Program, pos: int, what: str) -> tuple[str, int, int]:
     return name, prog.long(_LOADER, pos + 20), pos + 36
 
 
-def _loader(prog: _Program) -> EndingLoad:
+def _loader(prog: ProgramCode) -> EndingLoad:
     pos, pictures = _LOADER_ENTRY[1], []
     while prog.word(_LOADER, pos) == _MOVE_L_ABS_D0:
         picture, pos = _picture(prog, pos)
@@ -569,7 +508,7 @@ def _loader(prog: _Program) -> EndingLoad:
     )
 
 
-def _tweak_blocks(prog: _Program, pos: int, size: int, what: str) -> list[tuple[int, int]]:
+def _tweak_blocks(prog: ProgramCode, pos: int, size: int, what: str) -> list[tuple[int, int]]:
     """``BTST #bit,D0 ; BEQ.S next`` blocks of ``size`` bytes; returns (bit, body) pairs."""
     blocks = []
     while prog.word(_LOADER, pos) == 0x0800:
@@ -585,7 +524,7 @@ def _tweak_blocks(prog: _Program, pos: int, size: int, what: str) -> list[tuple[
     return blocks
 
 
-def _ending_tweaks(prog: _Program) -> tuple[EndingTweak, ...]:
+def _ending_tweaks(prog: ProgramCode) -> tuple[EndingTweak, ...]:
     prog.expect(_LOADER, 0x938, _LEA_A0, "ending tweak palette")
     prog.expect(_LOADER, 0x93E, _MOVE_W_ABS_D0, "ending tweak flags")
     if _key(prog.pointer(_LOADER, 0x940, "ending tweak flags")) != _FLAGS:
@@ -608,7 +547,7 @@ def _ending_tweaks(prog: _Program) -> tuple[EndingTweak, ...]:
     return tuple(rows)
 
 
-def _class_tweaks(prog: _Program) -> tuple[tuple[ClassTweak, ...], int]:
+def _class_tweaks(prog: ProgramCode) -> tuple[tuple[ClassTweak, ...], int]:
     prog.expect(_LOADER, 0x9DE, 0xD1FC, "class tweak offset")
     first, rest = divmod(prog.long(_LOADER, 0x9E0), 2)
     prog.expect(_LOADER, 0x9E4, _MOVE_W_ABS_D0, "class tweak flags")
@@ -624,7 +563,7 @@ def _class_tweaks(prog: _Program) -> tuple[tuple[ClassTweak, ...], int]:
     return tuple(rows), first
 
 
-def _ramps(prog: _Program) -> tuple[RampSpec, ...]:
+def _ramps(prog: ProgramCode) -> tuple[RampSpec, ...]:
     rows = []
     for index in range(3):
         pos = 0x8DC + 0x1A * index
@@ -646,7 +585,7 @@ def _ramps(prog: _Program) -> tuple[RampSpec, ...]:
     return tuple(rows)
 
 
-def _spawn_side(prog: _Program, pos: int) -> SpawnSide:
+def _spawn_side(prog: ProgramCode, pos: int) -> SpawnSide:
     prog.expect(_CODE, pos, 0x247C, "spawn frame table")
     if prog.pointer(_CODE, pos + 2, "spawn frames").hunk != 11:
         raise MogVersionError("program: spawn frame table outside its hunk")
@@ -663,7 +602,7 @@ def _spawn_side(prog: _Program, pos: int) -> SpawnSide:
     return SpawnSide(values[0], values[1], values[2], prog.word(_CODE, pos + 26), depth)
 
 
-def _caption_entries(prog: _Program) -> tuple[tuple[int, int], ...]:
+def _caption_entries(prog: ProgramCode) -> tuple[tuple[int, int], ...]:
     prog.expect(_CODE, 0x1222, _LEA_A0, "caption palette")
     prog.expect(_CODE, 0x1228, 0xD1FC, "caption first entry")
     entry, rest = divmod(prog.long(_CODE, 0x122A), 2)
@@ -680,7 +619,7 @@ def _caption_entries(prog: _Program) -> tuple[tuple[int, int], ...]:
     return tuple(rows)
 
 
-def _fade(prog: _Program) -> tuple[int, int, int]:
+def _fade(prog: ProgramCode) -> tuple[int, int, int]:
     prog.expect(_SCREENS, 0xC52, _LEA_A0, "fade table")
     if _key(prog.pointer(_SCREENS, 0xC54, "fade table")) != _BLACK:
         raise MogVersionError("program: fade uses another table")
@@ -696,7 +635,7 @@ def _fade(prog: _Program) -> tuple[int, int, int]:
     return quick & 0xFF, prog.long(_SCREENS, 0xC62), prog.long(_SCREENS, period_cell.offset)
 
 
-def _pair_frames(prog: _Program) -> int:
+def _pair_frames(prog: ProgramCode) -> int:
     prog.expect(_CODE, 0x248, 0x0C79, "pair frame count")
     if _key(prog.pointer(_CODE, 0x24C, "pair frame counter")) != (0, 0x604):
         raise MogVersionError("program: pair frame counter moved")
@@ -705,7 +644,8 @@ def _pair_frames(prog: _Program) -> int:
 
 def parse_ending_plan(executable: DecodedHunkExecutable) -> EndingPlan:
     """Decode the whole ending pass of ``program`` (§12.39)."""
-    prog = _Program(executable)
+    prog = ProgramCode(executable)
+    runtime.check_finish_handler(prog)
     steps, next_program = _top_level(prog)
     class_tweaks, class_first = _class_tweaks(prog)
     fade_period, fade_wait, palette_period = _fade(prog)
@@ -726,4 +666,13 @@ def parse_ending_plan(executable: DecodedHunkExecutable) -> EndingPlan:
         fade_wait=fade_wait,
         palette_period=palette_period,
         next_program=next_program,
+        overlay=runtime.overlay(prog),
+        callbacks=runtime.callbacks(prog),
+        scripts=runtime.scripts(prog),
+        font=runtime.font(prog),
+        job_slots=runtime.job_slots(prog),
+        wipe=runtime.wipe(prog),
+        stage_period=runtime.stage_period(prog),
+        message=runtime.message_files(prog)[1],
+        palette_cell=runtime.palette_cell(prog),
     )

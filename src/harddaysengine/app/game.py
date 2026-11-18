@@ -16,6 +16,7 @@ import pygame
 from harddaysengine.app.audio import AudioEngine
 from harddaysengine.app.config import find_adf_images
 from harddaysengine.app.dice_screen import DiceScreen
+from harddaysengine.app.ending_screen import EndingScreen
 from harddaysengine.app.fight_runtime import FightLoader, FightRuntime, FightUnavailableError
 from harddaysengine.app.input import (
     InputFrame,
@@ -136,7 +137,7 @@ class GameScene(IntEnum):
     KNIGHT_SELECT = 1
     OVERWORLD = 2
     COMBAT = 3
-    VICTORY = 4
+    ENDING = 4
     GAME_OVER = 5
     LOCATION = 6
     STATUS = 7
@@ -237,6 +238,7 @@ class GameSession:
         self.active_encounter: ActiveEncounter | None = None
         self.town_screen: TownScreen | None = None
         self.stone_screen: StoneScreen | None = None
+        self.ending_screen: EndingScreen | None = None
         self.wizard_screen: WizardScreen | None = None
         self.village_visit: VillageVisit | None = None
         self.valley_screen: ValleyScreen | None = None
@@ -271,6 +273,7 @@ class GameSession:
         self.active_encounter = None
         self.town_screen = None
         self.stone_screen = None
+        self.ending_screen = None
         self.wizard_screen = None
         self.village_visit = None
         self.valley_screen = None
@@ -337,6 +340,7 @@ class GameSession:
             GameScene.SERVICE: lambda: self._step_service(frame),
             GameScene.DICE: lambda: self._step_dice(frame),
             GameScene.STONEHENGE: lambda: self._step_stone(frame),
+            GameScene.ENDING: self._step_ending,
             GameScene.WIZARD: lambda: self._step_wizard(frame),
             GameScene.VILLAGE: self._step_village,
             GameScene.VALLEY: lambda: self._step_valley(frame),
@@ -349,7 +353,7 @@ class GameSession:
             if mod is not None:
                 self.audio.play_music(mod)
 
-    def _play_victory_music(self) -> None:
+    def _play_ending_music(self) -> None:
         if self.audio is not None and self.asset_bundle is not None:
             mod = self.asset_bundle.load_victory_music()
             if mod is not None:
@@ -383,11 +387,28 @@ class GameSession:
         self._pending_fade_in = False
         self.palette_fx.fade_in(_palette_to_rgb12(target_palette), divisor=1, from_black=True)
 
-    def _enter_victory(self, status: str) -> None:
-        self.scene = GameScene.VICTORY
-        self.last_status = status
-        self._begin_fade_in(self._picture_target_palette("message.piv"))
-        self._play_victory_music()
+    def _enter_ending(self, request: EndingRequest) -> None:
+        """Hand over to the program ending pass with the boot flags (§12.39.10)."""
+        if self.asset_bundle is None:
+            raise ValueError("the ending needs the original disks")
+        self.ending_screen = EndingScreen(self.asset_bundle, request.flags)
+        self.palette_fx.set_palette([0] * 32)
+        self.palette_fx.clear_flash()
+        self.scene = GameScene.ENDING
+
+    def _step_ending(self) -> None:
+        """One VBL of the ending; afterwards mog starts again at the title (§12.39.10)."""
+        screen = self.ending_screen
+        if screen is None:
+            raise ValueError("ending scene has no run")
+        music = screen.run.music
+        done = screen.advance()
+        if screen.run.music and not music:
+            self._play_ending_music()
+        if done:
+            self._reset_campaign(self.selected_player_count, self.players)
+            self.scene = GameScene.TITLE
+            self._play_title_music()
 
     def _enter_game_over(self) -> None:
         self.scene = GameScene.GAME_OVER
@@ -562,10 +583,7 @@ class GameSession:
 
     def _map_ready(self) -> bool:
         if self.overworld.game_over:
-            if self.overworld.winner is not None:
-                self._enter_victory(f"{self.overworld.winner.name} WINS")
-            else:
-                self._enter_game_over()
+            self._enter_game_over()
             return False
         return self._ensure_map()
 
@@ -1180,6 +1198,7 @@ class GameSession:
             if state.phase == StonePhase.QUEST:
                 state.phase = StonePhase.HAND_OVER
                 state.request = EndingRequest(screen.rules.program, state.ending)
+                self._enter_ending(state.request)
             else:
                 state.phase = StonePhase.OFFER_OUT
                 self._stone_fade(out=True)
@@ -1257,9 +1276,6 @@ class GameSession:
         triggers: tuple[EncounterTrigger, ...],
     ) -> None:
         for trig in triggers:
-            if trig.kind == TriggerKind.VICTORY:
-                self._enter_victory(f"{knight_id.name} WINS")
-                return
             if trig.kind == TriggerKind.TOWN_VISIT:
                 self._open_town(knight_id, waterdeep=trig.node_id == 26)
                 return
@@ -1759,6 +1775,7 @@ class GameSession:
             "calendar_phase": self._calendar_phase,
             "town": asdict(self.town_screen.state) if self.town_screen else None,
             "stone": self._stone_snapshot(),
+            "ending": self._ending_snapshot(),
             "wizard": self._wizard_snapshot(),
             "village": self._village_snapshot(),
             "valley": self._valley_snapshot(),
@@ -1898,12 +1915,8 @@ class GameSession:
         if self.scene == GameScene.GAME_OVER and self.overworld.turn_rules is not None:
             self._render_calendar(scene_renderer, farewell=True)
             return
-        if self.scene == GameScene.VICTORY:
-            self._compose_picture_or_solid(scene_renderer, "message.piv")
-            font.draw_text(scene_renderer.canvas, "VICTORY!", 128, 236, color_index=30)
-        else:
-            self._compose_picture_or_solid(scene_renderer, "message.piv")
-            font.draw_text(scene_renderer.canvas, "GAME OVER", 124, 236, color_index=15)
+        self._compose_picture_or_solid(scene_renderer, "message.piv")
+        font.draw_text(scene_renderer.canvas, "GAME OVER", 124, 236, color_index=15)
 
     def _render_new_day(self, renderer: SceneRenderer, font: BitmapFont) -> None:
         if self._calendar_phase == 0:
@@ -1922,6 +1935,14 @@ class GameSession:
         )
         renderer.set_palette(palette)
 
+    def _ending_snapshot(self) -> dict[str, object] | None:
+        return None if self.ending_screen is None else self.ending_screen.snapshot()
+
+    def _render_ending(self, renderer: SceneRenderer) -> None:
+        if self.ending_screen is None:
+            raise ValueError("ending scene has no run")
+        self.ending_screen.render(renderer)
+
     def render_to_scene(self, scene_renderer: SceneRenderer, font: BitmapFont) -> None:
         """Render the active game scene and HUD onto ``scene_renderer``."""
         scenes: dict[GameScene, Callable[[], None]] = {
@@ -1935,6 +1956,7 @@ class GameSession:
             GameScene.SERVICE: lambda: self._render_service_scene(scene_renderer),
             GameScene.DICE: lambda: self._render_dice_scene(scene_renderer),
             GameScene.STONEHENGE: lambda: self._render_stone_scene(scene_renderer, font),
+            GameScene.ENDING: lambda: self._render_ending(scene_renderer),
             GameScene.WIZARD: lambda: self._render_wizard_scene(scene_renderer, font),
             GameScene.VILLAGE: lambda: self._render_overworld_scene(scene_renderer, font),
             GameScene.VALLEY: lambda: self._render_valley_scene(scene_renderer, font),
