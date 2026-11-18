@@ -814,3 +814,20 @@ fades, fresh pools at stage changes, direct gift-to-farewell palette installatio
 and a spent temple exit. Original data comes from user disks. Exact sound-bank
 instrument wiring remains T11.23c, as for other original place screens. The wizard
 pictures cease to be the legacy victory backdrop; program endings remain T11.22.
+
+## ADR-042: Home villages retain their caller through the shared temple
+**Status:** ACCEPTED (2026-11-18, T11.21a)
+**Context:** The four home-village place kinds still fall through to an unavailable
+screen. They share one life-reward routine and temple caller, while the Valley
+requires different combat loading, rewards and turn accounting.
+**Decision:** Split T11.21 into home villages (a), Valley (b) and meetings/hoard (c).
+Decode village operands into frozen rules. Retain a small integer-only visit
+through the map fade, one reward application, shared sheet 9 and temple fade.
+Use the existing authoritative actors, sheet presenter, PAL palette state and
+map re-entry. All village colours reward the active visitor, as the original
+common caller does; the signed byte comparison and wrapping addition are kept.
+**Consequences:** No village artwork, duplicate inventory model or random draw is
+introduced. Hash ownership and wait state; clear them on campaign reset. The
+parent remains open until Valley and meeting acceptance also pass. Tests cover
+synthetic operands, signed boundaries, all village/visitor combinations, natural
+temple input, replay and rendering. No disk-derived assets are tracked.

@@ -49,6 +49,7 @@ from harddaysengine.assets.palette import (
 from harddaysengine.assets.service_data import parse_service_rules
 from harddaysengine.assets.service_screen_data import parse_service_screens
 from harddaysengine.assets.sound_rules import parse_sound_rules
+from harddaysengine.assets.village_data import parse_village_rules
 from harddaysengine.render.renderer import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
@@ -92,6 +93,7 @@ from harddaysengine.sim.stonehenge import EndingRequest, StonePhase, bless
 from harddaysengine.sim.towns import TownAction, TownEntry
 from harddaysengine.sim.turns import TurnResult, advance as advance_turn
 from harddaysengine.sim.types import KnightId
+from harddaysengine.sim.village import VillagePhase, VillageVisit, reward as village_reward
 from harddaysengine.sim.wizard import WizardPhase
 
 if TYPE_CHECKING:
@@ -136,6 +138,7 @@ class GameScene(IntEnum):
     DICE = 10
     STONEHENGE = 11
     WIZARD = 12
+    VILLAGE = 13
 
 
 @dataclass(slots=True, frozen=True)
@@ -227,6 +230,7 @@ class GameSession:
         self.town_screen: TownScreen | None = None
         self.stone_screen: StoneScreen | None = None
         self.wizard_screen: WizardScreen | None = None
+        self.village_visit: VillageVisit | None = None
         self.loading_cycle = 0
         self.palette_fx: PaletteFxState = PaletteFxState(
             _palette_to_rgb12(default_combat_palette())
@@ -259,6 +263,7 @@ class GameSession:
         self.town_screen = None
         self.stone_screen = None
         self.wizard_screen = None
+        self.village_visit = None
         self.loading_cycle = 0
         self.sheet_screen = None
         self.service_screen = None
@@ -323,6 +328,7 @@ class GameSession:
             GameScene.DICE: lambda: self._step_dice(frame),
             GameScene.STONEHENGE: lambda: self._step_stone(frame),
             GameScene.WIZARD: lambda: self._step_wizard(frame),
+            GameScene.VILLAGE: self._step_village,
         }
         scenes.get(self.scene, lambda: self._step_end_screen(primary))()
 
@@ -682,6 +688,8 @@ class GameSession:
                 ),
                 kid,
             )
+        elif row.kind in (21, 22, 23, 24):
+            self._open_village(kid)
         elif row.kind in (25, 26):
             self._open_town(kid, waterdeep=row.kind == 26)
         elif row.kind == 27:
@@ -777,6 +785,58 @@ class GameSession:
     def ending_request(self) -> EndingRequest | None:
         """Encoded program hand-over, consumed by the ending host in T11.22 (§12.34)."""
         return None if self.stone_screen is None else self.stone_screen.state.request
+
+    def _open_village(self, knight_id: KnightId) -> None:
+        """Retain the original village caller through map OUT and sheet 9 (§12.37)."""
+        if self.asset_bundle is None:
+            self.last_status = "ORIGINAL DISKS REQUIRED FOR VILLAGES"
+            return
+        rules = parse_village_rules(
+            parse_hunk_executable("mog", self.asset_bundle.disk_set.read_file("mog"))
+        )
+        self.village_visit = VillageVisit(int(knight_id) + 1, rules, wait=rules.fade_wait)
+        palette = self._overworld_target_palette()
+        self.overworld.setup_turn()
+        self.overworld.colors.active = False
+        self._clear_map_jobs()
+        self._map_key = 0
+        self._pending_fade_in = False
+        self.scene = GameScene.VILLAGE
+        self.last_status = "HOME VILLAGE"
+        self.palette_fx.set_palette(_palette_to_rgb12(palette))
+        self.palette_fx.fade_out(divisor=rules.fade_period)
+
+    def _step_village(self) -> None:
+        visit = self.village_visit
+        if visit is None:
+            raise ValueError("village scene has no visit")
+        visit.wait = max(0, visit.wait - 1)
+        if visit.wait or self.palette_fx.is_fading:
+            return
+        village_reward(self.actors[visit.knight - 1], visit.rules)
+        self._sync_legacy_actor(KnightId(visit.knight - 1))
+        visit.phase = VillagePhase.TEMPLE
+        self._open_sheet(visit.rules.sheet)
+
+    def _close_village_sheet(self, sheet: SheetScreen) -> None:
+        visit = self.village_visit
+        if visit is None:
+            raise ValueError("village temple has no visit")
+        if visit.phase == VillagePhase.TEMPLE:
+            visit.phase = VillagePhase.TEMPLE_OUT
+            visit.wait = visit.rules.fade_wait
+            self.palette_fx.fade_out(divisor=visit.rules.fade_period)
+            return
+        visit.wait = max(0, visit.wait - 1)
+        if visit.wait or self.palette_fx.is_fading:
+            return
+        self.last_sheet_item = sheet.state.last_item
+        self.sheet_screen, self.village_visit = None, None
+        self.overworld.spent = self.overworld.budget
+        self._reenter_map()
+
+    def _village_snapshot(self) -> tuple[int, int, int] | None:
+        return None if self.village_visit is None else self.village_visit.snapshot()
 
     def _open_wizard(self, knight_id: KnightId) -> None:
         """Original wizard visit, with retained loading and the shared reward state (§12.36)."""
@@ -1235,6 +1295,9 @@ class GameSession:
         screen = self.sheet_screen
         if screen is None:
             raise ValueError("no shared sheet to close")
+        if self.village_visit is not None:
+            self._close_village_sheet(screen)
+            return
         if self.wizard_screen is not None:
             self._close_wizard_sheet(screen)
             return
@@ -1520,6 +1583,7 @@ class GameSession:
             "town": asdict(self.town_screen.state) if self.town_screen else None,
             "stone": self._stone_snapshot(),
             "wizard": self._wizard_snapshot(),
+            "village": self._village_snapshot(),
             "loading_cycle": self.loading_cycle,
             "sheet": asdict(self.sheet_screen.state) if self.sheet_screen else None,
             "service": asdict(self.service_screen.state) if self.service_screen else None,
@@ -1694,6 +1758,7 @@ class GameSession:
             GameScene.DICE: lambda: self._render_dice_scene(scene_renderer),
             GameScene.STONEHENGE: lambda: self._render_stone_scene(scene_renderer, font),
             GameScene.WIZARD: lambda: self._render_wizard_scene(scene_renderer, font),
+            GameScene.VILLAGE: lambda: self._render_overworld_scene(scene_renderer, font),
         }
         scenes.get(self.scene, lambda: self._render_end_scene(scene_renderer, font))()
 
@@ -1701,6 +1766,7 @@ class GameSession:
             self.palette_fx.is_fading
             or self.palette_fx.is_flashing
             or self.wizard_screen is not None
+            or self.village_visit is not None
         ):
             scene_renderer.set_palette_fx(self.palette_fx.current_palette())
         scene_renderer.flush_to_fbo()

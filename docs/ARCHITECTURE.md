@@ -4437,3 +4437,37 @@ Hash the owner, class, phase, waits, gift result, job/pool records, engine work,
 lists and counters. Scene reset clears the visit; a new game resets the loading
 cursor. The wizard pictures are removed from the legacy victory display; actual
 ending playback remains the program hand-over of T11.22.
+
+### 12.37 Home-village caller (T11.21a)
+
+The common place dispatcher sends kind bytes 21 through 24 to the same village
+routine; the active knight owns the visit and the temple sheet, independently
+of the village's colour. There is no separate village picture or dialogue.
+This extends the caller summary in §12.13 from the supported mog instructions,
+checked against the Amiga reference's village and common place-return paths.
+
+At entry, retain the map palette, stop its colour jobs, run turn setup, clear
+map jobs and input, and clear dragon-active through the existing map reset.
+Keep displaying the map during the blocking OUT fade (the shared §12.34 silent
+fade: period 2, minimum 36 PAL ticks). Input cannot skip this wait. Then apply
+the village reward once and open shared sheet 9. At code $18B6, CMP.I.B compares
+actor byte +73 with the runtime immediate; the $18BC BGE is **signed**. If the
+actor's signed lives byte is less than that cap, ADD.I.B at $18BE adds the
+runtime gain, wrapping to eight bits. Thus the supported cap of three is not
+an equality-only cap: four lives stay four, while $FF becomes zero. Do not heal
+HP, recalculate stats, change inventory or draw RNG as part of this reward.
+
+The MOVEQ at $18C4 supplies sheet 9 to the shared-sheet call at $18C6. Decode
+and validate these operands and call identities from the user's mog, along
+with the cap/gain field displacements and signed branch. The common return at
+$18CC copies budget into spent and $18D6 calls map setup in hunk 36, offset 0.
+On temple completion, retain its display through the same blocking OUT fade,
+then remember its last item, clear the sheet/visit, set spent equal to budget,
+and re-enter the map. Sheet actions use the existing inventory and actor records.
+
+Retain owner, phase and remaining wait in session hashes, including while the
+temple is open; rendering never advances them. Reset clears the visit. Preserve
+the fade palette even after its last interpolation step until the blocking wait
+expires. Missing original disks leave the map unchanged with an availability
+message, as for other original place callers. Valley setup/rewards and meetings
+remain T11.21b/c; they must not inherit this village reward or spent-exit policy.

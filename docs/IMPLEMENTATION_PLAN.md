@@ -315,10 +315,14 @@ Rules for the whole phase:
   the selected stat-table row and shared item/gold message cycles), and **T11.20b**, the
   three animated stages, assets/scripts, PAL waits, host/hash integration, spent temple
   return and reviewed real-disk contact sheet. The complete screen and its decoding exceed
-  one session. Parent acceptance is unchanged and requires both parts.
+  one session. Parent acceptance is unchanged and requires all three parts.
 - **T11.21 Valley, home villages, meetings:** the guardian fight and its reward, the life granted
   at a home village, knight-meets-knight duel with the scroll dialog, meeting and exchange sheets,
   the dragon hoard sheet.
+  Split into **T11.21a**, home villages, **T11.21b**, the Valley's complete guardian/reward caller,
+  and **T11.21c**, knight meetings, the protection-scroll dialog, exchanges and dragon hoard
+  sheets. The independent blocking callers, ownership changes and real-disk acceptance exceed
+  one session. Parent acceptance is unchanged and requires both parts.
 - **T11.22 Ending and game over:** the `program` ending sequence with `vmusic.cmp`; the farewell
   text screen on `message.piv` with its own palette.
 
