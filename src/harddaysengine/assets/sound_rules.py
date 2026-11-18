@@ -101,6 +101,8 @@ _FIXED_RUNS = (
 )
 _BRANCH_PAIRS = (("sound_pick_10", 0x0428), ("sound_pick_13", 0x0AAE))
 _SIGNED_TABLE = ("guardian_sound", 0x049E)
+_DISCARDED = ("sound_pick_dice", 0xA8C2)
+_OP_MOVEQ_0 = 0x7000
 _COUNTER = ("sound_pick_11", 0x04BC)
 _LOOP_TABLE = ("sound_pick_12", 0x0682)
 
@@ -387,6 +389,23 @@ def _table_pick(reader: _Reader, *, signed: bool) -> DrawPick:
     return DrawPick(mask, choices)
 
 
+def _discarded(mog: MogCode, start: int) -> tuple[SoundStep, ...]:
+    """A draw whose value ``MOVEQ #0`` overwrites, then the table's first byte (§12.32)."""
+    reader = _Reader(mog, CODE_HUNK, start, "dice sound")
+    reader.generator()
+    mask = _check_mask(reader.immediate(_OP_ANDI_W_D0), reader.what)
+    reader.words(OP_LEA_A0)
+    table = reader.pointer()
+    reader.words(_OP_MOVEQ_0, *_OP_READ_BYTE)
+    tail, kind, channel = reader.call()
+    if tail or kind != SoundKind.FIXED:
+        raise MogVersionError("mog: dice sound: expected a fixed-channel call")
+    reader.words(OP_RTS)
+    sound = mog.hunk_data(table.hunk)[table.offset]
+    discard = DrawPick(mask, ((),) * (mask + 1))
+    return (discard, Emit(SoundRequest(SoundKind.FIXED, sound, channel)))
+
+
 def _signed_table(mog: MogCode, start: int) -> tuple[SoundStep, ...]:
     reader = _Reader(mog, GUARDIAN_HUNK, start, "sound table")
     pick = _table_pick(reader, signed=True)
@@ -453,6 +472,7 @@ def sound_rules(mog: MogCode) -> SoundRules:
     )
     routines.extend((name, _branch_pairs(mog, start)) for name, start in _BRANCH_PAIRS)
     routines.append((_SIGNED_TABLE[0], _signed_table(mog, _SIGNED_TABLE[1])))
+    routines.append((_DISCARDED[0], _discarded(mog, _DISCARDED[1])))
     counter, counter_cell = _counter(mog, _COUNTER[1])
     routines.append((_COUNTER[0], (counter,)))
     routines.append((_LOOP_TABLE[0], _loop_table(mog, _LOOP_TABLE[1])))

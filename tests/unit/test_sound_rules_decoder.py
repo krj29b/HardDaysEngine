@@ -117,6 +117,9 @@ def _code(h: _Hunk, opts: _Options) -> None:
     h.w(0x660A, 0x33FC, 0).ref(0, 0x72FA).w(0x7000, 0x3030, 0).call(JMP)
     h.at(plain).w(2, 4, 61, 62, 0xFFFF, 0xFFFF, 71, 72, 73, 0xFFFF)
     h.at(0x6D28).w(0x303C, 33).call(JMP, 0x00).w(0x303C, 34).call(JMP, 0x10)
+    h.at(0xA8C2).draw().w(0x0240, 3, 0x41F9).ref(0, 0xA8E0).w(0x7000, 0x1030, 0)
+    h.call(JSR, 0x30).w(RTS)
+    h.data[0xA8E0:0xA8E4] = bytes((101, 102, 103, 104))
 
 
 def _pairs(h: _Hunk, pairs: list[tuple[int, int]]) -> list[int]:
@@ -157,7 +160,7 @@ def _guardian(h: _Hunk, opts: _Options) -> None:
 
 def _mog(opts: _Options | None = None) -> MogCode:
     opts = opts or _Options()
-    hunks = {0: _Hunk(bytearray(0xA300)), FRONT_HUNK: _Hunk(bytearray(0x100))}
+    hunks = {0: _Hunk(bytearray(0xA900)), FRONT_HUNK: _Hunk(bytearray(0x100))}
     hunks[GUARDIAN_HUNK] = _Hunk(bytearray(0xC00))
     _front(hunks[FRONT_HUNK], opts)
     _code(hunks[0], opts)
@@ -221,6 +224,10 @@ def test_fixed_release_and_tables_keep_channels_signs_and_loop_counts() -> None:
     assert r["sound_release_0"] == (Emit(SoundRequest(SoundKind.RELEASE, 300, 0, 0x0E)),)
     assert r["sound_release_1"] == (Emit(SoundRequest(SoundKind.RELEASE, 300, 1, 0x0D)),)
     assert _pick(r["guardian_sound"]) == ((10,), (0xFF90,), (12,), (13,))
+    assert r["sound_pick_dice"] == (
+        DrawPick(3, ((),) * 4),
+        Emit(SoundRequest(SoundKind.FIXED, 101, 3)),
+    )
     loop = r["sound_pick_12"]
     assert len(loop) == 3 and _pick(loop[:1])[7] == (207,)
 

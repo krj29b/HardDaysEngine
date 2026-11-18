@@ -4157,3 +4157,69 @@ state, and the replay hash holds the screen's phase, pointer, wait counters, fir
 cells and the displayed list. The simulation advances only while no palette fade runs, but the
 pointer keeps moving. Sound starts are reported as *start* requests (channel, sequence) for the
 presentation; until T11.23b the host passes only the ids.
+
+### 12.32 The dice house (T11.18b2)
+
+This subsection is the exact form of §12.21 for the supported `mog` version (hunk0 `$A318` to
+`$A8E3`). Rules come from §12.30.
+
+**Entry.** With the knight's gold not above 0 (signed word), the routine returns at once and no
+screen appears. Otherwise it selects font table entry 0 (`Small.font`) and loads the tavern
+picture and the table picture, each through a checked `LEA` of a filename in hunk 42 and the
+picture loader. It copies each picture's palette: the tavern palette becomes the round palette
+and the table palette the roll palette. It loads the dice cel file through a checked `LEA`. The
+knight becomes the player. Six regions are registered from the same scratch stores as §12.31:
+x +12, y +14, width +4, height +6, a long kind at +16 and the code at +20, with unstored fields
+inherited. Five bet regions have kind 1 and codes 1 to 5 (the stake). The leave region has kind
+2. The routine fades out and clears the "done" word. The colour ramp routine (`$AADE`) writes the
+player's class shades into the round palette from the byte offset given by `MOVE.L #imm,D0`. It
+finds the row by `CMPI.L #kind,54(A1)` and writes five `MOVE.W #imm,(A0)+` words; a kind without
+a row writes nothing. Three fixed-channel requests follow (§10.32).
+
+**Round** (`$A50A`). The pointer x is set by a `MOVE.W #imm` store; y keeps its value from the
+town. The pointer is shown. With the player's gold not above 0 (signed) the screen ends. Otherwise
+fight jobs are cleared, the tavern is shown in the round palette, the throw state becomes 0, and
+the thrower is spawned. The spawn is a pool record and a job of type `$44` at (160, 0, 100)
+facing 1. Its script is the idle script, its frame list holds only the dice cels, and the frame
+wait becomes 5 (all operands checked at `$A60C`).
+
+**Loop.** Each pass runs the job pass, the engine tick and the draw pass (§10.17 and §10.18),
+then prints the player's gold at an immediate position in style 2. The value is the signed word
+widened to a long, formatted as in §12.31. When the throw state is 2, the roll follows.
+Otherwise the routine waits for the frame-wait word's number of VBLs, and the screen ends once
+"done" is set. As in fights, one pass takes the wait's VBLs.
+
+**Thrower handler** (`$A63A`, type `$44`). It runs whenever the job pass calls it (§10.18). It
+returns through the common exit (`$6EC8`): the script cell is the result, with 0 meaning end,
+and the record's position and facing are returned:
+
+- throw state not 0 (the throw script has ended): the state becomes 2 and the job ends;
+- fire not held on the player's port: the state becomes 0, the job restarts on the idle script
+  and the frame wait becomes 6;
+- fire held: the routine hit-tests the pointer. With no region, the job goes idle as above. A
+  kind-2 region sets "done" and goes idle. A kind-1 region takes its code as the bet. A bet
+  greater than the gold (signed words) goes idle. Otherwise the bet comes off the gold (§12.30),
+  the state becomes 1, the job restarts on the throw script and the frame wait becomes 3.
+
+The scripts are fight-engine scripts in hunk 42, so engine routine operands there are named like
+those of the fight data hunk. The throw script calls `$A8C2` (a sound-only routine, §10.32): one
+draw masked by `ANDI.W #3`, then `MOVEQ #0,D0` overwrites the value, so the byte table's first
+entry is always played on fixed channel 3. The draw still counts.
+
+**Roll** (`$A722`). Three dice are rolled (§12.30). The table picture is shown with the pointer off,
+and the dice are drawn as dice-cel frames (the face is the frame) at three immediate positions,
+in roll order. They are then sorted and looked up. *Lost*: the bet and the gold go into the lost
+text list. *Won*: the payout is added (§12.30), and the winnings and the gold go into the won
+list. Each value is formatted into a number field inside a text-list string, then followed by
+the suffix that `MOVE.B #imm,(A2)+` stores write at `$A828` (" gp."). A string therefore reads
+up to its field, then the digits, then the suffix. The list is shown in the roll palette, and
+the routine waits `MOVEQ #20` VBLs and for fire (press, then release). If the gold is now
+negative (signed), "done" is set. A new round starts.
+
+**Exit.** Pointer off, fade, and the player becomes the current knight again. The host returns to
+the town without spending the turn, as in §12.31.
+
+**Host.** The dice screen is a child of the town. The replay hash holds its phase, throw state,
+frame wait, bet, "done", the pointer, the roll, and the thrower's job and pool records. The fight
+engine instance uses the shared generator. Draws come from the engine tick (§10.17) over the
+tavern picture.

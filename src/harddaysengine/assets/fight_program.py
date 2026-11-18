@@ -64,6 +64,7 @@ _ROUTINES: tuple[tuple[int, int, int, str], ...] = (
     (CODE_HUNK, 0x72C0, 0x41F9, "sound_pick_6"),
     (CODE_HUNK, 0x72C8, 0x41F9, "sound_pick_7"),
     (CODE_HUNK, 0x90B8, 0x7002, "screen_shake"),
+    (CODE_HUNK, 0xA8C2, 0x4EB9, "sound_pick_dice"),
     (GUARDIAN_HUNK, 0x041C, 0x303C, "guardian_fixed_sound"),
     (GUARDIAN_HUNK, 0x0428, 0x4EB9, "sound_pick_10"),
     (GUARDIAN_HUNK, 0x049E, 0x4EB9, "guardian_sound"),
@@ -105,13 +106,16 @@ def _check_routine_entries(mog: MogCode) -> None:
             raise MogVersionError(msg)
 
 
-def script_image(mog: MogCode) -> ScriptImage:
-    """The script hunk and the name of every engine routine its longs point at (§10.18)."""
+def script_image(mog: MogCode, hunk_index: int = DATA_HUNK) -> ScriptImage:
+    """A script hunk and the name of every engine routine its longs point at (§10.18).
+
+    The fight scripts live in the data hunk; the dice house's in hunk 42 (§12.32).
+    """
     _check_routine_entries(mog)
     known = {(hunk, offset): name for hunk, offset, _, name in _ROUTINES}
-    data = mog.hunk_data(DATA_HUNK)
+    data = mog.hunk_data(hunk_index)
     routines: dict[int, str] = {}
-    for pos, hunk in mog.relocations(DATA_HUNK).items():
+    for pos, hunk in mog.relocations(hunk_index).items():
         name = known.get((hunk, struct.unpack_from(">I", data, pos)[0]))
         if name is not None:
             routines[pos] = name

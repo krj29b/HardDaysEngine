@@ -593,6 +593,64 @@ def _service_shots(rig: AuditRig) -> Iterator[AuditShot]:
     yield from _service_visit(rig, "mystic", 4, 40, 30)
 
 
+def _dice_round(rig: AuditRig, seed: int, bet: int) -> tuple[GameSession, list[AuditShot]]:
+    """Enter the dice house, bet ``bet`` and play until the roll is shown (§12.32)."""
+    session = rig.new_session()
+    session.actors[_PRIMARY].gold = 40
+    session._open_town(_PRIMARY, waterdeep=False)
+    _step(session, 24)
+    _audit_town_button(session, 2)
+    _step(session, 24)
+    screen = session.dice_screen
+    if screen is None:
+        raise ValueError("dice audit requires the dice house")
+    session.overworld.prng.state = seed
+    shots = [rig.capture(session, "dice_round_gold_fixture")]
+    region = next(r for r in screen.run.house.regions if r.kind == 1 and r.code == bet)
+    screen.run.state.pointer_x, screen.run.state.pointer_y = region.x, region.y
+    for _ in range(40):
+        if screen.run.state.throw:
+            break
+        _step(session, 1, PlayerInput(fire=True))
+    _step(session, 9)
+    shots.append(rig.capture(session, f"dice_throw_bet_{bet}"))
+    for _ in range(400):
+        if screen.run.state.dice:
+            break
+        _step(session, 1)
+    return session, shots
+
+
+def _dice_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    """The dice house through the town caller: a lost and a won roll, then leave (§12.32)."""
+    wanted = {False: "lost", True: "won"}
+    for seed in range(1, 4096):
+        session, shots = _dice_round(rig, seed * 0x9E3779B1 & 0xFFFFFFFF, 2)
+        screen = session.dice_screen
+        if screen is None:
+            raise ValueError("the dice round left the screen")
+        won = screen.run.state.lines[0].text.startswith(screen.run.house.won[0].text)
+        label = wanted.pop(won, None)
+        if label is None:
+            continue
+        if label == "lost":
+            yield from shots
+        yield rig.capture(session, f"dice_roll_{label}")
+        if label == "won":
+            _step(session, 30)
+            _tap(session, PlayerInput(fire=True))
+            _step(session, 2)
+            yield rig.capture(session, "dice_next_round")
+            leave = next(r for r in screen.run.house.regions if r.kind == 2)
+            screen.run.state.pointer_x, screen.run.state.pointer_y = leave.x, leave.y
+            _step(session, 12, PlayerInput(fire=True))
+            _step(session, 30)
+            yield rig.capture(session, "dice_left_to_town")
+        if not wanted:
+            return
+    raise ValueError("no seed produced both dice outcomes")
+
+
 def _audit_town_button(session: GameSession, number: int) -> None:
     screen = session.town_screen
     if screen is None:
@@ -618,6 +676,7 @@ def _audit_shop_click(session: GameSession, field: int, side: int, mask: int = 0
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
     "shops": _shop_shots,
     "services": _service_shots,
+    "dice": _dice_shots,
     "sheets": _sheet_shots,
     "computer_knight": _computer_knight_shots,
     "dragon": _dragon_shots,

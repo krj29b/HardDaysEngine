@@ -703,3 +703,26 @@ with *nothing given*; its *refused* list is decoded but unreachable, as in the o
 that lands inside the 2-frame repeat wait is ignored. The dice house stays explicitly
 unavailable until T11.18b2. Text uses `Small.font` (font table entry 0) without narrow spacing.
 
+## ADR-037: The dice thrower runs in its own fight engine instance
+**Status:** ACCEPTED (2026-11-18, T11.18b2; follows ADR-036 / ADR-035)
+**Context:** The original dice house reuses the fight engine. The thrower is a pool record with a
+job of type `$44` that runs hunk-42 scripts. Its handler reads the pointer and fire, takes the
+stake, and switches scripts. The throw script calls a sound routine that draws from the shared
+generator. A hand-written animation would lose those draws and the original timing.
+**Decision:** `sim/dice_house.py` builds a fresh `Fight` each round (the original clears the jobs
+each round) with the hunk-42 `ScriptImage` (`script_image(mog, 42)`), the dice cels as frame
+list 1, the decoded sound routines, and a type-`$44` handler bound to the visit state. The
+handler follows the common exit: a script cell of 0 ends the job. One engine pass runs every
+frame-wait VBLs, as in fights. The visit raises if a script calls a routine with no
+implementation. `$A8C2` joins the sound rules: one discarded draw, then a fixed-channel request
+for the table's first byte. `assets/dice_house_data.py` reads every operand at a checked
+position, and walks the region list, the colour-ramp table, the dice draws and the suffix
+stores. Roll texts keep their prefix up to the original number field, then add the digits and
+the decoded suffix. The host adds `GameScene.DICE` as a town child, with the town's pointer and
+its y position, and adds the visit snapshot (state, jobs and pool records) to the replay hash.
+**Consequences:** The roll's PRNG position includes the throw script's discarded draws. Entering
+with gold not above 0 shows nothing and leaves the town untouched. Each round's fight instance
+shares the session generator but not the fight loader's sound cells. Its hunk-42 routines draw
+no cell state, so a default `SoundCells` is enough. The thrower's draws use the cel hot spot like
+the fights; the dice faces and roll text use the shared cel drawer offsets of §12.31.
+

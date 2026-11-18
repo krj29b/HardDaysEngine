@@ -113,12 +113,13 @@ def test_services_route_to_explicit_host_boundary(
     assert session.town_screen is not None and session.town_screen.state.pending == action
 
 
-def test_the_dice_house_stays_unavailable_without_legacy_effects(adf_dir: Path) -> None:
+def test_the_dice_house_without_gold_returns_to_the_town_without_effects(adf_dir: Path) -> None:
     session = _session(adf_dir)
     actor = session.overworld.current_actor
+    actor.gold = 0
     hp, gold, rng = actor.hp, actor.gold, session.overworld.prng.state
     _click(session, 2)
-    assert session.last_status == "DICE UNAVAILABLE (T11.18b2)"
+    assert session.dice_screen is None
     assert (actor.hp, actor.gold, session.overworld.prng.state) == (hp, gold, rng)
     assert session.scene == GameScene.LOCATION
 

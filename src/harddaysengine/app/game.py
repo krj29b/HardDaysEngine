@@ -15,6 +15,7 @@ import pygame
 
 from harddaysengine.app.audio import AudioEngine
 from harddaysengine.app.config import find_adf_images
+from harddaysengine.app.dice_screen import DiceScreen
 from harddaysengine.app.fight_runtime import FightLoader, FightRuntime, FightUnavailableError
 from harddaysengine.app.input import (
     InputFrame,
@@ -35,13 +36,17 @@ from harddaysengine.app.service_screen import ServiceScreen
 from harddaysengine.app.sheet_screen import SheetScreen
 from harddaysengine.app.town_screen import TownScreen
 from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.dice_house_data import SCRIPT_HUNK as DICE_SCRIPT_HUNK, parse_dice_house
+from harddaysengine.assets.fight_program import cel_shape, fight_constants, script_image
 from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.assets.mog_code import MogCode
 from harddaysengine.assets.palette import (
     RGBColor,
     default_combat_palette,
 )
 from harddaysengine.assets.service_data import parse_service_rules
 from harddaysengine.assets.service_screen_data import parse_service_screens
+from harddaysengine.assets.sound_rules import parse_sound_rules
 from harddaysengine.render.renderer import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
@@ -58,6 +63,7 @@ from harddaysengine.render.scene import (
 )
 from harddaysengine.sim.actor import Actor
 from harddaysengine.sim.ai_map import computer_frame
+from harddaysengine.sim.dice_house import DiceEngine, DiceWorld, can_enter
 from harddaysengine.sim.fight_moves import FIRE
 from harddaysengine.sim.fight_setup import SpawnLanes, settle_defeats
 from harddaysengine.sim.inventory import Inventory
@@ -90,6 +96,7 @@ if TYPE_CHECKING:
 
     import numpy.typing as npt
 
+    from harddaysengine.sim.dice_house import DiceHouse
     from harddaysengine.sim.service_screen_types import ServiceScreens
     from harddaysengine.sim.service_types import DiceRules, HealerRules, MysticRules
     from harddaysengine.sim.sound import SoundRequest
@@ -122,6 +129,7 @@ class GameScene(IntEnum):
     STATUS = 7
     NEW_DAY = 8
     SERVICE = 9
+    DICE = 10
 
 
 @dataclass(slots=True, frozen=True)
@@ -221,6 +229,8 @@ class GameSession:
         self._calendar_phase = 0
         self.sheet_screen: SheetScreen | None = None
         self.service_screen: ServiceScreen | None = None
+        self.dice_screen: DiceScreen | None = None
+        self._dice_data: tuple[DiceHouse, DiceEngine] | None = None
         self._service_data: tuple[ServiceScreens, ServiceRules] | None = None
         self.last_sheet_item = 65535
         if self.asset_bundle is not None:
@@ -240,6 +250,7 @@ class GameSession:
         self.town_screen = None
         self.sheet_screen = None
         self.service_screen = None
+        self.dice_screen = None
         self.last_sheet_item = 65535
         self.practice_mode = False
         self.actors = [Actor(kind=_KNIGHT_KINDS[kid]) for kid in KnightId]
@@ -302,6 +313,8 @@ class GameSession:
             self._step_new_day(primary)
         elif self.scene == GameScene.SERVICE:
             self._step_service(frame)
+        elif self.scene == GameScene.DICE:
+            self._step_dice(frame)
         else:
             self._step_end_screen(primary)
 
@@ -761,10 +774,15 @@ class GameSession:
         if town is None:
             raise ValueError("service call requires its parent town")
         kinds = {TownAction.HEALER: ServiceKind.HEALER, TownAction.MYSTIC: ServiceKind.MYSTIC}
-        if action not in kinds or self.asset_bundle is None:
-            self.last_status = f"{action.name} UNAVAILABLE (T11.18b2)"
+        if self.asset_bundle is None:
+            self.last_status = f"{action.name} REQUIRES THE ORIGINAL DISKS"
             town.resume()
             return
+        if action == TownAction.DICE:
+            self._open_dice(town)
+            return
+        if action not in kinds:
+            raise ValueError(f"no service screen for {action.name}")
         screens, _ = self._services()
         self.service_screen = ServiceScreen(
             self.asset_bundle,
@@ -777,6 +795,58 @@ class GameSession:
         self.scene = GameScene.SERVICE
         self._play_requests(self.service_screen.state.sounds)
         self._begin_fade_in(self.service_screen.picture.palette)
+
+    def _open_dice(self, town: TownScreen) -> None:
+        """Enter the dice house unless the player has no gold (§12.32)."""
+        player = self.actors[town.state.knight - 1]
+        if self.asset_bundle is None or not can_enter(player):
+            town.resume()
+            return
+        self.dice_screen = DiceScreen(
+            self.asset_bundle,
+            self._dice(),
+            knight=(town.state.knight, player.kind),
+            pointer=(town.pointer_pixels, town.state.pointer_y),
+            text=(self.overworld.data().char_map, self._turn_rules().span),
+        )
+        self.scene = GameScene.DICE
+        self._play_requests(self.dice_screen.run.state.sounds)
+        self._begin_fade_in(self.dice_screen.round_palette)
+
+    def _dice(self) -> tuple[DiceHouse, DiceEngine]:
+        if self._dice_data is None:
+            bundle = self.asset_bundle
+            if bundle is None:
+                raise ValueError("the dice house requires the original disks")
+            executable = parse_hunk_executable("mog", bundle.disk_set.read_file("mog"))
+            house = parse_dice_house(executable)
+            cel = bundle.get_cel(house.cel_file)
+            if cel is None:
+                raise ValueError("the dice house requires its cel file")
+            mog = MogCode(executable)
+            engine = DiceEngine(
+                script_image(mog, DICE_SCRIPT_HUNK),
+                {house.cel_file: cel_shape(house.cel_file, cel, None)},
+                fight_constants(mog),
+                parse_sound_rules(executable),
+            )
+            self._dice_data = (house, engine)
+        return self._dice_data
+
+    def _step_dice(self, frame: InputFrame) -> None:
+        screen = self.dice_screen
+        if screen is None:
+            raise ValueError("dice scene has no screen")
+        kid = KnightId(screen.run.state.knight - 1)
+        _, (_healer, _mystic, dice) = self._services()
+        world = DiceWorld(self.actors[kid], self.overworld.prng, dice)
+        inp = self._player_input(frame, kid)
+        done = screen.step(world, inp, fading=self.palette_fx.is_fading)
+        self._play_requests(screen.run.state.sounds)
+        self._sync_legacy_actor(kid)
+        if done:
+            self.dice_screen = None
+            self._close_service()
 
     def _services(self) -> tuple[ServiceScreens, ServiceRules]:
         if self._service_data is None:
@@ -1142,6 +1212,7 @@ class GameSession:
             "town": asdict(self.town_screen.state) if self.town_screen else None,
             "sheet": asdict(self.sheet_screen.state) if self.sheet_screen else None,
             "service": asdict(self.service_screen.state) if self.service_screen else None,
+            "dice": self.dice_screen.run.snapshot() if self.dice_screen else None,
             "last_sheet_item": self.last_sheet_item,
             "palette": self.palette_fx.snapshot(),
             "pending_fade": self._pending_fade_in,
@@ -1303,12 +1374,19 @@ class GameSession:
             GameScene.STATUS: lambda: self._render_sheet_scene(scene_renderer),
             GameScene.NEW_DAY: lambda: self._render_new_day(scene_renderer, font),
             GameScene.SERVICE: lambda: self._render_service_scene(scene_renderer),
+            GameScene.DICE: lambda: self._render_dice_scene(scene_renderer),
         }
         scenes.get(self.scene, lambda: self._render_end_scene(scene_renderer, font))()
 
         if self.palette_fx.is_fading or self.palette_fx.is_flashing:
             scene_renderer.set_palette_fx(self.palette_fx.current_palette())
         scene_renderer.flush_to_fbo()
+
+    def _render_dice_scene(self, renderer: SceneRenderer) -> None:
+        screen = self.dice_screen
+        if screen is None:
+            raise ValueError("dice scene has no screen")
+        screen.render(renderer, self.actors[screen.run.state.knight - 1].gold)
 
     def _render_service_scene(self, renderer: SceneRenderer) -> None:
         if self.service_screen is None:
