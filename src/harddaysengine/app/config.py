@@ -32,7 +32,9 @@ ADF_IMAGE_SIZE = 901_120
 
 ENV_ADF_DIR = "HARDDAYSENGINE_ADF_DIR"
 DISPLAY_TABLE = "display"
-_DISPLAY_KEYS = frozenset({"scale", "filter", "scale_mode", "aspect", "crop", "fullscreen"})
+_DISPLAY_KEYS = frozenset(
+    {"scale", "filter", "scale_mode", "aspect", "crop", "fullscreen", "vsync"}
+)
 
 
 class ConfigError(Exception):
@@ -139,6 +141,12 @@ def _resolve_enum[E: StrEnum](
     return _enum_setting(table.get(key, default.value), enum_cls, key, file_source)
 
 
+def _bool_setting(value: object, key: str, source: str) -> bool:
+    if not isinstance(value, bool):
+        raise ConfigError(f"{source}: {key} must be a boolean, got {type(value).__name__}")
+    return value
+
+
 def resolve_display_settings(
     config_path: Path,
     *,
@@ -148,6 +156,7 @@ def resolve_display_settings(
     aspect: str | None = None,
     crop: str | None = None,
     fullscreen: str | None = None,
+    vsync: bool | None = None,
 ) -> DisplaySettings:
     """Resolve ``[display]`` settings: CLI value, then the config file, then the default (§13.7)."""
     table = _display_table(load_config_file(config_path), config_path)
@@ -157,6 +166,11 @@ def resolve_display_settings(
         _window_scale(scale, "--scale")
         if scale is not None
         else _window_scale(table.get("scale", defaults.scale), file_source)
+    )
+    resolved_vsync = (
+        _bool_setting(vsync, "vsync", "--vsync")
+        if vsync is not None
+        else _bool_setting(table.get("vsync", defaults.vsync), "vsync", file_source)
     )
     return DisplaySettings(
         scale=resolved_scale,
@@ -185,4 +199,5 @@ def resolve_display_settings(
             defaults.fullscreen,
             file_source,
         ),
+        vsync=resolved_vsync,
     )

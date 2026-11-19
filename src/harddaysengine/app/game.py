@@ -26,7 +26,7 @@ from harddaysengine.app.input import (
     load_replay,
     save_replay,
 )
-from harddaysengine.app.loop import Accumulator50Hz
+from harddaysengine.app.loop import RefreshPacer
 from harddaysengine.app.map_runtime import MapRuntime
 from harddaysengine.app.map_scene import compose_map, draw_calendar_screen, draw_map_menu
 from harddaysengine.app.meeting_screen import MeetingScreen
@@ -2512,10 +2512,28 @@ def _step_window_ticks(
     return True, replay_idx
 
 
-def _pump_game_events(window: WindowController, router: InputRouter) -> None:
+def _present_game_frame(
+    session: GameSession,
+    scene_renderer: SceneRenderer,
+    base_renderer: HardDaysRenderer,
+    font: BitmapFont,
+    settings: DisplaySettings,
+) -> None:
+    cur_w, cur_h = pygame.display.get_window_size()
+    session.render_to_scene(scene_renderer, font)
+    if cur_w > 0 and cur_h > 0:
+        base_renderer.present_to_screen((0, 0, cur_w, cur_h), settings=settings)
+    pygame.display.set_caption(f"HardDaysEngine | {session.scene.name} | {session.last_status}")
+    pygame.display.flip()
+
+
+def _pump_game_events(window: WindowController, router: InputRouter, pacer: RefreshPacer) -> None:
+    prev_mode = window.mode
     for event in pygame.event.get():
         if not window.consume_event(event):
             router.process_pygame_event(event)
+    if window.mode is not prev_mode:
+        pacer.set_refresh_rate(window.get_refresh_rate())
 
 
 def run_game_window(
@@ -2546,7 +2564,9 @@ def run_game_window(
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
-    window = WindowController(initial_window_size(settings), settings.fullscreen)
+    window = WindowController(
+        initial_window_size(settings), settings.fullscreen, vsync=settings.vsync
+    )
     window.open()
 
     ctx = moderngl.create_context(require=330)
@@ -2555,7 +2575,7 @@ def run_game_window(
     scene_renderer.set_palette(default_combat_palette())
     font = default_bitmap_font()
     router = InputRouter(init_joysticks=True)
-    acc = Accumulator50Hz()
+    pacer = RefreshPacer(refresh_hz=window.get_refresh_rate(), vsync=settings.vsync)
     recorded: list[InputFrame] = []
     prev_ns = time.perf_counter_ns()
     replay_idx = 0
@@ -2563,22 +2583,17 @@ def run_game_window(
     try:
         running = True
         while running:
-            _pump_game_events(window, router)
+            _pump_game_events(window, router, pacer)
             now_ns = time.perf_counter_ns()
-            ticks = acc.advance(now_ns - prev_ns)
+            step = pacer.step(now_ns - prev_ns)
             prev_ns = now_ns
             running, replay_idx = _step_window_ticks(
-                ticks, session, router, replay_rec, replay_idx, recorded, max_ticks
+                step.ticks, session, router, replay_rec, replay_idx, recorded, max_ticks
             )
-            cur_w, cur_h = pygame.display.get_window_size()
-            session.render_to_scene(scene_renderer, font)
-            if cur_w > 0 and cur_h > 0:
-                base_renderer.present_to_screen((0, 0, cur_w, cur_h), settings=settings)
-            pygame.display.set_caption(
-                f"HardDaysEngine | {session.scene.name} | {session.last_status}"
-            )
-            pygame.display.flip()
-            pygame.time.wait(2)
+            if step.should_present:
+                _present_game_frame(session, scene_renderer, base_renderer, font, settings)
+            elif not settings.vsync:
+                pygame.time.wait(1)
     finally:
         if record_path is not None:
             save_replay(

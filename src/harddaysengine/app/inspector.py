@@ -13,7 +13,7 @@ import pygame
 from harddaysengine.app.loop import (
     FIGHT_FRAME_DIVISOR_FAST,
     FIGHT_FRAME_DIVISOR_NORMAL,
-    Accumulator50Hz,
+    RefreshPacer,
 )
 from harddaysengine.app.window import WindowController
 from harddaysengine.assets.arena import composite_arena_background, decode_arena
@@ -408,6 +408,25 @@ def _prepare_inspector_state(
     return state
 
 
+def _present_inspector_frame(
+    state: InspectorState, renderer: HardDaysRenderer, settings: DisplaySettings
+) -> None:
+    cur_w, cur_h = pygame.display.get_window_size()
+    renderer.render_to_canvas(
+        state.current_frame,
+        hit_frame=state.current_hit_frame,
+        show_overlay=state.show_overlay,
+    )
+    if cur_w > 0 and cur_h > 0:
+        renderer.present_to_screen(
+            (0, 0, cur_w, cur_h),
+            settings=settings,
+            scanlines=state.scanlines,
+        )
+    pygame.display.set_caption(state.status_title())
+    pygame.display.flip()
+
+
 def run_inspector_window(
     disk_set: DiskSet,
     *,
@@ -425,7 +444,9 @@ def run_inspector_window(
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
-    window = WindowController(initial_window_size(settings), settings.fullscreen)
+    window = WindowController(
+        initial_window_size(settings), settings.fullscreen, vsync=settings.vsync
+    )
     window.open()
 
     ctx = moderngl.create_context(require=330)
@@ -433,38 +454,29 @@ def run_inspector_window(
     bg = state.current_background.picture
     renderer.upload_background(bg.pixels, bg.palette)
 
-    acc = Accumulator50Hz()
+    pacer = RefreshPacer(refresh_hz=window.get_refresh_rate(), vsync=settings.vsync)
     prev_ns = time.perf_counter_ns()
     rendered_frames = 0
     try:
         running = True
         while running:
+            prev_mode = window.mode
             running = _pump_events(state, renderer, window)
+            if window.mode is not prev_mode:
+                pacer.set_refresh_rate(window.get_refresh_rate())
             now_ns = time.perf_counter_ns()
-            ticks = acc.advance(now_ns - prev_ns)
+            step = pacer.step(now_ns - prev_ns)
             prev_ns = now_ns
-            for _ in range(ticks):
+            for _ in range(step.ticks):
                 state.tick_vbl()
 
-            cur_w, cur_h = pygame.display.get_window_size()
-            renderer.render_to_canvas(
-                state.current_frame,
-                hit_frame=state.current_hit_frame,
-                show_overlay=state.show_overlay,
-            )
-            if cur_w > 0 and cur_h > 0:
-                renderer.present_to_screen(
-                    (0, 0, cur_w, cur_h),
-                    settings=settings,
-                    scanlines=state.scanlines,
-                )
-            pygame.display.set_caption(state.status_title())
-            pygame.display.flip()
-
-            rendered_frames += 1
-            if max_frames is not None and rendered_frames >= max_frames:
-                break
-            pygame.time.wait(2)
+            if step.should_present:
+                _present_inspector_frame(state, renderer, settings)
+                rendered_frames += 1
+                if max_frames is not None and rendered_frames >= max_frames:
+                    break
+            elif not settings.vsync:
+                pygame.time.wait(1)
     finally:
         renderer.release()
         pygame.quit()

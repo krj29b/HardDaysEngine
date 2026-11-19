@@ -116,6 +116,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="window fullscreen mode (default: [display] fullscreen or off)",
     )
     parser.add_argument(
+        "--vsync",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="enable or disable vertical sync (default: [display] vsync or true)",
+    )
+    parser.add_argument(
         "--headless-frames",
         type=int,
         default=None,
@@ -196,6 +202,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             aspect=args.aspect,
             crop=args.crop,
             fullscreen=args.fullscreen,
+            vsync=args.vsync,
         )
     except ConfigError as exc:
         parser.error(str(exc))

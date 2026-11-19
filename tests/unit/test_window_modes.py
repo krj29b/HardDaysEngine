@@ -33,6 +33,9 @@ class _FakeWindowBackend:
     def get_window_size(self) -> tuple[int, int]:
         return self.size
 
+    def get_refresh_rate(self) -> int:
+        return 60
+
 
 def _dispatch(
     window: WindowController, router: InputRouter, events: list[pygame.event.Event]

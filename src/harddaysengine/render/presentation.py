@@ -61,6 +61,7 @@ class DisplaySettings:
     aspect: AspectMode = AspectMode.SQUARE
     crop: CropMode = CropMode.FULL
     fullscreen: FullscreenMode = FullscreenMode.OFF
+    vsync: bool = True
 
     @property
     def scanlines(self) -> bool:

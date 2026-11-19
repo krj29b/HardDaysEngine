@@ -37,6 +37,7 @@ Useful CLI flags:
 - `--aspect square|pal`: source pixel shape (default `square`; `pal` gives 4:3 on the full 320x256 frame)
 - `--crop full|playfield`: show the full 320x256 PAL canvas or crop to the 320x200 playfield (default `full`)
 - `--fullscreen off|desktop|exclusive`: start windowed, borderless desktop fullscreen, or exclusive fullscreen (default `off`)
+- `--vsync` / `--no-vsync`: enable or disable vertical sync (default `true`; `--no-vsync` presents once per 50 Hz tick)
 
 Display settings can also live in `config.toml` (CLI flags win; unknown keys are an error):
 
@@ -48,6 +49,7 @@ scale_mode = "integer"
 aspect = "square"
 crop = "full"
 fullscreen = "off"
+vsync = true
 ```
 - `--inspect-assets`: launch the 50 Hz ModernGL Lair Background, Sprite, and Hitbox Inspector (`--cel kn4 --background fol1.t`)
 - `--extract-assets`: unpack ADF assets into `--output-dir` (default `./build/assets`) with `manifest.json`

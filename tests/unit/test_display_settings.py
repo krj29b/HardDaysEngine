@@ -36,6 +36,7 @@ def test_defaults_are_the_faithful_look(tmp_path: Path) -> None:
         aspect=AspectMode.SQUARE,
         crop=CropMode.FULL,
         fullscreen=FullscreenMode.OFF,
+        vsync=True,
     )
     assert not settings.scanlines
 
@@ -45,7 +46,7 @@ def test_file_values_apply(tmp_path: Path) -> None:
         tmp_path,
         '[display]\nscale = 5\nfilter = "scanlines"\n'
         'scale_mode = "sharp-bilinear"\naspect = "pal"\ncrop = "playfield"\n'
-        'fullscreen = "desktop"\n',
+        'fullscreen = "desktop"\nvsync = false\n',
     )
     settings = resolve_display_settings(cfg)
     assert settings == DisplaySettings(
@@ -55,6 +56,7 @@ def test_file_values_apply(tmp_path: Path) -> None:
         aspect=AspectMode.PAL,
         crop=CropMode.PLAYFIELD,
         fullscreen=FullscreenMode.DESKTOP,
+        vsync=False,
     )
     assert settings.scanlines
 
@@ -64,7 +66,7 @@ def test_cli_values_beat_the_file(tmp_path: Path) -> None:
         tmp_path,
         '[display]\nscale = 5\nfilter = "scanlines"\n'
         'scale_mode = "fit"\naspect = "pal"\ncrop = "playfield"\n'
-        'fullscreen = "exclusive"\n',
+        'fullscreen = "exclusive"\nvsync = false\n',
     )
     settings = resolve_display_settings(
         cfg,
@@ -74,6 +76,7 @@ def test_cli_values_beat_the_file(tmp_path: Path) -> None:
         aspect="square",
         crop="full",
         fullscreen="off",
+        vsync=True,
     )
     assert settings == DisplaySettings(
         scale=2,
@@ -82,6 +85,7 @@ def test_cli_values_beat_the_file(tmp_path: Path) -> None:
         aspect=AspectMode.SQUARE,
         crop=CropMode.FULL,
         fullscreen=FullscreenMode.OFF,
+        vsync=True,
     )
 
 
@@ -102,6 +106,8 @@ def test_cli_values_beat_the_file(tmp_path: Path) -> None:
         ('[display]\ncrop = "overscan"\n', "full, playfield"),
         ('[display]\nfullscreen = "borderless"\n', "off, desktop, exclusive"),
         ("[display]\nfullscreen = true\n", "off, desktop, exclusive"),
+        ('[display]\nvsync = "true"\n', "boolean"),
+        ("[display]\nvsync = 1\n", "boolean"),
     ],
 )
 def test_invalid_file_values_raise(tmp_path: Path, text: str, message: str) -> None:
@@ -166,6 +172,7 @@ def test_cli_passes_resolved_settings_to_the_game_window(
             "playfield",
             "--fullscreen",
             "desktop",
+            "--no-vsync",
         ]
     )
     assert rc == 0
@@ -177,6 +184,7 @@ def test_cli_passes_resolved_settings_to_the_game_window(
             aspect=AspectMode.PAL,
             crop=CropMode.PLAYFIELD,
             fullscreen=FullscreenMode.DESKTOP,
+            vsync=False,
         )
     ]
 
