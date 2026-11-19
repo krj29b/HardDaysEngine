@@ -1,19 +1,26 @@
-"""Clean-room Amiga ``program`` starting cinematic interpreter (ARCHITECTURE.md §7.4)."""
+"""Clean-room Amiga ``program`` intro player and ``mog`` title/select renderer (§7.4, §12.42).
+
+All scene steps, loader progress screens, script offsets, wipe tables, palette tweaks and menu
+layouts are decoded from the user's own ``program`` and ``mog`` executables at runtime via
+:mod:`harddaysengine.assets.intro_data` and executed on :class:`~harddaysengine.sim.intro.IntroRun`.
+"""
 
 from __future__ import annotations
 
-import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from harddaysengine.assets.arena import decode_stile
-from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.assets.fight_palette import MogVersionError
+from harddaysengine.assets.hunk import HunkFormatError, parse_hunk_executable
+from harddaysengine.assets.intro_data import parse_intro_plan, parse_menu_data
 from harddaysengine.assets.palette import RGBColor, default_combat_palette
 from harddaysengine.render.renderer import CANVAS_WIDTH, PLAYFIELD_HEIGHT
-from harddaysengine.render.scene import blit_indexed_sprite
-from harddaysengine.sim.palette_fx import rgb12_to_rgb24
+from harddaysengine.render.scene import blit_indexed_sprite, palette_fx_to_rgb
+from harddaysengine.sim.ending import SCREEN, WORK, EndingInputs
+from harddaysengine.sim.intro import IntroRun
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -22,108 +29,34 @@ if TYPE_CHECKING:
 
     from harddaysengine.app.scene_assets import GameAssetBundle
     from harddaysengine.assets.cel import DecodedCel
+    from harddaysengine.assets.picture import DecodedPicture
+    from harddaysengine.sim.intro_types import IntroPlan, MogMenuData
+    from harddaysengine.sim.turn_rules import TextLine
 
+_BUFFERS = 10
 _PLAYFIELD_CLIP: tuple[int, int, int, int] = (0, 0, CANVAS_WIDTH, PLAYFIELD_HEIGHT)
-_CHARMAP_OFFSET = 11744
-_TITLE_LOGO_FRAME = 0x49
-_CAPTION_TEXT_OFFSET = 120
-_CREDIT_TEXT_OFFSETS: tuple[int, ...] = (11884, 11912, 11954, 11996, 12066, 12024)
-_TEXT_PAL_INDICES: tuple[int, ...] = (5, 9, 10, 11, 12)
-_TEXT_GOLD_WORDS: tuple[int, ...] = (0x0000, 0x0FED, 0x0DC9, 0x0B95, 0x0842)
-_WIPE_PAL_WORDS: tuple[tuple[int, int], ...] = (
-    (9, 0x0A00),
-    (10, 0x0600),
-    (11, 0x0300),
-    (12, 0x0FC6),
-)
-_CAPTION_PAL_WORDS: tuple[int, ...] = (0x0800, 0x0600, 0x0400, 0x0000, 0x0200)
-_KNIGHT_TWEAK_RAMP_WORDS: tuple[tuple[int, int, int, int], ...] = (
-    (0x005D, 0x0028, 0x0016, 0x0003),  # Blue
-    (0x0E00, 0x0900, 0x0600, 0x0300),  # Red
-    (0x0FA0, 0x0B40, 0x0930, 0x0710),  # Orange/Yellow
-    (0x00C5, 0x0082, 0x0061, 0x0040),  # Green
-)
-_WIPE_THRESHOLDS: tuple[int, ...] = (10, 18, 33, 65, 115, 900, 920, 940, 960, 980, 1200)
-_WIPE_STEPS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1)
-_FLASH_A_FN = 3780
-_FLASH_B_FN = 3814
-_FLASH_A_S0_OFFSET = 3918
-_FLASH_B_S0_OFFSET = 3982
-_MOG_MAIN_MENU_LIST_OFFSET = 8
-_MOG_GORE_ON_OFFSET = 196
-_MOG_GORE_OFF_OFFSET = 199
-_MOG_KNIGHT_SELECT_LIST_OFFSET = 772
-_MOG_KNIGHT_PALETTE_OFFSET = 1142
-_MOG_KNIGHT_NAME_OFFSETS: tuple[int, ...] = (96, 118, 140, 162)
-_MOG_MENU_CURSOR_Y: tuple[int, ...] = (85, 110, 148, 168)
-_MOG_PORTRAIT_X: tuple[int, ...] = (12, 88, 164, 240)
-_INTRO_CEL_NAMES: tuple[str, ...] = ("au1.cel", "li1.cel", "ha1.cel", "dw1.cel", "da1.cel")
 
 
-def _s8(val: int) -> int:
-    masked = val & 0xFF
-    return masked - 0x100 if masked >= 0x80 else masked
+def _blank() -> npt.NDArray[np.uint8]:
+    return np.zeros((PLAYFIELD_HEIGHT, CANVAS_WIDTH), dtype=np.uint8)
 
 
-def _s16(val: int) -> int:
-    masked = val & 0xFFFF
-    return masked - 0x10000 if masked >= 0x8000 else masked
+def _screen_pixels(picture: DecodedPicture) -> npt.NDArray[np.uint8]:
+    return picture.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH].copy()
 
 
-def _blit_playfield(
-    buf: npt.NDArray[np.uint8],
-    pixels: npt.NDArray[np.uint8],
-    x: int,
-    y: int,
-    *,
-    mirrored: bool = False,
-) -> None:
-    blit_indexed_sprite(
-        buf,
-        pixels,
-        x,
-        y,
-        mirrored=mirrored,
-        clip_rect=_PLAYFIELD_CLIP,
-    )
-
-
-def _pad_palette_32(palette: Sequence[RGBColor]) -> list[RGBColor]:
+def _pad_palette_32(palette: Sequence[RGBColor]) -> tuple[RGBColor, ...]:
     out = list(palette[:32])
     while len(out) < 32:
         out.append((0, 0, 0))
-    return out
-
-
-def _scale_palette(palette: Sequence[RGBColor], num: int, den: int) -> tuple[RGBColor, ...]:
-    clamped = max(0, min(den, num))
-    if clamped >= den:
-        return tuple(palette)
-    return tuple(
-        ((r * clamped) // den, (g * clamped) // den, (b * clamped) // den) for r, g, b in palette
-    )
-
-
-def _fade_palette_ends(
-    palette: tuple[RGBColor, ...],
-    local_tick: int,
-    total_ticks: int,
-    *,
-    fade_in: int = 16,
-    fade_out: int = 16,
-) -> tuple[RGBColor, ...]:
-    if fade_in > 0 and local_tick < fade_in:
-        return _scale_palette(palette, local_tick, fade_in)
-    if fade_out > 0 and local_tick >= total_ticks - fade_out:
-        return _scale_palette(palette, max(0, total_ticks - 1 - local_tick), fade_out)
-    return palette
+    return tuple(out)
 
 
 def assemble_stile_panorama(
     stile_words: Sequence[int],
     pictures: tuple[npt.NDArray[np.uint8], npt.NDArray[np.uint8], npt.NDArray[np.uint8]],
 ) -> npt.NDArray[np.uint8]:
-    """Assemble the 320x1200 vertical panorama from ``intro.stile`` and 3 ``.piv`` atlases."""
+    """Assemble the 320x1200 vertical panorama from a ``.stile`` map and 3 ``.piv`` atlases."""
     panorama = np.zeros((1200, CANVAS_WIDTH), dtype=np.uint8)
     for idx, code in enumerate(stile_words[:480]):
         dst_r, dst_c = divmod(idx, 10)
@@ -138,551 +71,298 @@ def assemble_stile_panorama(
     return panorama
 
 
-def _build_wipe_progress_curve() -> tuple[int, ...]:
-    progress = 0
-    positions: list[int] = [0]
-    while progress < 1000:
-        row = 0
-        while row < 10 and _WIPE_THRESHOLDS[row] < progress:
-            row += 1
-        progress = min(1000, progress + _WIPE_STEPS[row])
-        positions.append(progress)
-    return tuple(positions)
+class _NullCanvas:
+    """Pixel-free canvas used once at load time to count the exact VBL duration of the plan."""
 
-
-def render_bold_string(
-    buf: npt.NDArray[np.uint8],
-    charmap: bytes,
-    bold_cel: DecodedCel,
-    text: str,
-    x: int,
-    y: int,
-    *,
-    centered: bool = False,
-) -> None:
-    """Render an ASCII string onto ``buf`` using ``bold.f`` and ``S_2`` charmap (§7.4)."""
-    if not bold_cel.frames or not charmap:
+    def flip(self) -> None:
         return
-    glyphs = [
-        bold_cel.frames[charmap[(ord(ch) - 0x20) & 0xFF] % len(bold_cel.frames)]
-        for ch in text
-        if 0 <= (ord(ch) - 0x20) < len(charmap)
-    ]
-    total_w = sum(cf.meta.width - 2 for cf in glyphs)
-    cx = (((CANVAS_WIDTH - total_w) & 0xFFFF) >> 1) if centered else x
-    for cf in glyphs:
-        _blit_playfield(buf, cf.pixels, cx, y)
-        cx += cf.meta.width - 2
+
+    def copy(self, source: int, target: int) -> None:
+        _ = source, target
+
+    def clear(self, target: int) -> None:
+        _ = target
+
+    def draw(self, target: int, slot: int, frame: int, x: int, y: int, mirrored: bool) -> None:
+        _ = target, slot, frame, x, y, mirrored
+
+    def overlay(self, frame: int, x: int, y: int) -> None:
+        _ = frame, x, y
+
+    def text(self, target: int, lines: tuple[TextLine, ...]) -> None:
+        _ = target, lines
+
+    def message(self, target: int) -> None:
+        _ = target
+
+    def wipe(self, target: int, progress: int) -> None:
+        _ = target, progress
+
+    def mindscape(self, target: int) -> None:
+        _ = target
+
+    def font_cel(self, target: int, frame: int, x: int, y: int) -> None:
+        _ = target, frame, x, y
 
 
-def render_bold_text_list(
-    buf: npt.NDArray[np.uint8],
-    data_section: bytes,
-    bold_cel: DecodedCel,
-    list_offset: int,
-    *,
-    charmap: bytes | None = None,
-    overrides: dict[int, str] | None = None,
-) -> None:
-    """Render a 14-byte text linked list using ``bold.f`` (§7.4)."""
-    active_map = (
-        charmap if charmap is not None else data_section[_CHARMAP_OFFSET : _CHARMAP_OFFSET + 104]
-    )
-    cur = list_offset
-    while 0 < cur <= len(data_section) - 14:
-        t_off, tx, ty, style, nxt = struct.unpack_from(">IHHHI", data_section, cur)
-        if overrides is not None and cur in overrides:
-            text = overrides[cur]
-        else:
-            end = data_section.find(0, t_off)
-            if end < 0:
-                break
-            text = data_section[t_off:end].decode("ascii", errors="replace")
-        render_bold_string(buf, active_map, bold_cel, text, tx, ty, centered=bool(style & 1))
-        cur = nxt
+def _picture(bundle: GameAssetBundle, name: str) -> DecodedPicture:
+    picture = bundle.get_picture(name)
+    if picture is None:
+        raise ValueError(f"the intro needs the original picture {name}")
+    return picture
 
 
-@dataclass(slots=True)
-class _IntroAnimJob:
-    """Single ``program`` ``S_2`` animation bytecode job slot (ARCHITECTURE.md §7.4)."""
-
-    p: int
-    x: int
-    y: int
-    z: int
-    flags: int
-    has_script: bool = True
-    loop_active: int = 0
-    loop_count: int = 0
-    p_loop: int = 0
-    deferred: int = 0
-    p_deferred: int = 0
-
-    @classmethod
-    def spawn(cls, script_offset: int, kind: str = "A") -> _IntroAnimJob:
-        if kind == "B":
-            return cls(p=script_offset, x=120, y=0, z=100, flags=3)
-        return cls(p=script_offset, x=160, y=0, z=100, flags=1)
-
-    def _handle_end_of_frame(self, h2: bytes) -> bool:
-        if self.loop_active:
-            self.loop_count = (self.loop_count - 1) & 0xFFFF
-            if self.loop_count != 0:
-                self.p = self.p_loop
-                return True
-            self.loop_active = 0
-        if self.deferred:
-            self.deferred = 0
-            self.p = self.p_deferred
-            return True
-        if h2[self.p + 1] != 0xFF:
-            self.p += 2
-            return True
-        self.has_script = False
-        return True
-
-    def _handle_control_op(self, op: int, h2: bytes) -> int:
-        if op == 0x80:
-            arg = h2[self.p + 1]
-            self.flags = (self.flags ^ 2) if arg == 0xFF else arg
-            self.p += 2
-            return 0
-        if op == 0x84:
-            mode = h2[self.p + 1]
-            target = int(struct.unpack_from(">I", h2, self.p + 2)[0])
-            if mode == 3:
-                self.p = target
-            else:
-                self.p_deferred = target
-                self.deferred = 1
-                self.p += 6
-            return 0
-        if op == 0x88:
-            cnt = h2[self.p + 1]
-            self.loop_count = cnt if cnt != 0 else 4
-            self.loop_active = 1
-            self.p += 2
-            self.p_loop = self.p
-            return 0
-        fn_addr = int(struct.unpack_from(">I", h2, self.p + 2)[0])
-        self.p += 6
-        return 1 if fn_addr == _FLASH_A_FN else (2 if fn_addr == _FLASH_B_FN else 0)
-
-    def _execute_draw_op(
-        self,
-        op: int,
-        h2: bytes,
-        cels: Sequence[DecodedCel],
-        shown: npt.NDArray[np.uint8],
-        work: npt.NDArray[np.uint8],
-    ) -> None:
-        slot = (op & 0x1F) >> 2
-        fidx = h2[self.p + 1]
-        dy = _s8(h2[self.p + 2])
-        d3 = h2[self.p + 3]
-        dx = _s16(int(struct.unpack_from(">H", h2, self.p + 4)[0]))
-        if 0 <= slot < len(cels) and cels[slot].frames:
-            cf = cels[slot].frames[fidx % len(cels[slot].frames)]
-            mirr = bool(self.flags & 2)
-            sx = _s16((self.x - dx - cf.meta.width) if mirr else (self.x + dx))
-            sy = _s16(self.y + self.z + dy)
-            if d3 & 0x10:
-                _blit_playfield(shown, cf.pixels, sx, sy, mirrored=mirr)
-            _blit_playfield(work, cf.pixels, sx, sy, mirrored=mirr)
-        self.p += 6
-
-    def step_frame(
-        self,
-        h2: bytes,
-        cels: Sequence[DecodedCel],
-        shown: npt.NDArray[np.uint8],
-        work: npt.NDArray[np.uint8],
-    ) -> tuple[bool, int]:
-        """Execute one script frame; return ``(still_active, flash_kind)``."""
-        if not self.has_script:
-            return False, 0
-        flash = 0
-        while 0 <= self.p < len(h2):
-            op = h2[self.p]
-            if op == 0xFF:
-                return self._handle_end_of_frame(h2), flash
-            if op >= 0x80:
-                flash = max(flash, self._handle_control_op(op, h2))
-            else:
-                self._execute_draw_op(op, h2, cels, shown, work)
-        self.has_script = False
-        return False, flash
+def _cel(bundle: GameAssetBundle, name: str) -> DecodedCel:
+    cel = bundle.get_cel(name)
+    if cel is None:
+        raise ValueError(f"the intro needs the original cel {name}")
+    return cel
 
 
-@dataclass(slots=True, frozen=True)
-class _SceneSpec:
-    """Declarative specification for one ``program`` intro story scene (§7.4)."""
+class IntroPixels:
+    """Picture buffers and the two screens of the ``program`` intro pass (§12.42)."""
 
-    bg_name: str
-    vbls_per_frame: int
-    num_frames: int
-    ov1_phase: int
-    tweaked_palette: bool
-    spawns: tuple[tuple[int, int, str], ...]
-    fade_in: int = 16
-    fade_out: int = 16
-
-
-_STORY_SCENE_SPECS: tuple[_SceneSpec, ...] = (
-    # 1. Scene 001B: 5 druids with torches marching across bg1b.piv forest floor
-    _SceneSpec(
-        bg_name="bg1b.piv",
-        vbls_per_frame=8,
-        num_frames=68,
-        ov1_phase=0,
-        tweaked_palette=False,
-        spawns=((0, 5636, "A"), (12, 5636, "A"), (24, 5636, "A"), (36, 5636, "A"), (48, 5636, "A")),
-        fade_in=0,
-        fade_out=16,
-    ),
-    # 2. Scene 001C: 5 druids approaching Stonehenge behind ov1.cel foliage
-    _SceneSpec(
-        bg_name="bg2.piv",
-        vbls_per_frame=8,
-        num_frames=48,
-        ov1_phase=1,
-        tweaked_palette=True,
-        spawns=((0, 5056, "A"), (8, 5056, "A"), (16, 5056, "A"), (24, 5056, "A"), (32, 5056, "A")),
-    ),
-    # 3. Scene 001A: Stonehenge overhead druid circle + PAIRS + central altar
-    _SceneSpec(
-        bg_name="bg3.piv",
-        vbls_per_frame=6,
-        num_frames=102,
-        ov1_phase=0,
-        tweaked_palette=True,
-        spawns=(
-            (0, 6996, "A"),
-            (0, 7034, "A"),
-            (0, 6818, "A"),
-            (0, 6996, "B"),
-            (0, 7034, "B"),
-            (0, 6594, "B"),
-            (0, 7078, "A"),
-            (16, 7078, "B"),
-            (32, 7592, "A"),
-            (48, 7592, "B"),
-            (64, 8312, "A"),
-        ),
-    ),
-    # 4. Scene 002C Part 1: High Druid raising crescent amulet & staff on bg4.piv
-    _SceneSpec(
-        bg_name="bg4.piv",
-        vbls_per_frame=6,
-        num_frames=24,
-        ov1_phase=0,
-        tweaked_palette=False,
-        spawns=((0, 584, "A"),),
-        fade_in=16,
-        fade_out=0,
-    ),
-    # 5. Scene 002C Part 2: High Druid invoking the swirling cloud vortex on bg5a.piv
-    _SceneSpec(
-        bg_name="bg5a.piv",
-        vbls_per_frame=6,
-        num_frames=36,
-        ov1_phase=0,
-        tweaked_palette=True,
-        spawns=((0, 2804, "A"),),
-        fade_in=0,
-        fade_out=16,
-    ),
-    # 6. Scene 002D: Knight drawing broadsword before Stonehenge on bg2a.piv + ov1 phase 2
-    _SceneSpec(
-        bg_name="bg2a.piv",
-        vbls_per_frame=6,
-        num_frames=31,
-        ov1_phase=2,
-        tweaked_palette=True,
-        spawns=((0, 4932, "A"),),
-    ),
-    # 7. Scene 002F: Knight entering the Stonehenge circle on bg3.piv
-    _SceneSpec(
-        bg_name="bg3.piv",
-        vbls_per_frame=8,
-        num_frames=31,
-        ov1_phase=0,
-        tweaked_palette=True,
-        spawns=(
-            (0, 6996, "A"),
-            (0, 7034, "A"),
-            (0, 6958, "A"),
-            (0, 7554, "A"),
-            (0, 7942, "A"),
-            (0, 6996, "B"),
-            (0, 7034, "B"),
-            (0, 6958, "B"),
-            (0, 7554, "B"),
-            (0, 7942, "B"),
-            (0, 8568, "A"),
-            (0, 8582, "A"),
-        ),
-    ),
-    # 8. Scene 002E: High Druid dubbing the kneeling knight on bg5a.piv
-    _SceneSpec(
-        bg_name="bg5a.piv",
-        vbls_per_frame=6,
-        num_frames=27,
-        ov1_phase=0,
-        tweaked_palette=True,
-        spawns=((0, 1022, "A"),),
-    ),
-)
-
-
-def _draw_ov1_overlay(work: npt.NDArray[np.uint8], ov1: DecodedCel | None, phase: int) -> None:
-    if ov1 is None or len(ov1.frames) < 4 or phase == 0:
-        return
-    _blit_playfield(work, ov1.frames[0].pixels, 0, 56)
-    _blit_playfield(work, ov1.frames[3].pixels, 51, 134)
-    if phase != 2:
-        _blit_playfield(work, ov1.frames[1].pixels, 157, 104)
-        _blit_playfield(work, ov1.frames[2].pixels, 297, 82)
-
-
-def _build_caption_palette(base_palette: Sequence[RGBColor]) -> tuple[RGBColor, ...]:
-    cap_pal = _pad_palette_32(base_palette)
-    for idx, w12 in enumerate(_CAPTION_PAL_WORDS, start=1):
-        cap_pal[idx] = rgb12_to_rgb24(w12)
-    for idx, w12 in zip(_TEXT_PAL_INDICES, _TEXT_GOLD_WORDS, strict=True):
-        cap_pal[idx] = rgb12_to_rgb24(w12)
-    return tuple(cap_pal)
-
-
-def _unpack_pal32(h0: bytes, offset: int) -> tuple[RGBColor, ...]:
-    return tuple(rgb12_to_rgb24(w) for w in struct.unpack_from(">32H", h0, offset))
-
-
-def _set_text_palette_colors(
-    pal: list[RGBColor], colors: Sequence[RGBColor]
-) -> tuple[RGBColor, ...]:
-    for idx, col in zip(_TEXT_PAL_INDICES, colors, strict=True):
-        pal[idx] = col
-    return tuple(pal)
-
-
-def _lerp_white_to_gold(gold_rgb: Sequence[RGBColor], step: int) -> list[RGBColor]:
-    return [
-        (
-            255 - ((255 - r) * step) // 16,
-            255 - ((255 - g) * step) // 16,
-            255 - ((255 - b) * step) // 16,
+    def __init__(self, bundle: GameAssetBundle, plan: IntroPlan) -> None:
+        self.plan = plan
+        self.buffers = [_blank() for _ in range(_BUFFERS)]
+        self.screens = [_blank(), _blank()]
+        self.displayed = 0
+        self.mindscape_picture = _picture(bundle, plan.load.mindscape)
+        self.message_picture = _picture(bundle, plan.message)
+        self._initial_buffers: dict[int, npt.NDArray[np.uint8]] = {}
+        for load in plan.load.pictures:
+            pixels = _screen_pixels(_picture(bundle, load.name))
+            self.buffers[load.buffer] = pixels
+            self._initial_buffers[int(load.buffer)] = pixels.copy()
+        self.cels = {slot: _cel(bundle, name) for slot, name in plan.load.cels}
+        self.overlay_cel = _cel(bundle, plan.load.overlay)
+        self.font = _cel(bundle, plan.font.file)
+        words = decode_stile(bundle.disk_set.read_file(plan.load.stile))
+        self.panorama = assemble_stile_panorama(
+            words,
+            (self.buffers[2].copy(), self.buffers[3].copy(), self.buffers[4].copy()),
         )
-        for r, g, b in gold_rgb
-    ]
+
+    def reset(self) -> None:
+        """Reset all buffers and screens to their initial post-load state."""
+        for index in range(_BUFFERS):
+            if index in self._initial_buffers:
+                self.buffers[index][:] = self._initial_buffers[index]
+            else:
+                self.buffers[index][:] = 0
+        self.screens[0][:] = 0
+        self.screens[1][:] = 0
+        self.displayed = 0
+
+    def _buffer(self, index: int) -> npt.NDArray[np.uint8]:
+        if index == SCREEN:
+            return self.screens[self.displayed]
+        if index == WORK:
+            return self.screens[1 - self.displayed]
+        return self.buffers[index]
+
+    def displayed_pixels(self) -> npt.NDArray[np.uint8]:
+        return self.screens[self.displayed]
+
+    def flip(self) -> None:
+        self.displayed = 1 - self.displayed
+
+    def copy(self, source: int, target: int) -> None:
+        self._buffer(target)[:] = self._buffer(source)
+
+    def clear(self, target: int) -> None:
+        self._buffer(target)[:] = 0
+
+    def draw(self, target: int, slot: int, frame: int, x: int, y: int, mirrored: bool) -> None:
+        pixels = self.cels[slot].frames[frame].pixels
+        blit_indexed_sprite(
+            self._buffer(target),
+            pixels,
+            x,
+            y,
+            mirrored=mirrored,
+            clip_rect=_PLAYFIELD_CLIP,
+        )
+
+    def overlay(self, frame: int, x: int, y: int) -> None:
+        pixels = self.overlay_cel.frames[frame].pixels
+        blit_indexed_sprite(self._buffer(WORK), pixels, x, y, clip_rect=_PLAYFIELD_CLIP)
+
+    def message(self, target: int) -> None:
+        self._buffer(target)[:] = _screen_pixels(self.message_picture)
+
+    def mindscape(self, target: int) -> None:
+        self._buffer(target)[:] = _screen_pixels(self.mindscape_picture)
+
+    def font_cel(self, target: int, frame: int, x: int, y: int) -> None:
+        pixels = self.font.frames[frame].pixels
+        blit_indexed_sprite(self._buffer(target), pixels, x, y, clip_rect=_PLAYFIELD_CLIP)
+
+    def wipe(self, target: int, progress: int) -> None:
+        window = self.panorama[progress : progress + PLAYFIELD_HEIGHT]
+        self._buffer(target)[: window.shape[0]] = window
+
+    def text(self, target: int, lines: tuple[TextLine, ...]) -> None:
+        """Draw ``lines`` using ``program``'s decoded font and charmap (§12.39.7, §12.42.3)."""
+        font, data = self.plan.font, self.plan.scripts.data
+        buffer = self._buffer(target)
+        for line in lines:
+            if line.style & ~3:
+                raise ValueError(f"intro text style {line.style} is not used by program")
+            glyphs = [self.font.frames[data[font.charmap + ord(ch) - 0x20]] for ch in line.text]
+            width = sum(glyph.meta.width - font.bias for glyph in glyphs)
+            x = ((font.width - width) & 0xFFFF) >> 1 if line.style & 1 else line.x
+            for glyph in glyphs:
+                blit_indexed_sprite(buffer, glyph.pixels, x, line.y, clip_rect=_PLAYFIELD_CLIP)
+                x += glyph.meta.width - font.bias
 
 
-def _step_active_jobs(
-    jobs: list[_IntroAnimJob],
-    h2: bytes,
-    cels: Sequence[DecodedCel],
-    shown: npt.NDArray[np.uint8],
-    work: npt.NDArray[np.uint8],
-) -> int:
-    frame_flash = 0
-    for job in list(jobs):
-        active, jf = job.step_frame(h2, cels, shown, work)
-        frame_flash = max(frame_flash, jf)
-        if not active:
-            jobs.remove(job)
-    return frame_flash
+def _draw_mog_bold_line(
+    buf: npt.NDArray[np.uint8],
+    font: DecodedCel,
+    char_map: bytes,
+    line: TextLine,
+    span: int,
+) -> None:
+    """Draw one ``mog`` bold-font text line onto ``buf`` (§11.18/19, §12.42.6)."""
+    bias = 3 if line.style & 8 else 0
+    glyphs = [font.frames[char_map[(ord(ch) - 32) & 255]] for ch in line.text]
+    x = line.x
+    if line.style & 5:
+        width = sum(g.meta.width - bias for g in glyphs)
+        x = (span - width) >> 1 if line.style & 1 else span - width
+    for glyph in glyphs:
+        blit_indexed_sprite(buf, glyph.pixels, x, line.y, clip_rect=_PLAYFIELD_CLIP)
+        x += glyph.meta.width - bias
 
 
-def _render_credit_frames(
-    moon_bg: npt.NDArray[np.uint8],
-    h2: bytes,
+def _count_total_ticks(plan: IntroPlan, inputs: EndingInputs) -> int:
+    probe = IntroRun(plan, inputs, _NullCanvas())
+    while not probe.advance():
+        pass
+    return probe.tick
+
+
+def _try_parse_mog_menu(bundle: GameAssetBundle) -> MogMenuData | None:
+    if not bundle.disk_set.has_file("mog"):
+        return None
+    try:
+        mog_exe = parse_hunk_executable("mog", bundle.disk_set.read_file("mog"))
+        return parse_menu_data(mog_exe)
+    except (HunkFormatError, MogVersionError):
+        return None
+
+
+def _draw_title_text_and_banner(
+    buf: npt.NDArray[np.uint8],
     bold: DecodedCel,
-) -> tuple[npt.NDArray[np.uint8], ...]:
-    credit_frames: list[npt.NDArray[np.uint8]] = []
-    for off in _CREDIT_TEXT_OFFSETS:
-        cframe = moon_bg.copy()
-        render_bold_text_list(cframe, h2, bold, off)
-        credit_frames.append(cframe)
-    return tuple(credit_frames)
+    menu_data: MogMenuData,
+    selected_player_count: int,
+    *,
+    gore_on: bool,
+) -> None:
+    title = menu_data.title
+    if len(bold.frames) > title.banner.frame:
+        blit_indexed_sprite(
+            buf,
+            bold.frames[title.banner.frame].pixels,
+            title.banner.x,
+            title.banner.y,
+            clip_rect=_PLAYFIELD_CLIP,
+        )
+    gore_text = title.gore_on_text if gore_on else title.gore_off_text
+    for idx, line in enumerate(title.lines):
+        active = line
+        if idx == title.players_line_index:
+            active = replace(line, text=str(selected_player_count))
+        elif idx == title.gore_line_index:
+            active = replace(line, text=gore_text)
+        _draw_mog_bold_line(buf, bold, menu_data.char_map, active, title.span)
 
 
 @dataclass(slots=True)
 class IntroCinematicPlayer:
-    """Lazy, clean-room player for the full ``program`` starting cinematic (§7.4)."""
+    """Clean-room player for the decoded ``program`` intro and ``mog`` title/select screens."""
 
-    h0: bytes
-    h2: bytes
-    mog_s4: bytes
-    panorama: npt.NDArray[np.uint8]
-    bg1a_palette: tuple[RGBColor, ...]
-    title_frame: npt.NDArray[np.uint8]
-    credit_frames: tuple[npt.NDArray[np.uint8], ...]
-    caption_frame: npt.NDArray[np.uint8]
-    caption_palette: tuple[RGBColor, ...]
-    wipe_curve: tuple[int, ...]
-    flash_a_palette: tuple[RGBColor, ...]
-    flash_b_palette: tuple[RGBColor, ...]
-    _scene_cache: dict[int, tuple[tuple[npt.NDArray[np.uint8], ...], tuple[int, ...]]] = field(
-        default_factory=dict
-    )
+    plan: IntroPlan
+    pixels: IntroPixels
+    inputs: EndingInputs
+    run: IntroRun
+    menu_data: MogMenuData | None
+    _total_ticks: int
+
+    @property
+    def panorama(self) -> npt.NDArray[np.uint8]:
+        return self.pixels.panorama
+
+    @property
+    def credit_frames(self) -> tuple[tuple[TextLine, ...], ...]:
+        return self.plan.load.progress.credits
 
     @classmethod
     def try_build(cls, bundle: GameAssetBundle) -> IntroCinematicPlayer | None:
         """Build an :class:`IntroCinematicPlayer` if Disk 1 intro assets exist in ``bundle``."""
-        required_files = (
-            "program",
-            "intro.stile",
-            "bg1a.piv",
-            "bg1c.piv",
-            "bg1b.piv",
-            "message.piv",
+        if not bundle.disk_set.has_file("program"):
+            return None
+        try:
+            prog_exe = parse_hunk_executable("program", bundle.disk_set.read_file("program"))
+            plan = parse_intro_plan(prog_exe)
+        except (HunkFormatError, MogVersionError):
+            return None
+
+        required = (
+            plan.load.mindscape,
+            plan.message,
+            plan.font.file,
+            plan.load.stile,
+            plan.load.overlay,
+            *(p.name for p in plan.load.pictures),
+            *(name for _, name in plan.load.cels),
         )
-        if not all(bundle.disk_set.has_file(name) for name in required_files):
+        if not all(bundle.disk_set.has_file(name) for name in required):
             return None
-        bold = bundle.get_cel("bold.f")
-        prg = parse_hunk_executable("program", bundle.disk_set.read_file("program"))
-        if bold is None or len(prg.sections) < 3:
-            return None
-        bg1a = bundle.get_picture("bg1a.piv")
-        bg1c = bundle.get_picture("bg1c.piv")
-        bg1b = bundle.get_picture("bg1b.piv")
-        msg_pic = bundle.get_picture("message.piv")
-        assert bg1a is not None and bg1c is not None and bg1b is not None and msg_pic is not None
 
-        h0, h2 = prg.sections[0].data, prg.sections[2].data
-        stile_words = decode_stile(bundle.disk_set.read_file("intro.stile"))
-        panorama = assemble_stile_panorama(stile_words, (bg1a.pixels, bg1c.pixels, bg1b.pixels))
-        moon_bg = panorama[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH]
-
-        title_frame = moon_bg.copy()
-        if len(bold.frames) > _TITLE_LOGO_FRAME:
-            _blit_playfield(title_frame, bold.frames[_TITLE_LOGO_FRAME].pixels, 9, 60)
-
-        caption_frame = msg_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH].copy()
-        render_bold_text_list(caption_frame, h2, bold, _CAPTION_TEXT_OFFSET)
-
-        mog_s4 = b""
-        if bundle.disk_set.has_file("mog"):
-            mog_prg = parse_hunk_executable("mog", bundle.disk_set.read_file("mog"))
-            if len(mog_prg.sections) > 4:
-                mog_s4 = mog_prg.sections[4].data
-
+        pixels = IntroPixels(bundle, plan)
+        palettes = {plan.load.mindscape: pixels.mindscape_picture.raw_palette}
+        for load in plan.load.pictures:
+            palettes[load.name] = _picture(bundle, load.name).raw_palette
+        widths = {
+            slot: tuple(frame.meta.width for frame in cel.frames)
+            for slot, cel in pixels.cels.items()
+        }
+        inputs = EndingInputs(palettes, pixels.message_picture.raw_palette, widths)
         return cls(
-            h0=h0,
-            h2=h2,
-            mog_s4=mog_s4,
-            panorama=panorama,
-            bg1a_palette=tuple(_pad_palette_32(bg1a.palette)),
-            title_frame=title_frame,
-            credit_frames=_render_credit_frames(moon_bg, h2, bold),
-            caption_frame=caption_frame,
-            caption_palette=_build_caption_palette(msg_pic.palette),
-            wipe_curve=_build_wipe_progress_curve(),
-            flash_a_palette=_unpack_pal32(h0, _FLASH_A_S0_OFFSET),
-            flash_b_palette=_unpack_pal32(h0, _FLASH_B_S0_OFFSET),
-        )
-
-    def _title_or_credit_palette(
-        self,
-        local_tick: int,
-        total_ticks: int,
-        *,
-        fade_bg_in: bool,
-    ) -> tuple[RGBColor, ...]:
-        pal = list(self.bg1a_palette)
-        gold_rgb = [rgb12_to_rgb24(w) for w in _TEXT_GOLD_WORDS]
-        if fade_bg_in and local_tick < 16:
-            return _scale_palette(_set_text_palette_colors(pal, gold_rgb), local_tick, 16)
-        if not fade_bg_in and local_tick < 2:
-            return _set_text_palette_colors(pal, [(255, 255, 255)] * 5)
-        if not fade_bg_in and local_tick < 18:
-            return _set_text_palette_colors(pal, _lerp_white_to_gold(gold_rgb, local_tick - 2))
-        if local_tick >= total_ticks - 16:
-            rem = max(0, total_ticks - 1 - local_tick)
-            return _set_text_palette_colors(pal, _scale_palette(gold_rgb, rem, 16))
-        return _set_text_palette_colors(pal, gold_rgb)
-
-    def _get_story_scene_frames(
-        self,
-        bundle: GameAssetBundle,
-        scene_index: int,
-    ) -> tuple[tuple[npt.NDArray[np.uint8], ...], tuple[int, ...]]:
-        if scene_index in self._scene_cache:
-            return self._scene_cache[scene_index]
-        spec = _STORY_SCENE_SPECS[scene_index]
-        bg_pic = bundle.get_picture(spec.bg_name)
-        shown = (
-            bg_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH].copy()
-            if bg_pic is not None
-            else np.zeros((PLAYFIELD_HEIGHT, CANVAS_WIDTH), dtype=np.uint8)
-        )
-        valid_cels = [c for name in _INTRO_CEL_NAMES if (c := bundle.get_cel(name)) is not None]
-        ov1 = bundle.get_cel("ov1.cel")
-
-        jobs: list[_IntroAnimJob] = []
-        frames: list[npt.NDArray[np.uint8]] = []
-        flashes: list[int] = []
-        for fidx in range(spec.num_frames):
-            for sp_frame, script_off, kind in spec.spawns:
-                if sp_frame == fidx:
-                    jobs.append(_IntroAnimJob.spawn(script_off, kind))
-            work = shown.copy()
-            flashes.append(_step_active_jobs(jobs, self.h2, valid_cels, shown, work))
-            _draw_ov1_overlay(work, ov1, spec.ov1_phase)
-            frames.append(work)
-
-        result = (tuple(frames), tuple(flashes))
-        self._scene_cache[scene_index] = result
-        return result
-
-    def _story_scene_palette(
-        self,
-        bundle: GameAssetBundle,
-        spec: _SceneSpec,
-        round_index: int,
-        local_tick: int,
-        total_ticks: int,
-        flash_flag: int,
-    ) -> tuple[RGBColor, ...]:
-        if flash_flag == 1 and (local_tick % spec.vbls_per_frame) < 4:
-            return self.flash_a_palette
-        if flash_flag == 2 and ((local_tick // 3) % 2 == 0):
-            return self.flash_b_palette
-
-        if spec.bg_name == "bg1b.piv":
-            pal = list(self.bg1a_palette)
-            for idx, w12 in _WIPE_PAL_WORDS:
-                pal[idx] = rgb12_to_rgb24(w12)
-        else:
-            pic = bundle.get_picture(spec.bg_name)
-            pal = _pad_palette_32(pic.palette if pic is not None else default_combat_palette())
-            if spec.tweaked_palette:
-                ramp = _KNIGHT_TWEAK_RAMP_WORDS[round_index & 3]
-                for idx, w12 in enumerate(ramp, start=8):
-                    pal[idx] = rgb12_to_rgb24(w12)
-        return _fade_palette_ends(
-            tuple(pal),
-            local_tick,
-            total_ticks,
-            fade_in=spec.fade_in,
-            fade_out=spec.fade_out,
+            plan=plan,
+            pixels=pixels,
+            inputs=inputs,
+            run=IntroRun(plan, inputs, pixels),
+            menu_data=_try_parse_mog_menu(bundle),
+            _total_ticks=_count_total_ticks(plan, inputs),
         )
 
     def total_ticks(self) -> int:
         """Return total 50 Hz VBL duration of the starting cinematic before main menu."""
-        wipe_ticks = len(self.wipe_curve) * 2
-        story_ticks = sum(s.num_frames * s.vbls_per_frame for s in _STORY_SCENE_SPECS)
-        return 120 + 150 + 540 + wipe_ticks + story_ticks + 220
+        return self._total_ticks
 
     def is_finished(self, tick_count: int) -> bool:
         """Return ``True`` once ``tick_count`` reaches the end of the intro cinematic."""
-        return tick_count >= self.total_ticks()
+        return tick_count >= self._total_ticks
 
-    def _read_mog_cstring(self, offset: int) -> str:
-        end = self.mog_s4.find(0, offset)
-        if end < 0:
-            return ""
-        return self.mog_s4[offset:end].decode("ascii", errors="replace")
+    def render_tick(
+        self,
+        bundle: GameAssetBundle,
+        tick_count: int,
+    ) -> tuple[npt.NDArray[np.uint8], tuple[RGBColor, ...]]:
+        """Return ``(playfield_pixels, palette)`` for ``tick_count`` at 50 Hz (§12.42)."""
+        _ = bundle
+        cycle_len = max(1, self._total_ticks)
+        target_tick = min(max(0, tick_count), cycle_len - 1)
+        if self.run.tick > target_tick + 1 or self.run.tick == 0:
+            self.pixels.reset()
+            self.run = IntroRun(self.plan, self.inputs, self.pixels)
+        while self.run.tick <= target_tick and not self.run.done:
+            self.run.advance()
+        return self.pixels.displayed_pixels().copy(), palette_fx_to_rgb(self.run.palette.regs)
 
     def build_main_menu(
         self,
@@ -692,34 +372,34 @@ class IntroCinematicPlayer:
         *,
         gore_on: bool = True,
     ) -> tuple[npt.NDArray[np.uint8] | None, tuple[RGBColor, ...]]:
-        """Render the original Amiga ``mog`` title menu on ``ch.piv`` (§7.4)."""
+        """Render the original Amiga ``mog`` title menu on ``ch.piv`` (§12.42.6)."""
         ch_pic = bundle.get_picture("ch.piv")
         if ch_pic is None:
             return None, default_combat_palette()
-        buf = ch_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH].copy()
-        bold = bundle.get_cel("bold.f")
-        sel = bundle.get_cel("sel.cel")
-        charmap = self.h2[_CHARMAP_OFFSET : _CHARMAP_OFFSET + 104]
+        buf = _screen_pixels(ch_pic)
+        if self.menu_data is None:
+            return buf, _pad_palette_32(ch_pic.palette)
+        title = self.menu_data.title
+        bold = bundle.get_cel(self.plan.font.file)
         if bold is not None:
-            if len(bold.frames) > _TITLE_LOGO_FRAME:
-                _blit_playfield(buf, bold.frames[_TITLE_LOGO_FRAME].pixels, 5, 10)
-            if self.mog_s4:
-                gore_str = self._read_mog_cstring(
-                    _MOG_GORE_ON_OFFSET if gore_on else _MOG_GORE_OFF_OFFSET
-                )
-                overrides = {64: str(selected_player_count), 78: gore_str}
-                render_bold_text_list(
-                    buf,
-                    self.mog_s4,
-                    bold,
-                    _MOG_MAIN_MENU_LIST_OFFSET,
-                    charmap=charmap,
-                    overrides=overrides,
-                )
-        if sel is not None and sel.frames:
-            cursor_y = _MOG_MENU_CURSOR_Y[menu_cursor % len(_MOG_MENU_CURSOR_Y)]
-            _blit_playfield(buf, sel.frames[0].pixels, 50, cursor_y)
-        return buf, tuple(_pad_palette_32(ch_pic.palette))
+            _draw_title_text_and_banner(
+                buf,
+                bold,
+                self.menu_data,
+                selected_player_count,
+                gore_on=gore_on,
+            )
+        sel = bundle.get_cel("sel.cel")
+        if sel is not None and len(sel.frames) > title.cursor_frame:
+            cursor_y = title.cursor_y[menu_cursor % len(title.cursor_y)]
+            blit_indexed_sprite(
+                buf,
+                sel.frames[title.cursor_frame].pixels,
+                title.cursor_x,
+                cursor_y,
+                clip_rect=_PLAYFIELD_CLIP,
+            )
+        return buf, _pad_palette_32(ch_pic.palette)
 
     def build_knight_select(
         self,
@@ -727,80 +407,40 @@ class IntroCinematicPlayer:
         selected_slot: int,
         taken_mask: int = 0,
     ) -> tuple[npt.NDArray[np.uint8] | None, tuple[RGBColor, ...]]:
-        """Render the original Amiga ``mog`` Select a Knight portrait screen."""
-        if not self.mog_s4:
+        """Render the original Amiga ``mog`` Select a Knight portrait screen (§12.42.6)."""
+        if self.menu_data is None:
             return None, default_combat_palette()
-        buf = np.zeros((PLAYFIELD_HEIGHT, CANVAS_WIDTH), dtype=np.uint8)
-        bold = bundle.get_cel("bold.f")
+        ks = self.menu_data.knight_select
+        buf = _blank()
+        bold = bundle.get_cel(self.plan.font.file)
         sel = bundle.get_cel("sel.cel")
-        charmap = self.h2[_CHARMAP_OFFSET : _CHARMAP_OFFSET + 104]
+        slot = selected_slot & 3
         if bold is not None:
-            render_bold_text_list(
-                buf,
-                self.mog_s4,
-                bold,
-                _MOG_KNIGHT_SELECT_LIST_OFFSET,
-                charmap=charmap,
+            for line in ks.lines:
+                _draw_mog_bold_line(buf, bold, self.menu_data.char_map, line, ks.span)
+            name_line = replace(
+                ks.lines[0],
+                text=ks.knight_names[slot],
+                x=ks.name_x,
+                y=ks.name_y,
+                style=ks.name_style,
             )
-            name_off = _MOG_KNIGHT_NAME_OFFSETS[selected_slot & 3]
-            knight_name = self._read_mog_cstring(name_off).strip().replace("_", " ")
-            render_bold_string(buf, charmap, bold, knight_name, 50, 50)
-        if sel is not None and len(sel.frames) >= 6:
+            _draw_mog_bold_line(buf, bold, self.menu_data.char_map, name_line, ks.span)
+        if sel is not None and len(sel.frames) >= ks.portrait_first_frame + 4:
             for idx in range(4):
                 if not (taken_mask & (1 << idx)):
-                    _blit_playfield(buf, sel.frames[2 + idx].pixels, _MOG_PORTRAIT_X[idx], 80)
-            _blit_playfield(buf, sel.frames[1].pixels, _MOG_PORTRAIT_X[selected_slot & 3], 80)
-        pal = _unpack_pal32(self.mog_s4, _MOG_KNIGHT_PALETTE_OFFSET)
-        return buf, pal
-
-    def render_tick(
-        self,
-        bundle: GameAssetBundle,
-        tick_count: int,
-    ) -> tuple[npt.NDArray[np.uint8], tuple[RGBColor, ...]]:
-        """Return ``(playfield_pixels, palette)`` for ``tick_count`` at 50 Hz."""
-        wipe_ticks = len(self.wipe_curve) * 2
-        cycle_len = self.total_ticks()
-        round_idx = max(0, tick_count) // cycle_len
-        t = min(max(0, tick_count), cycle_len - 1)
-
-        if t < 120:
-            ms_pic = bundle.get_picture("mindscape")
-            if ms_pic is not None:
-                pal = _fade_palette_ends(tuple(_pad_palette_32(ms_pic.palette)), t, 120)
-                return ms_pic.pixels[:PLAYFIELD_HEIGHT, :CANVAS_WIDTH], pal
-        t -= 120
-
-        if t < 150:
-            return self.title_frame, self._title_or_credit_palette(t, 150, fade_bg_in=True)
-        t -= 150
-
-        if t < 540:
-            page_idx = min(len(self.credit_frames) - 1, t // 90)
-            local = t % 90
-            return (
-                self.credit_frames[page_idx],
-                self._title_or_credit_palette(local, 90, fade_bg_in=False),
+                    blit_indexed_sprite(
+                        buf,
+                        sel.frames[ks.portrait_first_frame + idx].pixels,
+                        ks.portrait_x[idx],
+                        ks.portrait_y,
+                        clip_rect=_PLAYFIELD_CLIP,
+                    )
+            blit_indexed_sprite(
+                buf,
+                sel.frames[ks.highlight_frame].pixels,
+                ks.portrait_x[slot],
+                ks.portrait_y,
+                clip_rect=_PLAYFIELD_CLIP,
             )
-        t -= 540
-
-        if t < wipe_ticks:
-            step_idx = min(len(self.wipe_curve) - 1, t // 2)
-            y_off = self.wipe_curve[step_idx]
-            wipe_pal = list(self.bg1a_palette)
-            for idx, w12 in _WIPE_PAL_WORDS:
-                wipe_pal[idx] = rgb12_to_rgb24(w12)
-            return self.panorama[y_off : y_off + PLAYFIELD_HEIGHT, :CANVAS_WIDTH], tuple(wipe_pal)
-        t -= wipe_ticks
-
-        for s_idx, spec in enumerate(_STORY_SCENE_SPECS):
-            s_len = spec.num_frames * spec.vbls_per_frame
-            if t < s_len:
-                frames, flashes = self._get_story_scene_frames(bundle, s_idx)
-                f_idx = min(len(frames) - 1, t // spec.vbls_per_frame)
-                pal = self._story_scene_palette(bundle, spec, round_idx, t, s_len, flashes[f_idx])
-                return frames[f_idx], pal
-            t -= s_len
-
-        pal = _fade_palette_ends(self.caption_palette, t, 220)
-        return self.caption_frame, pal
+        return buf, palette_fx_to_rgb(ks.palette)

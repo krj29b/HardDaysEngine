@@ -67,7 +67,7 @@ if TYPE_CHECKING:
 _PRIMARY = KnightId.RED
 _LABEL_HEIGHT = 12
 _SHEET_COLUMNS = 4
-_INTRO_SAMPLE_TICKS: tuple[int, ...] = (50, 400, 900, 1500, 2500)
+_INTRO_SAMPLE_TICKS: tuple[int, ...] = (50, 415, 900, 1500, 2500, 3250, 4100, 5050)
 _REGION_NAMES: tuple[str, ...] = ("forest", "glen", "swamp", "wasteland")
 _NO_NODE = -1
 _END_SCENES: tuple[GameScene, ...] = (

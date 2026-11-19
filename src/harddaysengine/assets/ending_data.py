@@ -36,6 +36,7 @@ from harddaysengine.sim.ending_types import (
     RampRelease,
     RampSpec,
     Select,
+    Series,
     Show,
     Spawn,
     SpawnKind,
@@ -81,8 +82,8 @@ _CALLS: dict[tuple[int, int], Call] = {
     (31, 0x71C): Call.LOADING_B,
 }
 _SPAWNS = {(0, 0x2E4): SpawnKind.LEFT, (0, 0x30A): SpawnKind.RIGHT}
-_SUBSCENE = (0, 0x862)
-_CAPTION, _LOADER_ENTRY, _PAIRS = (0, 0x11CA), (8, 0x500), (0, 0x508)
+_SUBSCENES = {(0, 0x818), (0, 0x862)}
+_CAPTION, _LOADER_ENTRY, _PAIRS, _SERIES = (0, 0x11CA), (8, 0x500), (0, 0x508), (0, 0x4C8)
 _UNPACK, _CLEAR, _TARGET, _WAIT = (10, 0xD6A), (29, 0x5E0), (10, 0xD9A), (29, 0x658)
 _RAMP_FREE, _PALETTE_TO, _TEXT, _FADE = (31, 0x5A), (10, 0xC70), (12, 0x132), (31, 0x1A)
 _TICK_BODY = ((0, 0x330), (10, 0x2BE), (10, 0x32A), (10, 0xC92), (10, 0xA18), (0, 0x33C))
@@ -186,7 +187,7 @@ class _Scene:
 
     def _jsr(self, pos: int) -> int:
         target = _key(self.prog.pointer(_CODE, pos + 2, "scene call"))
-        if target == _SUBSCENE:
+        if target in _SUBSCENES:
             self.run(target[1])
         elif target in _CALLS:
             self.steps.append(Invoke(_CALLS[target]))
@@ -196,11 +197,17 @@ class _Scene:
 
     def _spawn(self, pos: int) -> int:
         script = self.prog.pointer(_CODE, pos + 2, "spawn script")
-        kind = _SPAWNS.get(self.prog.call(_CODE, pos + 6, "spawn helper"))
+        is_bsr = self.prog.word(_CODE, pos + 6) == _BSR
+        call = (
+            (0, self.prog.branch(_CODE, pos + 6, _BSR, "spawn helper"))
+            if is_bsr
+            else self.prog.call(_CODE, pos + 6, "spawn helper")
+        )
+        kind = _SPAWNS.get(call)
         if kind is None or script.hunk != _SCRIPTS:
             raise MogVersionError(f"program: ending spawn at {pos:#x} is not understood")
         self.steps.append(Spawn(kind, script.offset))
-        return pos + 12
+        return pos + (10 if is_bsr else 12)
 
     def _buffer_call(self, pos: int) -> int:
         buffer = _buffer(self.prog.pointer(_CODE, pos + 2, "buffer operand"), "buffer operand")
@@ -258,6 +265,12 @@ class _Scene:
 
     def _table_call(self, pos: int) -> int:
         table = self.prog.pointer(_CODE, pos + 2, "table operand")
+        if self.prog.word(_CODE, pos + 6) == _BSR:
+            kind = _SPAWNS.get((0, self.prog.branch(_CODE, pos + 6, _BSR, "spawn helper")))
+            if kind is None or table.hunk != _SCRIPTS:
+                raise MogVersionError(f"program: ending LEA BSR at {pos:#x} is not understood")
+            self.steps.append(Spawn(kind, table.offset))
+            return pos + 10
         if self.prog.word(_CODE, pos + 6) & 0xFF00 == 0x7000:
             period = self.prog.word(_CODE, pos + 6) & 0xFF
             if _key(table) != _BLACK or self.prog.call(_CODE, pos + 8, "fade") != _FADE:
@@ -274,10 +287,22 @@ class _Scene:
         return pos + 12
 
     def _pairs_run(self, pos: int) -> int:
-        if (0, self.prog.branch(_CODE, pos, _BSR, "pairs")) != _PAIRS:
+        target = (0, self.prog.branch(_CODE, pos, _BSR, "pairs"))
+        if target in _SUBSCENES:
+            self.run(target[1])
+            return pos + 4
+        if target not in (_PAIRS, _SERIES):
             raise MogVersionError("program: ending BSR is not the pairs routine")
+        scripts, spare = self._pair_scripts(target == _PAIRS)
+        step: Step = Pairs(scripts) if target == _PAIRS else Series(scripts, spare)
+        self.steps.append(step)
+        self.pairs.clear()
+        return pos + 4
+
+    def _pair_scripts(self, require_zero_spare: bool) -> tuple[tuple[int, ...], int]:
         wanted = {_PAIR_INDEX, _PAIR_TABLE, _PAIR_COUNT, _PAIR_SPARE}
-        if set(self.pairs) != wanted or self.pairs[_PAIR_INDEX] or self.pairs[_PAIR_SPARE]:
+        spare = self.pairs.get(_PAIR_SPARE, 0)
+        if set(self.pairs) != wanted or self.pairs[_PAIR_INDEX] or (require_zero_spare and spare):
             raise MogVersionError("program: ending pairs run without its complete set-up")
         table, count = self.pairs[_PAIR_TABLE], self.pairs[_PAIR_COUNT]
         if not 0 < count <= 16:
@@ -288,9 +313,7 @@ class _Scene:
             if script.hunk != _SCRIPTS:
                 raise MogVersionError("program: ending pair script outside the script hunk")
             scripts.append(script.offset)
-        self.steps.append(Pairs(tuple(scripts)))
-        self.pairs.clear()
-        return pos + 4
+        return tuple(scripts), spare
 
 
 def _flag_bit(prog: ProgramCode) -> int:

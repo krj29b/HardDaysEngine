@@ -114,6 +114,14 @@ class Pairs:
 
 
 @dataclass(slots=True, frozen=True)
+class Series:
+    """Spawn ``scripts`` in turn on the left, counted frames from ``first_frame`` (§12.42.5)."""
+
+    scripts: tuple[int, ...]
+    first_frame: int
+
+
+@dataclass(slots=True, frozen=True)
 class Ticks:
     """``passes`` bare job passes: no stop test, overlay or stage palette."""
 
@@ -179,6 +187,7 @@ Step = (
     | Select
     | Spawn
     | Pairs
+    | Series
     | Ticks
     | RampRelease
     | Wait

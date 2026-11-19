@@ -981,3 +981,28 @@ Resolve the menu-return fade on the tick and present palettes without mutating
 simulation state; remove the render-dependent pending-fade flag. Include selection
 and input-edge state in hashes. The older town/Stonehenge bold-text follow-up uses
 checked runtime style bits on copied text records, as the existing Valley caller does.
+
+## ADR-050: Decode the `program` intro pass and `mog` title/knight-select screens at runtime
+**Status:** ACCEPTED (2026-11-19, T11.25; closes ADR-044 follow-up)
+**Context:** The initial `app/intro_player.py` from Phase 8 embedded hardcoded scene tables,
+script byte offsets, palette words, credit strings and `mog` hunk-4 text/palette offsets in
+Python source, and had swapped knight portrait names 0 and 1. ADR-044 noted that the `program`
+ending step-plan decoder (`T11.22a`/`T11.22b`) left the intro pass on the same executable ready
+to move onto the checked walker without a second engine.
+**Decision:** Extend `assets/ending_data.py` (`_Scene`) for intro sub-scenes (`$0818`, `$0862`),
+`Series` (`$04C8`) and `BSR.W` spawn calls, and add `assets/intro_data.py` + `sim/intro_types.py`
+to decode the `program` intro top level (`$0076..$0114`), loader (`hunk 8 $0136`), four progress
+routines (`hunk 31 $0328..$05A8`), forward progress wipe (`hunk 31 $05AA`), mid-intro picture
+setup (`hunk 8 $008E`), all 7 scene bodies, and the `mog` title-menu (`$18FA..$1B42`) and
+knight-select (`$1CDC..$1FBC`) layouts with checked instruction words and relocations. Run the
+intro plan on a deterministic 50 Hz VBL generator (`sim/intro.py`) sharing `JobPool`,
+`ScriptRunner` and `ProgramPalette` with `sim/ending.py`. Because floppy disk read latency is
+not emulated, progress steps that overlapped their `period = 2` fade-to-gold with the next disk
+read wait `tail_period << 4` (32 VBLs, the same shift `hunk 10 $0C82` uses for `PaletteTo`) so
+each screen's gold fade settles before the next white flash. Retain all ten picture buffers
+(`0..9`) across scenes in `IntroPixels` so permanent background stamps (such as Scene 3's
+altar and druids on `P4`) carry into later scenes.
+**Consequences:** Zero hardcoded scene specs, script offsets, palette words, credit texts or
+hunk offsets remain in `app/intro_player.py`. The `program` intro runs for 5,332 deterministic
+VBLs, and the `mog` knight-select screen maps portrait 0 (Blue) to `"SIR GODBER"` and portrait
+1 (Yellow) to `"SIR RICHARD"` directly from the `$1EFE..$1FBC` compare blocks.

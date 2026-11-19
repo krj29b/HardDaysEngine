@@ -332,6 +332,15 @@ Rules for the whole phase:
 - **T11.24 Campaign verification:** a recorded real-disk replay from knight select through a lair
   win, its loot sheet, a town purchase and a day change, with a deterministic state hash; README
   controls updated; `PROGRESS.md` statuses for Phases 6 to 10 corrected to what survived.
+- **T11.25 Checked `program` intro pass & `mog` title/knight-select screens (`assets/intro_data.py`,
+  `sim/intro_types.py`, `sim/intro.py`, `app/intro_player.py`):** decode the `program` first pass
+  (loader progress steps, credit pages, forward wipe, picture setup, `SERIES` and the seven intro
+  scene bodies) and the `mog` title-menu and knight-select screen layouts from the user's
+  executables at runtime (ADR-044 follow-up), run the intro on the `sim/` VBL generator and 40-slot
+  job pool, and remove all hardcoded scene tables, palette words and hunk offsets from
+  `app/intro_player.py`. *Accept:* synthetic and real-disk tests verify all decoded operands and
+  VBL playback; portrait names match the `mog` `$1EFE..$1FBC` order; contact sheets `intro.png` and
+  `menu_map.png` reviewed.
 
 Milestones: **M1** one creature fight that looks and plays right (T11.1, T11.2, T11.3, T11.6 to
 T11.11, Troggs first). **M2** walking the map into that fight and out again (T11.4, T11.5, T11.12,

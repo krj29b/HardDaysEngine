@@ -5204,3 +5204,164 @@ pixel oracle independently centres and advances glyphs by width minus three.
 Menu palette rendering is read-only; the return-to-menu fade is initialized on
 the simulation tick. Selection, roster and input-edge latches participate in the
 session hash, so a rendered and an unrendered replay have identical checkpoints.
+
+### 12.42 The intro pass of `program` and the `mog` title & knight-select screens (T11.25)
+
+When `program` tests the ending flag bit at hunk0 `$0064..$0072` (§12.39) and the bit is clear
+(initial boot flags `$3E0` are `0`), execution falls through to `$0076` and runs the intro pass
+before jumping to `$0114` to load `Mog`. Like the ending pass (§12.39), the intro pass is
+straight-line 68k code using the same buffers (`SHOWN`, `P1..P9`, `SCREEN`, `WORK`), eight palette
+tables (`hunk9 $0006 + $40·k`), shared picture-palette cell (`hunk26 $0146`), 40-slot job pool,
+script interpreter, `ProgramPalette`, credit overlay (`ov1.cel`), caption routine (`hunk0 $11CA`),
+and `$B4` script callbacks. `assets/intro_data.py` decodes both the `program` intro pass and the
+`mog` title-menu and knight-select screen layouts from the user's executables at runtime; no scene
+timeline, script offset, palette word or hunk offset is embedded in Python source (ADR-001,
+ADR-044).
+
+**12.42.1 Intro top level (hunk0 `$0076..$0114`).** Checked instruction by instruction:
+
+1. Clear intro music state (`MOVE.L #0,hunk1 $0088` at `$0076`), `gap = 0` (`MOVE.L #0,hunk3 $009A`
+   at `$0080`), `speed = 2` (`MOVE.L #2,hunk2 $023E` at `$008A`).
+2. `JSR hunk10 $0C50` (`Call.FADE_OUT`).
+3. `JSR hunk8 $0136` (the intro loader, §12.42.2).
+4. Abort test (`TST.W hunk33 $0F60 ; BNE.W $0114` at `$00A0..$00A8`): if the user skipped during
+   loading, jump straight to the `Mog` loader.
+5. `JSR hunk31 $05AA` (the forward progress wipe, §12.42.4).
+6. `gap = 4` (`MOVE.L #4,hunk3 $009A` at `$00B0`).
+7. Seven scene bodies and one mid-sequence picture setup called in order at `$00BA..$00E4`:
+   - `JSR hunk0 $03F0` (Scene 1: five torch-bearing druids marching on `bg1b.piv`),
+   - `JSR hunk0 $0438` (Scene 2: five druids approaching Stonehenge on `bg2.piv` with `ov1.cel`),
+   - `JSR hunk8 $008E` (picture setup, §12.42.5),
+   - `JSR hunk0 $0366` (Scene 3: Stonehenge circle with sub-scene `$0818`, four `Pairs` and altar),
+   - `JSR hunk0 $0610` (Scene 4: High Druid on `bg4.piv`, then cloud vortex on `bg5a.piv`),
+   - `JSR hunk0 $06BE` (Scene 5: Knight drawing broadsword on `bg2a.piv` with `ov1.cel` phase 2),
+   - `JSR hunk0 $0792` (Scene 6: Knight entering Stonehenge circle on `bg3.piv` with sub-scene `$0862`),
+   - `JSR hunk0 $0738` (Scene 7: High Druid dubbing the kneeling knight on `bg5a.piv`).
+8. `JSR hunk10 $0C50` (`Call.FADE_OUT`), `Caption` with the relocated text list at `$00F2`
+   (`hunk2 $0078`), `Wait` for the long immediate at `$00FE` (`$01A4` = 420 VBLs),
+   `JSR hunk10 $0C50` (`Call.FADE_OUT`), `JSR hunk1 $0034` (unhook VBL music), and fall through to
+   `$0114` (`Mog`).
+
+**12.42.2 Intro loader (hunk8 `$0136..$04F4`).** Unlike the ending loader (which loads silently
+under one caption), the intro loader interleaves file loads with four progress routines in hunk 31
+(`$0328`, `$03B0`, `$042E`, `$04AE`, §12.42.3) that display the Mindscape logo, the moon backdrop,
+the Moonstone title banner and the six credit pages:
+
+1. `JSR hunk10 $0BF8` (`BLACKOUT`), `Target(SCREEN)` (`$013C`), load `"mindscape"` (`$0148`) into
+   `SCREEN` using `P3` as scratch (`$014E`), then `LEA hunk26 $0146,A0 ; JSR hunk10 $0C70`
+   (`PaletteTo` the picture-palette cell: fades in the Mindscape logo at `palette_period = 2` and
+   waits 32 ticks).
+2. Load `"bg1a.piv"` into `P2` and copy its palette to table 0 (`$0166..$018A`), read
+   `"intro.stile"` (1000 bytes into `hunk33 $0000`, `$0190..$01AE`), then call progress step 0
+   (`JSR hunk31 $0328` at `$01B4`).
+3. Load `"bg1c.piv"` into `P3` (`$01BA..$01D2`), call progress step 1 (`JSR hunk31 $03B0` at
+   `$01D8`), followed by the abort branch (`TST.W hunk33 $0F60 ; BNE.W $04F4`).
+4. Load `"bg1b.piv"` into `P4` (`$01E8..$0200`), call progress step 2 (`JSR hunk31 $042E` at
+   `$0206`), followed by the abort branch.
+5. Five story pictures (`$0216..$0366`): each block sets the draw target (`P5..P9`), loads the
+   picture (`bg4.piv`, `bg5a.piv`, `bg3.piv`, `bg2.piv`, `bg2a.piv`), copies its palette to table
+   `3..7`, optionally calls the class tweak (`JSR hunk8 $09DE` for tables `4..7`), calls progress
+   step 3 (`JSR hunk31 $04AE`), and tests the abort word.
+6. Five animation cels (`$0368..$04A6`): placed into the shared frame table (`hunk11 $00DE`) in load
+   order `au1.cel` (slot 0), `li1.cel` (slot 1), `da1.cel` (slot 4, offset `$10`), `ha1.cel`
+   (slot 2, offset `$08`), and `dw1.cel` (slot 3, offset `$0C`, loaded at `hunk0 $10B8`). Each of
+   the first four cel loads is followed by `JSR hunk31 $04AE` (progress step 3) and the abort test.
+7. `ov1.cel` (`$04A8..$04C0`) is loaded after `P9` (`hunk2 $0236 + 40000`) and stored in the
+   overlay cel pointer (`hunk3 $0092`); `"music.cmp"` (`$04C6..$04F4`, `$159D9` packed bytes) is
+   read into `hunk3 $009E` and RNC-unpacked (`BRA.W $07C2`).
+
+**12.42.3 Progress screens (hunk31 `$0328..$05A8`).** All four progress steps share the tail at
+`$0550` (`$0556` without the leading `FLIP`): test `hunk16 $0000` (set `hunk33 $0F60 = 1` on a key),
+set `palette_period = 2` (`MOVE.L #2,hunk10 $0C8C` at `$0566`), overwrite five entries of palette
+table 0 (`hunk9 $0006`, displacements `10, 18, 20, 22, 24` -> entries `5, 9, 10, 11, 12`) with the
+gold ramp words decoded at `$0576..$0592` (`$0000, $0FED, $0DC9, $0B95, $0842`), start a fade to
+table 0 at period 2 (`MOVEQ #2,D0 ; JSR hunk31 $001A` at `$059A..$059C`), and restore dirty
+rectangles (`JSR hunk10 $0A18`). Because the original overlapped that period-2 fade with the next
+floppy file read and our model does not emulate disk reads, the tail waits `period << 4` (32 VBLs,
+the same shift `hunk10 $0C82` uses for `PaletteTo`) when the screen shows a new stage (step 0 moon,
+step 1 title banner, or a credit page in step 3), so every fade-to-gold completes before the next
+step flashes to white.
+
+- *Step 0 (`$0328`):* reset keys, `Call.FADE_OUT` (fades out the Mindscape logo over 36 VBLs),
+  `FLIP`, clear `SCREEN`, `WORK` and `SHOWN`, point the wipe sources at `P2, P3, P4` (`bg1a, bg1c,
+  bg1b`) and base at `SHOWN`, set `progress = 0`, draw the top 8 block rows (`wipe(SHOWN, 0)`),
+  `PREPARE`, then run the tail with `flip = True` (32 VBLs: the moon fades in).
+- *Step 1 (`$03B0`):* overwrite the five entries of table 0 with `$0000` (`$03B6..$03D2`), target
+  `WORK`, draw cel frame `$49` of the text font (`hunk3 $0010 + 16`) at `(x=9, y=60)` decoded from
+  `$0400..$040C`, `FLIP`, wait 8 VBLs (`MOVEQ #8,D0 ; JSR hunk29 $0658` at `$0422`), then run the
+  tail with `flip = False` (32 VBLs: the Moonstone title banner fades in from black to gold).
+- *Step 2 (`$042E`):* overwrite the five entries of table 0 with `$0FFF` (`$0434..$0450`), set
+  `palette_period = 1` (`$0452`), `PaletteTo(table 0)` (`16` VBLs: flashes the title banner to
+  white), wait 2 VBLs (`$0468`), overwrite the five entries with `$0000`, `FLIP`, `PREPARE`
+  (restores the clean moon to `SCREEN` and `WORK`), and fall straight through into step 3 (`$04AE`).
+- *Step 3 (`$04AE`):* overwrite the five entries of table 0 with `$0FFF`, set `palette_period = 1`,
+  `PaletteTo(table 0)` (`16` VBLs: fades the current credit page to white), target `WORK`, compare
+  the page counter (`hunk31 $079C`, initially 0) against the `CMPI.W` operand at `$04F4` (`6`). While
+  `page < 6`, print the credit text list at `hunk31 $079E + 4·page`, increment `page`, and overwrite
+  the five entries of table 0 with `$0000`. Then run the tail with `flip = True` (and restore the
+  new `WORK` screen from `SHOWN` so the next credit page draws on a clean moon). For the three extra
+  calls after `page` reaches 6 (during the remaining cel loads), no new text is drawn and the clean
+  moon already on `SCREEN` stays at its target palette.
+
+**12.42.4 Forward progress wipe (hunk31 `$05AA..$0688`).** Overwrites entries `9, 10, 11, 12` of
+palette table 0 with the four words decoded at `$05B6..$05CC` (`$0A00, $0600, $0300, $0FC6`) and
+writes table 0 immediately to the colour registers (`JSR hunk29 $0788`). Then loops while
+`s16(progress) < $03E8` (1000, checked at `$062E`):
+
+1. Scan the 11 signed threshold words at `hunk31 $065E` (`LEA` at `$05DA`) for the first index
+   `0..10` with `s16(threshold[i]) >= s16(progress)`, and set `wipe_step` (`hunk31 $0850`) to the
+   matching word in the 11-entry step table at `hunk31 $0674` (`LEA` at `$05E0`).
+2. Stamp the tick counter (`JSR hunk0 $0330`), advance `progress = min(1000, progress + wipe_step)`
+   (`JSR hunk31 $07B6` with bit 2 set), redraw the 200-line window of the `intro.stile` panorama
+   into `SCREEN`, and `FLIP`.
+3. If `wipe_step` equals the `CMPI.W` operand at `$0618` (`4`), call `JSR hunk1 $0000`
+   (`Call.MUSIC`, starting `music.cmp`).
+4. Wait until `speed + gap` ticks have elapsed since the stamp (`JSR hunk0 $033C`).
+
+When `progress` reaches 1000, copy `SCREEN` to `WORK` and `SHOWN` (`$0638..$0656`).
+
+**12.42.5 Mid-intro picture setup (hunk8 `$008E..$00FA`) and `Series` (hunk0 `$04C8..$0506`).**
+
+- *Picture setup (`$008E`):* three 24-byte blocks (`$008E`, `$00B2`, `$00D6`), each copying a picture
+  buffer (`JSR hunk10 $0D6A`) and its 32-word palette table (`JSR hunk8 $092E`):
+  `(P5, table 3) -> (P2, table 0)`, `(P6, table 4) -> (P3, table 1)`, and
+  `(P7, table 5) -> (P4, table 2)`.
+- *`Series` (`$04C8`):* set up by writing `_PAIR_INDEX = 0` (`$0602`), `_PAIR_TABLE` (`$060A`),
+  `_PAIR_COUNT` (`$0608`) and `_PAIR_SPARE = first_frame` (`$060E`), then `BSR.W $04C8`. For each of
+  the `count` script pointers in the table, copy `first_frame` into the frame counter (`$0604`),
+  spawn the script on the left (`BSR.W $02E4`), and run the counted frame loop (`JSR $0206`) from
+  `first_frame` up to `pair_frames` (`16`), i.e. `16 - first_frame` passes.
+- *Scene primitives added for the intro scene bodies:* in addition to §12.39.4, a scene body may
+  call sub-scene `$0818` (`BSR.W $0818`, inlined like `$0862`), spawn a left job via `LEA script,A0 ;
+  BSR.W $02E4` or `MOVEA.L #script,A0 ; BSR.W $02E4`, or invoke `Series` via `BSR.W $04C8`. Notice
+  that Scene 1 (`$03F0`) sets `_PAIR_SPARE = 4` before setting the rest of the `Series` cells; the
+  decoder accepts the four cell stores in any order before `BSR.W $04C8` / `$0508`.
+
+**12.42.6 `mog` title menu and knight-select screen layouts (hunk0 `$18DE..$1FBC`).** Decoded from
+`mog` with checked instruction words and relocations:
+
+- *Title menu (`$18FA..$1B42`):*
+  - Backdrop picture `"ch.piv"` (loaded at boot into `hunk1 $0124`, palette at `hunk31 $0146`),
+    font `"bold.f"`, and sprite sheet `"sel.cel"`.
+  - Cursor X is the word immediate at `$18FA` (`MOVE.W #$32,hunk1 $0172` -> `50`); the four cursor Y
+    positions are the 4 `BE16` words at the relocated `LEA` `$1A9C` (`hunk4 $027C`: `85, 110, 148,
+    168`).
+  - Title banner draw (`$1AC4..$1AD4`): frame `$49` of `bold.f` at `(x=5, y=10)`; cursor arrow draw
+    (`$1ADC..$1AF0`): frame `0` of `sel.cel` at `(cursor_x, cursor_y[cursor])`.
+  - Main menu text list at the relocated `LEA` `$1B28` (`hunk4 $0008`), with the player-count number
+    buffer at `LEA` `$1B00` (`hunk4 $00B8`, formatted by `JSR $93CA`) and the gore `"Off"` / `"On"`
+    string pointers at `$1B0C` (`hunk4 $00C7`) and `$1B1E` (`hunk4 $00C4`) replacing the text pointer
+    of the record at `hunk4 $004E`. As in §12.38/41, `mog`'s bold writer ORs style bit `8` into each
+    record (`width - 3` advance, centred on `span = 319` when `style & 1`).
+- *Knight-select screen (`$1CDC..$1FBC`):*
+  - 32-word `$0RGB` palette at the relocated `LEA` `$1D2C` (`hunk4 $0476`).
+  - Heading text list at the relocated `LEA` `$1E4E` (`hunk4 $0304`, `"Select a Knight"`).
+  - Four portrait X positions (`4` `BE16` words) at the relocated `LEA` `$1E68` (`hunk4 $04BE`:
+    `12, 88, 164, 240`), portrait Y at `$1E7C` (`$50` = 80), portrait frames `2 + index` (`ADDQ.W #2,D0`
+    at `$1E7A`), and highlight frame `1` at `(portrait_x[sel], 80)` (`$1EAA..$1EB0`).
+  - Selected knight's name position `(x=50, y=50)` decoded from `$1EC6..$1ECA`, and the four
+    22-byte space-padded knight name buffers by portrait index `0..3` decoded from the four
+    `CMP.W #n,D0 ; BNE ; MOVE.L #name,hunk4 $005C` blocks at `$1EFE, $1F2E, $1F5E, $1F8E`
+    (`hunk4 $0076, $0060, $008C, $00A2`: portrait 0 Blue is `"SIR_GODBER"`, portrait 1 Yellow is
+    `"SIR_RICHARD"`, portrait 2 Green is `"SIR_JEFFREY"`, portrait 3 Red is `"SIR_EDWARD"`). This
+    corrects the earlier swapped `(96, 118, 140, 162)` tuple in `app/intro_player.py`.
