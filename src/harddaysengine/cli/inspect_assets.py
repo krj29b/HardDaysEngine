@@ -8,9 +8,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from harddaysengine import __version__
-from harddaysengine.app.config import ConfigError, find_adf_images, resolve_adf_dir
+from harddaysengine.app.config import (
+    ConfigError,
+    find_adf_images,
+    resolve_adf_dir,
+    resolve_display_settings,
+)
 from harddaysengine.app.inspector import run_inspector_headless, run_inspector_window
 from harddaysengine.assets.adf import DiskSet
+from harddaysengine.render.presentation import (
+    AspectMode,
+    CropMode,
+    DisplaySettings,
+    FilterPreset,
+    ScaleMode,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -46,8 +58,32 @@ def build_inspect_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--scale",
         type=int,
-        default=3,
-        help="integer window scaling factor for 320x256 canvas (default: 3)",
+        default=None,
+        help="initial window size in canvas pixels, 1..8 (default: [display] scale or 3)",
+    )
+    parser.add_argument(
+        "--filter",
+        choices=[preset.value for preset in FilterPreset],
+        default=None,
+        help="presentation preset (default: [display] filter or faithful)",
+    )
+    parser.add_argument(
+        "--scale-mode",
+        choices=[mode.value for mode in ScaleMode],
+        default=None,
+        help="viewport scaling mode (default: [display] scale_mode or integer)",
+    )
+    parser.add_argument(
+        "--aspect",
+        choices=[mode.value for mode in AspectMode],
+        default=None,
+        help="source pixel aspect ratio (default: [display] aspect or square)",
+    )
+    parser.add_argument(
+        "--crop",
+        choices=[mode.value for mode in CropMode],
+        default=None,
+        help="source canvas crop (default: [display] crop or full)",
     )
     parser.add_argument(
         "--headless-frames",
@@ -69,6 +105,7 @@ def run_inspector_cli(
     cel_name: str | None = None,
     background_name: str | None = None,
     scale: int = 3,
+    display: DisplaySettings | None = None,
     headless_frames: int | None = None,
     screenshot: str | None = None,
 ) -> int:
@@ -92,6 +129,7 @@ def run_inspector_cli(
     return run_inspector_window(
         disk_set,
         scale=scale,
+        display=display,
         cel_name=cel_name,
         background_name=background_name,
     )
@@ -108,13 +146,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             config_path=Path(args.config),
             default=Path("disks"),
         )
+        display = resolve_display_settings(
+            Path(args.config),
+            scale=args.scale,
+            filter_name=args.filter,
+            scale_mode=args.scale_mode,
+            aspect=args.aspect,
+            crop=args.crop,
+        )
     except ConfigError as exc:
         parser.error(str(exc))
     return run_inspector_cli(
         adf_dir,
         cel_name=args.cel,
         background_name=args.background,
-        scale=args.scale,
+        display=display,
         headless_frames=args.headless_frames,
         screenshot=args.screenshot,
     )

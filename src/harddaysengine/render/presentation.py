@@ -21,12 +21,37 @@ class FilterPreset(StrEnum):
     SCANLINES = "scanlines"
 
 
+class ScaleMode(StrEnum):
+    """How the cropped canvas scales into the window (§13.2)."""
+
+    INTEGER = "integer"
+    SHARP_BILINEAR = "sharp-bilinear"
+    FIT = "fit"
+
+
+class AspectMode(StrEnum):
+    """Shape of one source pixel (§13.1)."""
+
+    SQUARE = "square"
+    PAL = "pal"
+
+
+class CropMode(StrEnum):
+    """Region of the 320x256 canvas shown in the window (§13.1)."""
+
+    FULL = "full"
+    PLAYFIELD = "playfield"
+
+
 @dataclass(slots=True, frozen=True)
 class DisplaySettings:
     """Resolved ``[display]`` settings (§13.7)."""
 
     scale: int = DEFAULT_WINDOW_SCALE
     filter: FilterPreset = FilterPreset.FAITHFUL
+    scale_mode: ScaleMode = ScaleMode.INTEGER
+    aspect: AspectMode = AspectMode.SQUARE
+    crop: CropMode = CropMode.FULL
 
     @property
     def scanlines(self) -> bool:

@@ -9,14 +9,18 @@ Display settings come from the ``[display]`` table, with CLI flags taking preced
 from __future__ import annotations
 
 import tomllib
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from harddaysengine.render.presentation import (
     MAX_WINDOW_SCALE,
     MIN_WINDOW_SCALE,
+    AspectMode,
+    CropMode,
     DisplaySettings,
     FilterPreset,
+    ScaleMode,
 )
 
 if TYPE_CHECKING:
@@ -27,7 +31,7 @@ ADF_IMAGE_SIZE = 901_120
 
 ENV_ADF_DIR = "HARDDAYSENGINE_ADF_DIR"
 DISPLAY_TABLE = "display"
-_DISPLAY_KEYS = frozenset({"scale", "filter"})
+_DISPLAY_KEYS = frozenset({"scale", "filter", "scale_mode", "aspect", "crop"})
 
 
 class ConfigError(Exception):
@@ -113,11 +117,25 @@ def _window_scale(value: object, source: str) -> int:
     return value
 
 
-def _filter_preset(value: object, source: str) -> FilterPreset:
-    names = ", ".join(preset.value for preset in FilterPreset)
-    if not isinstance(value, str) or value not in {preset.value for preset in FilterPreset}:
-        raise ConfigError(f"{source}: filter must be one of {names}, got {value!r}")
-    return FilterPreset(value)
+def _enum_setting[E: StrEnum](value: object, enum_cls: type[E], key: str, source: str) -> E:
+    names = ", ".join(member.value for member in enum_cls)
+    if not isinstance(value, str) or value not in {member.value for member in enum_cls}:
+        raise ConfigError(f"{source}: {key} must be one of {names}, got {value!r}")
+    return enum_cls(value)
+
+
+def _resolve_enum[E: StrEnum](
+    cli_value: str | None,
+    table: Mapping[str, object],
+    enum_cls: type[E],
+    key: str,
+    cli_flag: str,
+    default: E,
+    file_source: str,
+) -> E:
+    if cli_value is not None:
+        return _enum_setting(cli_value, enum_cls, key, cli_flag)
+    return _enum_setting(table.get(key, default.value), enum_cls, key, file_source)
 
 
 def resolve_display_settings(
@@ -125,6 +143,9 @@ def resolve_display_settings(
     *,
     scale: int | None = None,
     filter_name: str | None = None,
+    scale_mode: str | None = None,
+    aspect: str | None = None,
+    crop: str | None = None,
 ) -> DisplaySettings:
     """Resolve ``[display]`` settings: CLI value, then the config file, then the default (§13.7)."""
     table = _display_table(load_config_file(config_path), config_path)
@@ -135,9 +156,22 @@ def resolve_display_settings(
         if scale is not None
         else _window_scale(table.get("scale", defaults.scale), file_source)
     )
-    resolved_filter = (
-        _filter_preset(filter_name, "--filter")
-        if filter_name is not None
-        else _filter_preset(table.get("filter", defaults.filter.value), file_source)
+    return DisplaySettings(
+        scale=resolved_scale,
+        filter=_resolve_enum(
+            filter_name, table, FilterPreset, "filter", "--filter", defaults.filter, file_source
+        ),
+        scale_mode=_resolve_enum(
+            scale_mode,
+            table,
+            ScaleMode,
+            "scale_mode",
+            "--scale-mode",
+            defaults.scale_mode,
+            file_source,
+        ),
+        aspect=_resolve_enum(
+            aspect, table, AspectMode, "aspect", "--aspect", defaults.aspect, file_source
+        ),
+        crop=_resolve_enum(crop, table, CropMode, "crop", "--crop", defaults.crop, file_source),
     )
-    return DisplaySettings(scale=resolved_scale, filter=resolved_filter)

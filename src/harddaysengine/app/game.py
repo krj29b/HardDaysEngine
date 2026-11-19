@@ -55,7 +55,6 @@ from harddaysengine.assets.sound_rules import parse_sound_rules
 from harddaysengine.assets.village_data import parse_village_rules
 from harddaysengine.render.presentation import DisplaySettings
 from harddaysengine.render.renderer import (
-    CANVAS_HEIGHT,
     CANVAS_WIDTH,
     PLAYFIELD_HEIGHT,
     HardDaysRenderer,
@@ -68,6 +67,7 @@ from harddaysengine.render.scene import (
     default_bitmap_font,
     palette_fx_to_rgb,
 )
+from harddaysengine.render.viewport import initial_window_size
 from harddaysengine.sim.actor import Actor
 from harddaysengine.sim.ai_map import computer_frame
 from harddaysengine.sim.dice_house import DiceEngine, DiceWorld, can_enter
@@ -2539,8 +2539,7 @@ def run_game_window(
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
-    win_w = CANVAS_WIDTH * settings.scale
-    win_h = CANVAS_HEIGHT * settings.scale
+    win_w, win_h = initial_window_size(settings)
     pygame.display.set_mode((win_w, win_h), pygame.OPENGL | pygame.DOUBLEBUF | pygame.RESIZABLE)
 
     ctx = moderngl.create_context(require=330)
@@ -2567,7 +2566,8 @@ def run_game_window(
             )
             cur_w, cur_h = pygame.display.get_window_size()
             session.render_to_scene(scene_renderer, font)
-            base_renderer.present_to_screen((0, 0, cur_w, cur_h), scanlines=settings.scanlines)
+            if cur_w > 0 and cur_h > 0:
+                base_renderer.present_to_screen((0, 0, cur_w, cur_h), settings=settings)
             pygame.display.set_caption(
                 f"HardDaysEngine | {session.scene.name} | {session.last_status}"
             )

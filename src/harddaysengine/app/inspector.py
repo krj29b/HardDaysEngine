@@ -27,7 +27,9 @@ from harddaysengine.assets.picture import (
     decode_picture,
     decode_picture_pack,
 )
-from harddaysengine.render.renderer import CANVAS_HEIGHT, CANVAS_WIDTH, HardDaysRenderer
+from harddaysengine.render.presentation import DisplaySettings
+from harddaysengine.render.renderer import HardDaysRenderer
+from harddaysengine.render.viewport import initial_window_size
 
 if TYPE_CHECKING:
     import numpy as np
@@ -385,27 +387,40 @@ def _pump_events(state: InspectorState, renderer: HardDaysRenderer) -> bool:
     return True
 
 
+def _prepare_inspector_state(
+    disk_set: DiskSet,
+    display: DisplaySettings | None,
+    cel_name: str | None,
+    background_name: str | None,
+) -> InspectorState:
+    state = build_inspector_state(disk_set)
+    if display is not None:
+        state.scanlines = display.scanlines
+    if cel_name is not None:
+        state.select_cel_by_name(cel_name)
+    if background_name is not None:
+        state.select_background_by_name(background_name)
+    return state
+
+
 def run_inspector_window(
     disk_set: DiskSet,
     *,
     scale: int = 3,
+    display: DisplaySettings | None = None,
     cel_name: str | None = None,
     background_name: str | None = None,
     max_frames: int | None = None,
 ) -> int:
     """Open the interactive pygame-ce + ModernGL 50 Hz Asset & Hitbox Inspector window."""
-    state = build_inspector_state(disk_set)
-    if cel_name is not None:
-        state.select_cel_by_name(cel_name)
-    if background_name is not None:
-        state.select_background_by_name(background_name)
+    settings = display if display is not None else DisplaySettings(scale=max(1, scale))
+    state = _prepare_inspector_state(disk_set, display, cel_name, background_name)
 
     pygame.init()
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
-    win_w = CANVAS_WIDTH * max(1, scale)
-    win_h = CANVAS_HEIGHT * max(1, scale)
+    win_w, win_h = initial_window_size(settings)
     pygame.display.set_mode((win_w, win_h), pygame.OPENGL | pygame.DOUBLEBUF | pygame.RESIZABLE)
 
     ctx = moderngl.create_context(require=330)
@@ -432,7 +447,12 @@ def run_inspector_window(
                 hit_frame=state.current_hit_frame,
                 show_overlay=state.show_overlay,
             )
-            renderer.present_to_screen((0, 0, cur_w, cur_h), scanlines=state.scanlines)
+            if cur_w > 0 and cur_h > 0:
+                renderer.present_to_screen(
+                    (0, 0, cur_w, cur_h),
+                    settings=settings,
+                    scanlines=state.scanlines,
+                )
             pygame.display.set_caption(state.status_title())
             pygame.display.flip()
 

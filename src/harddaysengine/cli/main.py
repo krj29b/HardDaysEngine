@@ -17,7 +17,7 @@ from harddaysengine.app.config import (
 from harddaysengine.app.game import run_game_window, run_headless_session
 from harddaysengine.cli.extract import run_extraction
 from harddaysengine.cli.inspect_assets import run_inspector_cli
-from harddaysengine.render.presentation import FilterPreset
+from harddaysengine.render.presentation import AspectMode, CropMode, FilterPreset, ScaleMode
 from harddaysengine.sim.rng import DEFAULT_SEED
 
 if TYPE_CHECKING:
@@ -84,6 +84,24 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[preset.value for preset in FilterPreset],
         default=None,
         help="presentation preset (default: [display] filter or faithful)",
+    )
+    parser.add_argument(
+        "--scale-mode",
+        choices=[mode.value for mode in ScaleMode],
+        default=None,
+        help="viewport scaling mode (default: [display] scale_mode or integer)",
+    )
+    parser.add_argument(
+        "--aspect",
+        choices=[mode.value for mode in AspectMode],
+        default=None,
+        help="source pixel aspect ratio (default: [display] aspect or square)",
+    )
+    parser.add_argument(
+        "--crop",
+        choices=[mode.value for mode in CropMode],
+        default=None,
+        help="source canvas crop (default: [display] crop or full)",
     )
     parser.add_argument(
         "--headless-frames",
@@ -159,7 +177,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             default=Path("disks"),
         )
         display = resolve_display_settings(
-            Path(args.config), scale=args.scale, filter_name=args.filter
+            Path(args.config),
+            scale=args.scale,
+            filter_name=args.filter,
+            scale_mode=args.scale_mode,
+            aspect=args.aspect,
+            crop=args.crop,
         )
     except ConfigError as exc:
         parser.error(str(exc))
@@ -172,7 +195,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             adf_dir,
             cel_name=args.cel,
             background_name=args.background,
-            scale=display.scale,
+            display=display,
             headless_frames=args.headless_frames,
             screenshot=args.screenshot,
         )

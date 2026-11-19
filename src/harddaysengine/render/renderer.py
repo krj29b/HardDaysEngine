@@ -14,6 +14,15 @@ from harddaysengine.render.overlay import (
     build_frame_overlay,
     pack_overlay_vertex_array,
 )
+from harddaysengine.render.presentation import DisplaySettings
+from harddaysengine.render.viewport import (
+    CANVAS_HEIGHT as CANVAS_HEIGHT,
+    CANVAS_WIDTH as CANVAS_WIDTH,
+    PLAYFIELD_HEIGHT as PLAYFIELD_HEIGHT,
+    PLAYFIELD_Y_OFFSET as PLAYFIELD_Y_OFFSET,
+    PresentationViewport,
+    compute_viewport,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -21,10 +30,6 @@ if TYPE_CHECKING:
     from harddaysengine.assets.cel import CelFrame
     from harddaysengine.assets.hit import HitFrame
 
-CANVAS_WIDTH = 320
-CANVAS_HEIGHT = 256
-PLAYFIELD_HEIGHT = 200
-PLAYFIELD_Y_OFFSET = 28  # Centers 320x200 playfield inside 320x256 PAL canvas
 MAX_OVERLAY_LINES = 2048
 
 _INDEXED_VERT = """
@@ -75,7 +80,7 @@ void main() {
 }
 """
 
-_CRT_VERT = """
+_PRESENT_VERT = """
 #version 330 core
 in vec2 in_pos;
 in vec2 in_uv;
@@ -86,17 +91,47 @@ void main() {
 }
 """
 
-_CRT_FRAG = """
+_PRESENT_FRAG = """
 #version 330 core
 uniform sampler2D u_canvas_tex;
+uniform vec2 u_src_origin;
+uniform vec2 u_src_size;
+uniform ivec2 u_axis_mode;
+uniform vec2 u_prescale;
 uniform int u_scanlines;
+uniform float u_dest_top;
+uniform float u_scale_y;
 in vec2 v_uv;
 out vec4 f_color;
+
+float sample_axis(float p, float src_dim, int mode, float prescale) {
+    float coord;
+    if (mode == 0) {
+        coord = floor(p) + 0.5;
+    } else if (mode == 2) {
+        float rel = p - 0.5;
+        float base = floor(rel);
+        float f = clamp((rel - base - 0.5) * prescale + 0.5, 0.0, 1.0);
+        coord = base + 0.5 + f;
+    } else {
+        coord = p;
+    }
+    return clamp(coord, 0.5, src_dim - 0.5);
+}
+
 void main() {
-    vec4 col = texture(u_canvas_tex, v_uv);
+    vec2 p = vec2(v_uv.x, 1.0 - v_uv.y) * u_src_size;
+    float sx = sample_axis(p.x, u_src_size.x, u_axis_mode.x, u_prescale.x);
+    float sy = sample_axis(p.y, u_src_size.y, u_axis_mode.y, u_prescale.y);
+    vec2 canvas_uv = vec2(
+        (u_src_origin.x + sx) / 320.0,
+        1.0 - (u_src_origin.y + sy) / 256.0
+    );
+    vec4 col = texture(u_canvas_tex, canvas_uv);
     if (u_scanlines == 1) {
-        float row_phase = fract(v_uv.y * 256.0);
-        float scan = (row_phase < 0.5) ? 1.0 : 0.82;
+        float local_y = u_dest_top - gl_FragCoord.y;
+        float row_phase = fract(local_y / u_scale_y);
+        float scan = (row_phase < 0.49999) ? 1.0 : 0.82;
         col.rgb *= scan;
     }
     f_color = vec4(col.rgb, 1.0);
@@ -105,6 +140,24 @@ void main() {
 
 
 def _set_uniform_int(prog: moderngl.Program, name: str, value: int) -> None:
+    member = prog[name]
+    if isinstance(member, moderngl.Uniform):
+        member.value = value
+
+
+def _set_uniform_float(prog: moderngl.Program, name: str, value: float) -> None:
+    member = prog[name]
+    if isinstance(member, moderngl.Uniform):
+        member.value = value
+
+
+def _set_uniform_vec2(prog: moderngl.Program, name: str, value: tuple[float, float]) -> None:
+    member = prog[name]
+    if isinstance(member, moderngl.Uniform):
+        member.value = value
+
+
+def _set_uniform_ivec2(prog: moderngl.Program, name: str, value: tuple[int, int]) -> None:
     member = prog[name]
     if isinstance(member, moderngl.Uniform):
         member.value = value
@@ -142,6 +195,8 @@ class HardDaysRenderer:
         self.ctx = ctx
         self._canvas_tex = ctx.texture((CANVAS_WIDTH, CANVAS_HEIGHT), 4)
         self._canvas_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        self._canvas_tex.repeat_x = False
+        self._canvas_tex.repeat_y = False
         self.canvas_fbo = ctx.framebuffer(color_attachments=[self._canvas_tex])
 
         self._palette_tex = ctx.texture((32, 1), 4)
@@ -176,7 +231,7 @@ class HardDaysRenderer:
             [(self._line_vbo, "2f 4f", "in_pos", "in_color")],
         )
 
-        self._crt_prog = ctx.program(vertex_shader=_CRT_VERT, fragment_shader=_CRT_FRAG)
+        self._crt_prog = ctx.program(vertex_shader=_PRESENT_VERT, fragment_shader=_PRESENT_FRAG)
         _set_uniform_int(self._crt_prog, "u_canvas_tex", 0)
         fs_verts = np.array(
             [
@@ -277,19 +332,64 @@ class HardDaysRenderer:
 
         return lines
 
+    def present_to_framebuffer(
+        self,
+        target: moderngl.Framebuffer,
+        window_size: tuple[int, int],
+        *,
+        settings: DisplaySettings | None = None,
+        scanlines: bool | None = None,
+    ) -> PresentationViewport:
+        """Present the canvas into ``target`` with letterbox, scaling, and scanlines (§13)."""
+        resolved = settings if settings is not None else DisplaySettings()
+        use_scanlines = resolved.scanlines if scanlines is None else scanlines
+        win_w, win_h = window_size
+        pv = compute_viewport(
+            win_w,
+            win_h,
+            crop=resolved.crop,
+            aspect=resolved.aspect,
+            scale_mode=resolved.scale_mode,
+        )
+
+        target.use()
+        self.ctx.viewport = (0, 0, win_w, win_h)
+        self.ctx.clear(0.0, 0.0, 0.0, 1.0)
+        self.ctx.viewport = pv.gl_viewport
+
+        gl_filter = moderngl.LINEAR if pv.uses_linear_filter else moderngl.NEAREST
+        self._canvas_tex.filter = (gl_filter, gl_filter)
+
+        _set_uniform_vec2(self._crt_prog, "u_src_origin", (float(pv.source.x), float(pv.source.y)))
+        _set_uniform_vec2(
+            self._crt_prog, "u_src_size", (float(pv.source.width), float(pv.source.height))
+        )
+        _set_uniform_ivec2(self._crt_prog, "u_axis_mode", (int(pv.sampling_x), int(pv.sampling_y)))
+        _set_uniform_vec2(
+            self._crt_prog, "u_prescale", (float(pv.prescale_x), float(pv.prescale_y))
+        )
+        _set_uniform_int(self._crt_prog, "u_scanlines", 1 if use_scanlines else 0)
+        _set_uniform_float(self._crt_prog, "u_dest_top", float(pv.dest_y + pv.dest_height))
+        _set_uniform_float(self._crt_prog, "u_scale_y", pv.scale_y)
+
+        self._canvas_tex.use(location=0)
+        self._fs_vao.render(moderngl.TRIANGLES)
+        return pv
+
     def present_to_screen(
         self,
         viewport: tuple[int, int, int, int],
         *,
-        scanlines: bool = True,
-    ) -> None:
-        """Blit the 320x256 virtual canvas to the default screen framebuffer with CRT scanlines."""
-        self.ctx.screen.use()
-        self.ctx.viewport = viewport
-        self.ctx.clear(0.0, 0.0, 0.0, 1.0)
-        _set_uniform_int(self._crt_prog, "u_scanlines", 1 if scanlines else 0)
-        self._canvas_tex.use(location=0)
-        self._fs_vao.render(moderngl.TRIANGLES)
+        settings: DisplaySettings | None = None,
+        scanlines: bool | None = None,
+    ) -> PresentationViewport:
+        """Blit the 320x256 virtual canvas to the default screen framebuffer (§13.2-§13.3)."""
+        return self.present_to_framebuffer(
+            self.ctx.screen,
+            (viewport[2], viewport[3]),
+            settings=settings,
+            scanlines=scanlines,
+        )
 
     def read_canvas_rgba(self) -> npt.NDArray[np.uint8]:
         """Read back the 320x256 virtual canvas FBO as a top-down (256, 320, 4) uint8 RGBA array."""
