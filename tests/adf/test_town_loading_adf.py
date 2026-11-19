@@ -34,7 +34,10 @@ def test_welcome_matches_an_independent_linked_record_walk(adf_dir: Path, waterd
     while True:
         text, x, y, style, next_record = struct.unpack_from(">IHHHI", data, cursor)
         target = name if cursor == cell else text
-        expected.append((data[target : data.index(0, target)].decode("ascii"), x, y, style))
+        bold_style = int.from_bytes(code[0x9352:0x9354], "big")
+        expected.append(
+            (data[target : data.index(0, target)].decode("ascii"), x, y, style | bold_style)
+        )
         if not next_record:
             break
         cursor = next_record
@@ -99,14 +102,14 @@ def test_welcome_pixels_use_loaded_font_and_message_palette_without_render_side_
     assert town.state.entry == TownEntry.WELCOME_OUT
     expected = town.message.pixels.copy()
     for line in town.welcome.lines:
-        assert line.style == 1
+        assert line.style == 9
         glyphs = [town.font.frames[town.char_map[ord(ch) - 32]] for ch in line.text]
-        x = (town.span - sum(g.meta.width for g in glyphs)) >> 1
+        x = (town.span - sum(g.meta.width - 3 for g in glyphs)) >> 1
         for glyph in glyphs:
             height, width = glyph.pixels.shape
             target = expected[line.y : line.y + height, x : x + width]
             target[glyph.pixels != 0] = glyph.pixels[glyph.pixels != 0]
-            x += width
+            x += width - 3
     rig = AuditRig(adf_dir)
     try:
         before = session.state_hash()

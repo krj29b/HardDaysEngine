@@ -960,3 +960,24 @@ the buffer tail (fresh tails are zero). The sheet buy/sell/coin events are text 
 they generate no invented audio. Original-module and relocated-bank traces are verified
 against independent disk reads and deterministic PCM hashes. Audio hardware is not needed
 for these checks.
+
+
+## ADR-049: Campaign acceptance records ordinary inputs from a fresh game
+**Status:** ACCEPTED (2026-11-19, T11.24)
+**Context:** Scene acceptance tests often set up their own records or invoke private callers;
+they cannot prove that selection, map navigation, combat, loot, shops and turns connect.
+**Decision:** Add a bounded audit driver using only public tick inputs from the title. Use
+four human ports to make turn hand-over explicit, the existing fight audit input policy,
+and pointer movement to original regions. Save its replay and checkpoint hashes under
+`build/`, replay from a fresh session, and review the rendered checkpoints. Record an actual
+numeric day/moon advance as well as round screens. Correct historical Phase 6–10 statuses
+with explicit replacement/survival notes rather than preserving obsolete DONE claims.
+**Consequences:** No cheats, fixture equipment or extracted data enter the recording. The
+route verifies integration, while subsystem tests retain responsibility for their full
+behaviour. The existing replay format and runtime architecture are unchanged.
+
+The campaign render check exposed legacy palette writes during menu rendering.
+Resolve the menu-return fade on the tick and present palettes without mutating
+simulation state; remove the render-dependent pending-fade flag. Include selection
+and input-edge state in hashes. The older town/Stonehenge bold-text follow-up uses
+checked runtime style bits on copied text records, as the existing Valley caller does.

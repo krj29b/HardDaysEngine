@@ -6,7 +6,7 @@ A clean-room Python 3.12+ reimplementation of the 1991 Amiga game *Moonstone: A 
 
 The codebase is organized into strict unidirectional layers (`cli -> app -> render -> assets -> sim`):
 
-- **Simulation (`src/harddaysengine/sim/`)**: deterministic 50 Hz integer/fixed-point kernel (persistent combat jobs and handlers, overworld, locations, palette FX, PRNG). No floats, no wall clock, no `random`, no I/O.
+- **Simulation (`src/harddaysengine/sim/`)**: deterministic 50 Hz integer/fixed-point kernel (persistent combat jobs and handlers, pixel map, turn scheduler, sheets and places, palette FX, PRNG). No floats, no wall clock, no `random`, no I/O.
 - **Assets (`src/harddaysengine/assets/`)**: reads original Amiga `.adf` disk images (OFS) at runtime, unpacks RNC1/LZSS streams, and decodes pictures, cels, `collide.hit` attack sets, `.t` arena layouts, `program`/`mog` hunk tables, and audio banks.
 - **Render (`src/harddaysengine/render/`)**: ModernGL (OpenGL 3.3 core) `320x256` virtual canvas, indexed palette textures, optional CRT post-process, and debug hitbox overlay.
 - **App & CLI (`src/harddaysengine/app/`, `src/harddaysengine/cli/`)**: `pygame-ce` window host, 50 Hz fixed-timestep loop, keyboard/gamepad input, audio mixer, and CLI entry points.
@@ -36,19 +36,30 @@ Useful CLI flags:
 - `--extract-assets`: unpack ADF assets into `--output-dir` (default `./build/assets`) with `manifest.json`
 - `--headless-frames <N>`: run `N` 50 Hz ticks on a standalone OpenGL 3.3 context without opening a window
 
-### Default Player 1 Controls
+### Controls
 
-- **Move / Navigate**: Arrow keys (`Left` / `Right` / `Up` / `Down`)
-- **Attack / Fire**: `Space`; combine with a direction for strikes, blocks and dagger throws
-- **Confirm / Select**: `Enter`
-- **Status on the map**: `Left Ctrl`
-- **End turn on the map**: `Tab`
-- **Pause**: `P`
+At the title, press Enter to open the menu. Up/Down selects a row; Left/Right on the
+player-count row chooses 1–4 humans. Select Start, then choose portraits with Left/Right
+and confirm each with Enter. Keyboard slots follow portrait selection order.
 
-Practice uses two human knights; player 2 moves with `WASD` and fires with `F`.
-Combat currently supports the three Trogg variants, Ratmen and human knight duels. Other creature
-handlers, complete campaign fight setup and loot screens are still being migrated; see
-[docs/PROGRESS.md](docs/PROGRESS.md). Combat requires the original disks.
+| Context | Player 1 keys |
+|---|---|
+| Move on the map / move a sheet or town pointer | Arrow keys |
+| Enter a nearby place or lair / select a pointer region | Enter |
+| Choose a row when several map destinations overlap | 1–9 |
+| Status on the map | Space or Left Ctrl |
+| End the current map turn | E or Tab |
+| Fight | Arrows + Space; direction selects the sword move, guard or dagger throw |
+| Pause map or combat | P |
+| Continue a message or Next Day | Press and release Enter or Space |
+| Leave a sheet or town | Move the pointer to its close/Exit region and confirm |
+| Quit the campaign to farewell on the map | Q |
+
+Player 2 uses WASD/F, player 3 IJKL/U, and player 4 the numeric keypad/Keypad 0 for
+movement/fire. Gamepads use the directional pad or left stick and button 0 for fire.
+Practice uses two human knights. All nine creature handlers, loot, shops, services,
+place callers and the original ending are implemented; combat requires the original disks.
+See [docs/PROGRESS.md](docs/PROGRESS.md) for acceptance evidence and documented deviations.
 
 ## Development & Verification
 
@@ -57,7 +68,16 @@ uv run python scripts/quality_gate.py    # ruff format/lint, mypy --strict, impo
 uv run pytest -m "not adf and not gl"    # unit tests needing neither disks nor OpenGL
 uv run pytest -m adf                     # integration tests against your local ./disks/*.adf
 uv run pytest -m gl                      # ModernGL rendering tests
+uv run python scripts/verify_campaign.py # input-only campaign replay + reviewed checkpoints
 ```
+
+The campaign command writes `build/campaign/replay.json`, `verification.json` (checkpoint
+and final SHA-256 state hashes), and `campaign.png`. It selects four human knights, walks
+into a lair, wins with starting equipment, takes loot, buys a potion in Highwood, and advances
+the day and moon. It replays the saved inputs in a fresh session and verifies every checkpoint;
+rendering must leave those hashes unchanged. This is one integration route, alongside the
+separate creature, place, ending and audio tests. Generated game-derived files stay in `build/`.
+Use `--adf-dir <path>` or `--out-dir <path>` to change the command's paths.
 
 See [AGENTS.md](AGENTS.md) for contributor/agent rules and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/DECISIONS.md](docs/DECISIONS.md), and [docs/PROGRESS.md](docs/PROGRESS.md) for technical documentation.
 

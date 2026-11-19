@@ -1,6 +1,6 @@
 # Progress Tracker
 
-Statuses: `TODO` · `IN PROGRESS (<agent>/<date>)` · `DONE` · `BLOCKED (<reason>)`
+Statuses: `TODO` · `IN PROGRESS (<agent>/<date>)` · `DONE` · `BLOCKED (<reason>)` · `SUPERSEDED`
 Rules: claim a task before you start it. When you finish, set it to `DONE` and add notes (gotchas,
 deviations, follow-ups). Task details and acceptance criteria are in `IMPLEMENTATION_PLAN.md` §5
 and the Remediation Plan in `docs/PLAYABILITY_AUDIT.md`.
@@ -36,20 +36,20 @@ and the Remediation Plan in `docs/PLAYABILITY_AUDIT.md`.
 | T5.2 | Runtime executable table decoders | T2.5, T3.5 | DONE | `assets/tables.py`. |
 | T5.3 | 2.5D depth & hitbox/hurtbox resolver | T3.4, T5.1 | DONE | `sim/collision.py`. |
 | T5.4 | 50 Hz PAL palette & VBL effect sim | T2.8, T5.1 | DONE | `sim/palette_fx.py`. |
-| T6.1 | Combat animation & bytecode VM | T5.1, T5.2 | DONE | `sim/combat_vm.py` (real opcode set present; wiring/composition still incomplete). |
-| T6.2 | Knight combat controller & equipment | T5.3, T6.1 | DONE | `sim/knight_combat.py`. |
-| T6.3 | Monster AI state machines & Lairs | T5.2, T5.3, T6.1 | DONE | `sim/monster_ai.py`. |
-| T7.1 | Overworld map, turn order & moon cycle | T5.1, T5.2 | DONE | `sim/overworld.py`. |
-| T7.2 | Sacred places, towns & shops | T7.1 | DONE | `sim/locations.py`. |
-| T8.1 | Paula 4-voice VBL synth & 8SVX mixer | T3.5, T5.2 | DONE | `app/audio.py`. |
-| T8.2 | Multi-sprite 2.5D scene renderer & HUD | T4.1, T5.4, T6.1 | DONE | `render/scene.py`. |
-| T8.3 | Input router, scene host & playable CLI | T6.2, T6.3, T7.2, T8.1, T8.2 | DONE | `app/input.py`, `app/game.py`, CLI. |
-| T9.1 | Authentic overworld graph & road/lair alignment | T5.2, T7.1, T8.3 | DONE | Graph helpers exist; real-disk node count / moves_per_turn still wrong (see T10.5). |
-| T9.2 | Edge-triggered overworld controls, node menu & New Day | T9.1 | DONE | STATUS / NEW_DAY / LOCATION wiring. |
-| T9.3 | Interactive location & status screens | T7.2, T9.2 | DONE | `app/location_screens.py` (sub-location contrast still broken — T10.7). |
-| T9.4 | `mog`-driven combat encounters, scripts & hitboxes | T5.3, T6.1, T6.3, T8.3 | DONE | Bridge exists; script pointer resolution & multi-part composition incomplete (T10.1–T10.4). |
-| T9.5 | Combat projectiles, gore, SFX & Practice loop | T9.4 | DONE | Daggers, gore, SFX, Practice loop. |
-| T9.6 | Palette FX, scene music switching & end-screen loop | T5.4, T8.1, T9.3, T9.5 | DONE | Fades/music/end screens (entry fade timing still off — T10.8). |
+| T6.1 | Combat animation & bytecode VM | T5.1, T5.2 | SUPERSEDED | Old `sim/combat_vm.py` deleted. Persistent original jobs/interpreter: T11.8a/b; ADR-009/011. |
+| T6.2 | Knight combat controller & equipment | T5.3, T6.1 | SUPERSEDED | Old `sim/knight_combat.py` deleted. Runtime original action/damage rules: T11.9. |
+| T6.3 | Monster AI state machines & Lairs | T5.2, T5.3, T6.1 | SUPERSEDED | Old `sim/monster_ai.py` deleted. Nine original handlers and encounters: T11.10a–i / T11.11. |
+| T7.1 | Overworld map, turn order & moon cycle | T5.1, T5.2 | SUPERSEDED | Graph implementation replaced in the same module by pixel movement, original PRNG, scheduler and map AI: T11.12–14. |
+| T7.2 | Sacred places, towns & shops | T7.1 | SUPERSEDED | Invented `sim/locations.py` deleted. Original sheets and retained place callers: T11.15–22. |
+| T8.1 | Paula 4-voice VBL synth & 8SVX mixer | T3.5, T5.2 | SUPERSEDED | Generic mixer/sequencer replaced by original synth, event-level Paula, runtime banks and program player: T11.23a–c. |
+| T8.2 | Multi-sprite 2.5D scene renderer & HUD | T4.1, T5.4, T6.1 | DONE | ModernGL scene renderer, indexed canvas, fonts and top-left sprite support survive. Combat uses ordered retained draw lists (T11.8b1); invented combat HUD removed (T11.11). |
+| T8.3 | Input router, scene host & playable CLI | T6.2, T6.3, T7.2, T8.1, T8.2 | DONE | Input serialization/router, 50 Hz host and CLI survive. Gameplay internals replaced in Phase 11; continuous real-disk input-only campaign acceptance: T11.24. |
+| T9.1 | Authentic overworld graph & road/lair alignment | T5.2, T7.1, T8.3 | SUPERSEDED | No original road graph exists. Graph/helpers removed; pixel map and runtime proximity: T11.12. |
+| T9.2 | Edge-triggered overworld controls, node menu & New Day | T9.1 | SUPERSEDED | Old graph controls/calendar replaced by original key/menu and turn scheduler: T11.12/13; status caller: T11.15. |
+| T9.3 | Interactive location & status screens | T7.2, T9.2 | SUPERSEDED | Old `app/location_screens.py` deleted. Original sheets, town buttons and animated services: T11.15–21. |
+| T9.4 | `mog`-driven combat encounters, scripts & hitboxes | T5.3, T6.1, T6.3, T8.3 | SUPERSEDED | Old `app/combat_bridge.py` deleted. Persistent jobs, exact draw order, original contact and handlers: T11.7–11. |
+| T9.5 | Combat projectiles, gore, SFX & Practice loop | T9.4 | SUPERSEDED | Original dagger jobs, script spawns, practice/outcomes and sound requests replace the prior model: T11.9/11/23. |
+| T9.6 | Palette FX, scene music switching & end-screen loop | T5.4, T8.1, T9.3, T9.5 | SUPERSEDED | Palette FX primitive survives; original scene continuations, ending and music replace old switching: T11.13/16–23. |
 
 ## Phase 10 — Fidelity & Playability Remediation (post-Audit v2)
 
@@ -57,21 +57,22 @@ Source of truth: `docs/PLAYABILITY_AUDIT.md` (Remediation Plan v2). Goal: make t
 
 | ID | Task | Deps | Status | Notes |
 |---|---|---|---|---|
-| T10.1 | Real `mog` fight-script pointer tables | T5.2, T6.1, T9.4 | DONE | Verified `KnightScriptTables` (`idle=0x1064`, `alt=0x1080`, 9 `action_scripts`, 9 `hurt_scripts`, `walk_scripts`) and 11 `MonsterScriptTables` decoded from `mog` `S_0`/`S_1`/`S_4`; all 12 `KnightAction`s execute real `S_4` scripts via `combat_bridge.compose_knight_pieces` & `GameSession` with multi-part draw lists (`test_tables.py`, `test_combat_bridge.py`, `test_playability_v2.py`: 34 passed). |
-| T10.2 | Multi-part knight & monster composition | T10.1, T8.2 | DONE | `compose_knight_pieces` (`KN1.ob..KN4.ob`) + multi-slot fallback when `mog_s4=None` (`_fallback_multipart_knight_pieces`), and `compose_monster_pieces` + `get_monster_cels` (`scene_assets.py`) assemble layered bodies for knights and major monsters. |
-| T10.3 | Top-left sprite anchor math | T4.1, T10.2 | DONE | Added `top_left: bool = False` to `SceneSprite`, `compute_sprite_draw_origin`, `HardDaysRenderer.render_to_canvas`, and `cel_screen_origin`; fight-script draws position at top-left `(X+dx, Z-alt+dy)` (`tests/gl/test_scene_gl.py`, `test_renderer_gl.py`). |
-| T10.4 | Melee hit detection & winnable combat | T5.3, T10.2, T10.3 | DONE | Restricted `kn4` `collide.hit` matching to `cel_slot == 3` (`KN4.ob`) `DRAW_FLAG_ATTACK` pieces; kept `base.defense` in `params_from_creature_node`; verified Trogg defeat on real disks (`test_adf_knight_attacks_and_defeats_trogg`). |
-| T10.5 | Real-disk overworld graph & moves_per_turn | T7.1, T9.1 | DONE | `build_overworld_graph` populates canonical `ROAD` nodes alongside `mog` `S_2` sites + 4 lairs (`35` nodes) with `moves_per_turn = 3`; `test_adf_overworld_3_moves_and_stay_in_overworld` passes. |
-| T10.6 | Knight class & creature combat palettes | T5.4, T9.6 | DONE | `_combat_palette` patches indices `6..8` for active `KnightId` class colors and `9..15` for creature scene colors (`15` = blood red); `_overworld_palette` replaces `test[8]` magenta index `31` with a grayscale highlight matching `mi.c` frames (`test_adf_overworld_marker_frames_and_highlight_palette`). |
-| T10.7 | Town sub-location backdrops & text contrast | T9.3 | DONE | `location_backdrop_names(..., parent_location=...)` preserves `WaterDeep.PIV` for Waterdeep sub-menus; `render_location_menu` draws a dark filled panel behind sub-menu items (`test_waterdeep_sublocation_preserves_backdrop`). |
-| T10.8 | Scene-entry fade-in timing | T5.4, T9.6 | DONE | `_begin_fade_in` starts `palette_fx.fade_in` on scene transition and advances in `step_tick`, eliminating pitch-black first frames (`test_adf_blue_knight_combat_palette_and_fade_in`). |
-| T10.9 | Playability verification suite | T10.1–T10.8 | DONE | Verified via `test_playability_v2.py` (`13` synthetic + ADF checks), `scripts/quality_gate.py` (`7/7` gates, `238 passed`), `pytest -m adf` (`15 passed`), `pytest -m gl` (`8 passed`), and documented in `docs/PLAYABILITY_AUDIT.md` §5. |
+| T10.1 | Real `mog` fight-script pointer tables | T5.2, T6.1, T9.4 | SUPERSEDED | Old KnightScriptTables / MonsterScriptTables and bridge tests removed. Checked runtime definitions/script tables: T11.7/9/10. |
+| T10.2 | Multi-part knight & monster composition | T10.1, T8.2 | SUPERSEDED | Replay composition and slot fallback removed. Persistent jobs and exact loaded-cel lookup: T11.8a/b. |
+| T10.3 | Top-left sprite anchor math | T4.1, T10.2 | DONE | Top-left SceneSprite origin support and renderer tests survive. Combat projection/mirroring now belongs to original job draws (T11.8a/b), not the deleted bridge. |
+| T10.4 | Melee hit detection & winnable combat | T5.3, T10.2, T10.3 | SUPERSEDED | Old-model hit test and win fixture removed. Original attack/hurt lists, contact and action damage: T11.8a/9/10. |
+| T10.5 | Real-disk overworld graph & moves_per_turn | T7.1, T9.1 | SUPERSEDED | Canonical road sites, 35-node graph and three-hop budget were invented and removed. Runtime 24 lairs and pixel/endurance movement: T11.12. |
+| T10.6 | Knight class & creature combat palettes | T5.4, T9.6 | SUPERSEDED | Literal palette patches replaced by checked executable palette rows and original PAL map effects: T11.6/12. |
+| T10.7 | Town sub-location backdrops & text contrast | T9.3 | SUPERSEDED | Text-menu backdrop/contrast workaround deleted with the old location presenter. Original town/child screens: T11.16–21. |
+| T10.8 | Scene-entry fade-in timing | T5.4, T9.6 | SUPERSEDED | Old generic render-triggered fade replaced by original caller PAL waits/fades; T11.24 removes the remaining menu render mutation. |
+| T10.9 | Playability verification suite | T10.1–T10.8 | SUPERSEDED | Old test_playability_v2 suite asserted invented models and was removed. Independent subsystem checks plus continuous campaign replay: Phase 11 / T11.24; old green counts are not current acceptance evidence. |
 
 ## Phase 11 — Original-model rebuild (post-Audit v3)
 
 Source of truth: `docs/PLAYABILITY_AUDIT.md` §6 and `IMPLEMENTATION_PLAN.md` Phase 11. ADR-009 is
-ACCEPTED: the six invented modules are replaced, not patched. The `DONE` rows of Phases 6 to 10 above describe
-code that passes its tests but does not reproduce the original; T11.24 corrects them.
+ACCEPTED: the six invented modules were replaced, not patched. Phases 6–10 above now distinguish
+surviving infrastructure (`DONE`) from removed or rewritten models (`SUPERSEDED`), with their
+Phase 11 replacements. Historical session logs describe their date, not current acceptance.
 
 | ID | Task | Deps | Status | Notes |
 |---|---|---|---|---|
@@ -131,7 +132,7 @@ code that passes its tests but does not reproduce the original; T11.24 corrects 
 | T11.23a | Fight sound requests and pickers | T11.8a | DONE | Claude/2026-11-18. Spec §10.32 / ADR-035. `sim/sound.py` (ordered `SoundRequest` play/fixed/release, picker steps, session `SoundCells`) and `assets/sound_rules.py` (21 sound-only routines in hunks 0, 16 and 40, every instruction, relocated front-end target and immediate checked). Pickers now make their original PRNG draws; Drake, Guardian and Dragon real-disk fights run with no skipped routines. Script `$A4`, handler and routine sounds share one ordered list; the Dragon/Guardian fixed-channel sounds moved out of their rules; `guardian_1` renamed `guardian_fixed_sound`. Gotcha: the picker cells persist for the session in `FightLoader` (like flyer/drake cells), so replays from one loader must restore them. Host still sends bare ids to the legacy mixer (a release plays its silence id) until T11.23b. |
 | T11.23b | Sound front end and exact synth sequencer | T11.23a | DONE | Claude/2026-11-18. Spec §6.2 rewritten (§6.1 loop-word sign and pitch addressing corrected) / ADR-047. `assets/synth_data.py` (hunk-44 and hunk-16 code CRC gates; tables, cells and operands at checked positions; instrument count from the terminator row), `app/synth.py` (hunk-44 sequencer in the original write order: start with the channel-1 DMA quirk, every command, tremolo/vibrato stages, envelope, register pass, interrupt routine, fade), `app/sound_front.py` (busy byte, cursor, fixed/release/stop all), `app/paula.py` (event-level Paula: DMA edges latched per CPU batch, reloads and interrupts in time order, numpy rendering per channel, periodic shortcut for interrupt-free loops). `AudioEngine` runs tick, then queued requests, then render; the host passes `SoundRequest`s unchanged. `PaulaSynthMixer`, the legacy `tables.py` synth tables and the invented combat SFX aliases are removed. Real-disk test runs all 167 sequences on all channels with identical replays and cross-checks the release masks with the T11.23a sound rules. The new Paula test found an unwrap-before-render bug, now fixed. Gotchas: ten bank instruments loop (seven from a loop offset); `$88` restarts the started sequence, not a jumped-to one. Bank instruments stay silent (raw offsets) until c, so most effects and all area music are silent for now. Full gate: 1676 passed, 52 GL deselected. No game data committed. |
 | T11.23c | Sample banks, music and noncombat sounds | T11.23b | DONE | Codex/2026-11-19. §6.2.10/6.3.1/6.3.2 / ADR-048. Checked bank loaders and symbolic relocation preserve five persistent slots, knight replacements and short DOS reads. Fight, wizard and ritual callers install their original banks. Map/Next Day direct starts and original sheet jingles use decoded requests; repeated bad jingles retain their eight-VBL separation. Buy/sell/coin events are text calls, not sounds. The original PAL program module player replaces generic music playback, using runtime period/vibrato tables and the original effect subset; headless and audible output share Paula. Original silent fades retain callers for 36 VBLs, drive attenuation/stop-all and enter replay hashes. Full gate: 1714 passed, 52 GL deselected; three focused GL smoke checks pass. Reviewed build/audit-sound/{services,dice,places}.png. No game data committed. |
-| T11.24 | Campaign verification & status correction | all | TODO | |
+| T11.24 | Campaign verification & status correction | all | DONE | Codex/2026-11-19. Spec §12.41 / ADR-049. Continuous input-only campaign from title/portrait selection: starting-equipment natural lair win, gold/item loot, Highwood market purchase and actual day/moon advance. Serialized replay matches all 11 checkpoint hashes over 1952 ticks; repeated rendering leaves each unchanged. scripts/verify_campaign.py writes replay, report and reviewed contact sheet under ignored build/campaign/. Removed menu render-time palette mutation; menu-return fades now advance on ticks, and selection/input latches enter session hashes. Closed older town/Stonehenge condensed-bold follow-up with checked runtime style bits and independent pixel/operand checks. README controls updated; Phase 6–10 superseded models distinguished from surviving infrastructure. Full gate: 1717 passed, 53 GL deselected; full GL suite: 53 passed. Reviewed build/campaign/campaign.png and build/audit-campaign/places.png. One integration route, not exhaustive hardware/full-campaign parity. No game data committed. |
 
 ## Session log
 
@@ -200,3 +201,5 @@ code that passes its tests but does not reproduce the original; T11.24 corrects 
 - 2026-11-18 · Claude · T11.23b done: §6.2 rewritten from the verified hunk-44/16 code; checked synth decoder, exact sequencer, front end and event-level Paula replace PaulaSynthMixer; ADR-047. Bank instruments stay silent until T11.23c relocates them. Full gate: 1676 passed.
 
 - 2026-11-19 · Codex · T11.23c and parent T11.23 done on Claude's completed sequencer. Runtime bank loader/relocation decoder, persistent PCM slots, original program module player and all scene sound/fade callers; §6.2.10/6.3.1/6.3.2, ADR-048. Independent bank operand/file reads, all-sequence PCM replay, both modules over 12000 VBLs, nine creature-type bank callers, natural wizard and ritual bank starts, startup ownership, silent return ordering and jingle timing verified. Full quality gate: 1714 passed, 52 GL deselected; three focused GL smoke checks pass. Reviewed build/audit-sound/{services,dice,places}.png. Gotchas: bank reads skip 32 bytes but request the file-size count, retaining short-read tails; program slides retain their upper word bits on underflow; shop/coin events print text. Regenerated stale uv tool launchers from cached packages after the checkout rename. Next eligible task: T11.24 campaign verification and status correction. No game data committed.
+
+- 2026-11-19 · Codex · T11.24 done: input-only real-disk campaign replay through selection, natural lair win/loot, town purchase and day/moon change; 1952 ticks and 11 serialized/replayed checkpoint hashes. Reviewed campaign and updated town contact sheets. Found and removed render-time menu palette writes; tick-driven menu fade regression covered. Corrected town/Stonehenge shared bold spacing, README controls and historical Phase 6–10 statuses. Full quality gate: 1717 passed, 53 GL deselected; full GL suite: 53 passed. Output remains under ignored build/. No game data committed. Phase 11 is complete; the acceptance route supplements the independent subsystem tests and documented deviations, without claiming exhaustive original-hardware parity.

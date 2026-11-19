@@ -5171,3 +5171,36 @@ it. Keep palette effects during blocking black tails, but allow combat's own
 warning/death palette to update while the fight is running. Exact synth wiring
 remains T11.23. The bounded explicit pair replaces dependence on stale original
 swap-register state on a no-fight return; no unrelated record is swapped.
+
+
+### 12.41 Campaign acceptance replay (T11.24)
+
+Verification drives `GameSession.step_tick` exclusively with serializable `InputFrame`s.
+Start at the title with seed `$2468ACE1` and four human ports; enter knight selection,
+pick all four portraits in their displayed order, walk the first knight to lair 19
+(zero-based), and use the existing ordinary fight audit controller through all natural
+waves and settlement. No actor, inventory, position, pool, outcome or pointer is patched.
+Take gold and an item through the loot regions, close the sheet, and continue the round.
+On the next first-knight turn walk to Highwood, select its market and purchase a healing
+potion at the decoded price through the original pointer regions. Close both callers.
+End turns through the first actual day/moon change (four round screens, §11.12), then
+acknowledge that screen with release/press/release and return to the map.
+
+Every wait and navigation loop is bounded and fails on an unexpected scene. Record all
+inputs with the existing replay format. Replaying the serialized recording in a fresh
+session must match checkpoint hashes, including the final state; rendering each checkpoint
+must leave its hash unchanged. The command writes inputs, hashes and a contact sheet only
+under ignored `build/`. Source contains route choices and inputs, never decoded game tables
+or disk-derived fixtures. This is one campaign integration route; it does not claim an
+exhaustive full-game or original-hardware equivalence test. Other places, all creature
+handlers, the ending and audio retain their separate acceptance tests.
+
+
+Campaign verification also closes the older-caller spacing follow-up in §12.38:
+town welcome and Stonehenge message lists use the same bold writer as Valley and
+meetings. Their decoded immutable TextLine copies now OR the checked `$9350`
+operand into their style, preserving the raw executable data. The town welcome
+pixel oracle independently centres and advances glyphs by width minus three.
+Menu palette rendering is read-only; the return-to-menu fade is initialized on
+the simulation tick. Selection, roster and input-edge latches participate in the
+session hash, so a rendered and an unrendered replay have identical checkpoints.

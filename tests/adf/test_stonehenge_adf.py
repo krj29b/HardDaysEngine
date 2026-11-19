@@ -72,6 +72,9 @@ def test_decoded_rules_match_independent_instruction_and_shade_reads(adf_dir: Pa
     exe = parse_hunk_executable("mog", DiskSet.from_directory(adf_dir).read_file("mog"))
     rules = parse_stone_rules(exe)
     code = exe.sections[0].data
+    bold_style = int.from_bytes(code[0x9352:0x9354], "big")
+    assert bold_style == 8
+    assert all(line.style & bold_style for line in (*rules.offer, *rules.quest, *rules.ritual_text))
 
     def word(pos: int) -> int:
         return int.from_bytes(code[pos : pos + 2], "big")

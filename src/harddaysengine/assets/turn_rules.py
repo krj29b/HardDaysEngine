@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from harddaysengine.assets.fight_defs import parse_fight_defs
@@ -65,6 +66,14 @@ def text_list(
 def _long_operand(mog: MogCode, pos: int, opcode: int) -> int:
     mog.expect(pos, (opcode,), "gift threshold")
     return mog.long(pos + 2)
+
+
+def bold_lines(mog: MogCode, lines: tuple[TextLine, ...]) -> tuple[TextLine, ...]:
+    """Apply the shared bold writer's forced style bit (ARCHITECTURE.md §12.38/41)."""
+    style = mog.operand(0x9350, 0x002A, "bold-font style", displacement=9)
+    if style != 8:
+        raise MogVersionError("mog: unexpected bold-font style")
+    return tuple(replace(line, style=line.style | style) for line in lines)
 
 
 def _gifts(mog: MogCode) -> GiftRules:

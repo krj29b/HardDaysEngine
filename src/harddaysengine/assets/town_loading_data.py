@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from harddaysengine.assets.fight_palette import MogVersionError
 from harddaysengine.assets.mog_code import MogCode, Pointer
 from harddaysengine.assets.town_data import _call, _string
-from harddaysengine.assets.turn_rules import text_list
+from harddaysengine.assets.turn_rules import bold_lines, text_list
 from harddaysengine.sim.town_types import TownWelcome
 
 if TYPE_CHECKING:
@@ -49,7 +49,7 @@ def _read_welcome(mog: MogCode, *, waterdeep: bool) -> TownWelcome:
     return TownWelcome(
         _string(mog, mog.lea(0x2BFA, 0x41F9, "message picture filename")),
         _string(mog, mog.lea(0x2C36, 0x41F9, "message font filename")),
-        lines,
+        bold_lines(mog, lines),
     )
 
 

@@ -255,7 +255,6 @@ class GameSession:
         self.palette_fx: PaletteFxState = PaletteFxState(
             _palette_to_rgb12(default_combat_palette())
         )
-        self._pending_fade_in: bool = False
         self.last_status: str = "PRESS ENTER TO BEGIN"
         self._map_key = 0
         self.map_runtime: MapRuntime | None = None
@@ -474,12 +473,22 @@ class GameSession:
                 return self._overworld_palette(map_pic.palette)
         return self._picture_target_palette("bg2.PIV")
 
-    def _begin_fade_in(self, target_palette: Sequence[RGBColor] | None = None) -> None:
-        if target_palette is None:
-            self._pending_fade_in = True
-            return
-        self._pending_fade_in = False
+    def _begin_fade_in(self, target_palette: Sequence[RGBColor]) -> None:
         self.palette_fx.fade_in(_palette_to_rgb12(target_palette), divisor=1, from_black=True)
+
+    def _menu_target_palette(self) -> tuple[RGBColor, ...]:
+        """Resolve the menu fade during the tick, independently of rendering (§12.41)."""
+        if self.asset_bundle is not None:
+            player = self.asset_bundle.get_intro_player()
+            if player is not None:
+                _, palette = player.build_main_menu(
+                    self.asset_bundle,
+                    self.selected_player_count,
+                    self.menu_cursor,
+                    gore_on=self.gore_enabled,
+                )
+                return palette
+        return self._picture_target_palette("ch.piv")
 
     def _enter_ending(self, request: EndingRequest) -> None:
         """Hand over to the program ending pass with the boot flags (§12.39.10)."""
@@ -855,7 +864,6 @@ class GameSession:
         screen.state.entry = TownEntry.MAP_OUT
         self.scene = GameScene.LOCATION
         self.last_status = screen.data.name
-        self._pending_fade_in = False
         self.palette_fx.set_palette(_palette_to_rgb12(map_palette))
         self.palette_fx.fade_out()
 
@@ -917,7 +925,6 @@ class GameSession:
         self.overworld.colors.active = False
         self._clear_map_jobs()
         self._map_key = 0
-        self._pending_fade_in = False
         self.scene = GameScene.MEETING
         self.palette_fx.set_palette(_palette_to_rgb12(palette))
         self._meeting_fade(screen, out=True)
@@ -1103,7 +1110,6 @@ class GameSession:
         self.overworld.colors.active = False
         self._clear_map_jobs()
         self._map_key = 0
-        self._pending_fade_in = False
         self.scene = GameScene.VALLEY
         self.last_status = "VALLEY OF THE GODS"
         self.palette_fx.set_palette(_palette_to_rgb12(palette))
@@ -1265,7 +1271,6 @@ class GameSession:
         self.overworld.colors.active = False
         self._clear_map_jobs()
         self._map_key = 0
-        self._pending_fade_in = False
         self.scene = GameScene.VILLAGE
         self.last_status = "HOME VILLAGE"
         self.palette_fx.set_palette(_palette_to_rgb12(palette))
@@ -1319,7 +1324,6 @@ class GameSession:
         self.overworld.colors.active = False
         self._clear_map_jobs()
         self._map_key = 0
-        self._pending_fade_in = False
         self.scene = GameScene.WIZARD
         self.last_status = "WIZARD"
         self.palette_fx.set_palette(_palette_to_rgb12(palette))
@@ -1831,7 +1835,7 @@ class GameSession:
             self._reset_campaign(self.selected_player_count)
             self.scene = GameScene.KNIGHT_SELECT
             self.last_status = "SELECT KNIGHTS"
-            self._pending_fade_in = True
+            self._begin_fade_in(self._menu_target_palette())
             self._play_title_music()
 
     def _arena_name_for_trigger(self, trigger: EncounterTrigger) -> str:
@@ -2135,6 +2139,23 @@ class GameSession:
             "tick": self.tick_count,
             "scene": int(self.scene),
             "paused": self.paused,
+            "selection": (
+                self.players,
+                self.selected_player_count,
+                self.menu_cursor,
+                self.gore_enabled,
+                self.practice_mode,
+                self.knight_pick_active,
+                self.knight_pick_slot,
+                self.knight_taken_mask,
+                self.picked_knights,
+            ),
+            "input_latches": (
+                self._menu_prev_dx,
+                self._menu_prev_dy,
+                self._menu_prev_fire,
+                self._end_prev_fire,
+            ),
             "world": world,
             "map_key": self._map_key,
             "calendar_phase": self._calendar_phase,
@@ -2151,7 +2172,6 @@ class GameSession:
             "dice": self.dice_screen.run.snapshot() if self.dice_screen else None,
             "last_sheet_item": self.last_sheet_item,
             "palette": self.palette_fx.snapshot(),
-            "pending_fade": self._pending_fade_in,
             "sound_fade": (self._sound_fade_ticks, self._sound_return),
             "map_jobs": self.map_runtime.snapshot() if self.map_runtime else None,
             "legacy": [asdict(self.knight_combat[kid]) for kid in KnightId],
@@ -2198,13 +2218,6 @@ class GameSession:
     def _apply_scene_palette(
         self, scene_renderer: SceneRenderer, base_palette: Sequence[RGBColor]
     ) -> None:
-        words = _palette_to_rgb12(base_palette)
-        if self._pending_fade_in:
-            self._pending_fade_in = False
-            self.palette_fx.fade_in(words, divisor=1, from_black=True)
-            self.palette_fx.step_vbl()
-        elif not self.palette_fx.is_fading and not self.palette_fx.is_flashing:
-            self.palette_fx.set_palette(words)
         if self.palette_fx.is_fading or self.palette_fx.is_flashing:
             scene_renderer.set_palette_fx(self.palette_fx.current_palette())
         else:

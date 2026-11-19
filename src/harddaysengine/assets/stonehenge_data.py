@@ -9,7 +9,7 @@ from harddaysengine.assets.fight_palette import MogVersionError
 from harddaysengine.assets.fight_program import fight_constants, script_image
 from harddaysengine.assets.mog_code import MogCode, Pointer
 from harddaysengine.assets.town_data import _call
-from harddaysengine.assets.turn_rules import text_list
+from harddaysengine.assets.turn_rules import bold_lines, text_list
 from harddaysengine.sim.sound import SoundKind, SoundRequest
 from harddaysengine.sim.stonehenge import RitualEngine, RitualRules, RitualSpawn, StoneRules
 
@@ -188,9 +188,9 @@ def _read_rules(mog: MogCode) -> StoneRules:
         _file(mog, mog.lea(0x2BFA, 0x41F9, "message picture")),
         _file(mog, mog.lea(0x2C36, 0x41F9, "message font")),
         recolor,
-        text_list(mog, offer, "Stonehenge offer", hunk=4),
-        text_list(mog, quest, "Stonehenge quest complete", hunk=4),
-        text_list(mog, ritual, "ritual message", hunk=42),
+        bold_lines(mog, text_list(mog, offer, "Stonehenge offer", hunk=4)),
+        bold_lines(mog, text_list(mog, quest, "Stonehenge quest complete", hunk=4)),
+        bold_lines(mog, text_list(mog, ritual, "ritual message", hunk=42)),
         _file(mog, mog.lea(0x18A4, 0x41F9, "ending executable")),
         _ritual(mog),
     )

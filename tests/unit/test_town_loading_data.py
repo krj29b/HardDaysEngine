@@ -12,7 +12,8 @@ from harddaysengine.assets.town_loading_data import _read_welcome, parse_town_we
 
 
 def _image() -> tuple[bytearray, bytearray, dict[int, tuple[int, ...]]]:
-    code, data = bytearray(0x3000), bytearray(512)
+    code, data = bytearray(0x9360), bytearray(512)
+    struct.pack_into(">HHH", code, 0x9350, 0x002A, 8, 9)
     relocs: dict[int, list[int]] = {0: [], 4: []}
     for start, name in ((0x2D96, 100), (0x2DD2, 120)):
         struct.pack_into(">HIIHIHI", code, start, 0x23FC, name, 14, 0x41F9, 0, 0x4EB9, 0x2FB4)
@@ -60,7 +61,7 @@ def test_each_loader_substitutes_only_its_name_without_changing_the_executable()
     first, second = (_read_welcome(mog, waterdeep=flag) for flag in (False, True))
     assert [row.text for row in first.lines] == ["Welcome fixture", "First"]
     assert [row.text for row in second.lines] == ["Welcome fixture", "Second"]
-    assert [(row.x, row.y, row.style) for row in second.lines] == [(5, 61, 1), (7, 79, 4)]
+    assert [(row.x, row.y, row.style) for row in second.lines] == [(5, 61, 9), (7, 79, 12)]
     assert (first.picture, first.font) == ("message.fixture", "font.fixture")
     assert mog.hunk_data(4) == original
     with pytest.raises(MogVersionError, match="unsupported version"):
@@ -77,6 +78,8 @@ def test_each_loader_substitutes_only_its_name_without_changing_the_executable()
         (0x2FCC, 0, "font slot"),
         (0x2FCE, 0, "active font"),
         (0x2DE0, 28, "disagree"),
+        (0x9350, 0, "bold-font style"),
+        (0x9352, 0, "bold-font style"),
     ),
 )
 def test_changed_instructions_and_destinations_fail(offset: int, value: int, message: str) -> None:

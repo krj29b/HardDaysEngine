@@ -299,6 +299,9 @@ def test_game_over_resets_to_menu_and_music() -> None:
     calls: list[str] = []
 
     class _FakeBundle:
+        def get_intro_player(self) -> None:
+            return None
+
         def get_map_rules(self) -> MapRules:
             return RULES
 
@@ -330,6 +333,10 @@ def test_game_over_resets_to_menu_and_music() -> None:
         assert session.scene == GameScene.KNIGHT_SELECT
         assert session.overworld.game_over is False
         assert "title" in calls
+        assert session.palette_fx.is_fading
+        palette = session.palette_fx.snapshot()
+        session.step_tick(_frame_p1())
+        assert session.palette_fx.snapshot() != palette
 
         session.overworld.turn_rules = None
         session.scene = GameScene.GAME_OVER
