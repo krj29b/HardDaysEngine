@@ -1,23 +1,24 @@
-"""Host window and fullscreen mode controller (T13.3, T13.4, ARCHITECTURE.md §13.6-§13.7).
+"""Host window, fullscreen mode, and filter-preset hotkey controller (T13.3-T13.5, §13.4-§13.7).
 
 Manages resizable windowed, borderless desktop fullscreen, and exclusive fullscreen modes via
 ``pygame.display.set_mode`` without destroying the OpenGL 3.3 context or textures. Requests a
-50 Hz display mode in exclusive fullscreen when the display lists one, and consumes ``F11`` and
-``Alt+Enter`` (including their matching ``KEYUP`` events) before ``InputRouter`` sees them so
-fullscreen toggles never confirm menus and never enter replay recordings.
+50 Hz display mode in exclusive fullscreen when the display lists one, and consumes ``F11``,
+``Alt+Enter``, and ``F9`` (including their matching ``KEYUP`` events) before ``InputRouter`` sees
+them so window and preset toggles never confirm menus and never enter replay recordings.
 """
 
 from __future__ import annotations
 
 import ctypes
 import ctypes.util
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import pygame
 
 from harddaysengine.app.loop import PAL_HZ
-from harddaysengine.render.presentation import FullscreenMode
+from harddaysengine.render.presentation import DisplaySettings, FilterPreset, FullscreenMode
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -169,18 +170,20 @@ def _is_fullscreen_toggle_keydown(event: pygame.event.Event) -> bool:
 
 
 class WindowController:
-    """Stateful windowed/fullscreen controller and pre-router hotkey filter (T13.3, T13.4)."""
+    """Stateful windowed/fullscreen controller and pre-router hotkey filter (T13.3-T13.5)."""
 
     def __init__(
         self,
         initial_size: tuple[int, int],
         initial_mode: FullscreenMode = FullscreenMode.OFF,
         *,
+        initial_filter: FilterPreset = FilterPreset.FAITHFUL,
         vsync: bool = True,
         backend: WindowModeBackend | None = None,
     ) -> None:
         self._windowed_size = (max(1, initial_size[0]), max(1, initial_size[1]))
         self._mode = initial_mode
+        self._filter_preset = initial_filter
         self._fullscreen_target = (
             initial_mode if initial_mode is not FullscreenMode.OFF else FullscreenMode.DESKTOP
         )
@@ -195,6 +198,11 @@ class WindowController:
         return self._mode
 
     @property
+    def filter_preset(self) -> FilterPreset:
+        """Active post-process filter preset (§13.4)."""
+        return self._filter_preset
+
+    @property
     def windowed_size(self) -> tuple[int, int]:
         """Last known resizable windowed ``(width, height)``."""
         return self._windowed_size
@@ -206,6 +214,20 @@ class WindowController:
     def get_refresh_rate(self) -> int:
         """Return the active display refresh rate in Hz, or ``0`` if unknown."""
         return self._backend.get_refresh_rate()
+
+    def apply_display_settings(self, settings: DisplaySettings) -> DisplaySettings:
+        """Return ``settings`` updated with the live fullscreen mode and filter preset."""
+        if settings.filter is self._filter_preset and settings.fullscreen is self._mode:
+            return settings
+        return replace(settings, filter=self._filter_preset, fullscreen=self._mode)
+
+    def cycle_filter_preset(self, *, reverse: bool = False) -> FilterPreset:
+        """Cycle the active :class:`FilterPreset` forward (or backward when ``reverse``)."""
+        presets = tuple(FilterPreset)
+        idx = presets.index(self._filter_preset)
+        step = -1 if reverse else 1
+        self._filter_preset = presets[(idx + step) % len(presets)]
+        return self._filter_preset
 
     def toggle_fullscreen(self) -> FullscreenMode:
         """Toggle between windowed mode and the active fullscreen target."""
@@ -219,15 +241,26 @@ class WindowController:
         self._apply_mode(self._mode)
         return self._mode
 
-    def consume_event(self, event: pygame.event.Event) -> bool:
-        """Handle resize and fullscreen hotkeys; return ``True`` if consumed before the router."""
-        etype = event.type
-        if etype == pygame.KEYDOWN and _is_fullscreen_toggle_keydown(event):
-            key = int(event.key)
+    def _consume_keydown(self, event: pygame.event.Event) -> bool:
+        key = int(event.key)
+        if _is_fullscreen_toggle_keydown(event):
             self._suppressed_keyups.add(key)
             if not getattr(event, "repeat", 0):
                 self.toggle_fullscreen()
             return True
+        if key == pygame.K_F9:
+            self._suppressed_keyups.add(key)
+            if not getattr(event, "repeat", 0):
+                mod = int(getattr(event, "mod", 0))
+                self.cycle_filter_preset(reverse=(mod & pygame.KMOD_SHIFT) != 0)
+            return True
+        return False
+
+    def consume_event(self, event: pygame.event.Event) -> bool:
+        """Handle resize and presentation hotkeys; return ``True`` if consumed before the router."""
+        etype = event.type
+        if etype == pygame.KEYDOWN:
+            return self._consume_keydown(event)
         if etype == pygame.KEYUP:
             key = int(event.key)
             if key in self._suppressed_keyups:

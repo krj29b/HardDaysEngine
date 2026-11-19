@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import moderngl
@@ -14,6 +15,7 @@ from harddaysengine.render.overlay import (
     build_frame_overlay,
     pack_overlay_vertex_array,
 )
+from harddaysengine.render.postfx import PostPassSpec, PostProcessChain
 from harddaysengine.render.presentation import DisplaySettings
 from harddaysengine.render.viewport import (
     CANVAS_HEIGHT as CANVAS_HEIGHT,
@@ -96,6 +98,7 @@ _PRESENT_FRAG = """
 uniform sampler2D u_canvas_tex;
 uniform vec2 u_src_origin;
 uniform vec2 u_src_size;
+uniform vec2 u_tex_size;
 uniform ivec2 u_axis_mode;
 uniform vec2 u_prescale;
 uniform int u_scanlines;
@@ -124,8 +127,8 @@ void main() {
     float sx = sample_axis(p.x, u_src_size.x, u_axis_mode.x, u_prescale.x);
     float sy = sample_axis(p.y, u_src_size.y, u_axis_mode.y, u_prescale.y);
     vec2 canvas_uv = vec2(
-        (u_src_origin.x + sx) / 320.0,
-        1.0 - (u_src_origin.y + sy) / 256.0
+        (u_src_origin.x + sx) / u_tex_size.x,
+        1.0 - (u_src_origin.y + sy) / u_tex_size.y
     );
     vec4 col = texture(u_canvas_tex, canvas_uv);
     if (u_scanlines == 1) {
@@ -249,6 +252,7 @@ class HardDaysRenderer:
             self._crt_prog,
             [(self._fs_vbo, "2f 2f", "in_pos", "in_uv")],
         )
+        self.post_chain = PostProcessChain(ctx)
 
     def set_palette(self, palette: Sequence[RGBColor]) -> None:
         """Upload a 32-entry RGB888 palette to the GPU lookup texture."""
@@ -339,8 +343,9 @@ class HardDaysRenderer:
         *,
         settings: DisplaySettings | None = None,
         scanlines: bool | None = None,
+        passes: Sequence[PostPassSpec] | None = None,
     ) -> PresentationViewport:
-        """Present the canvas into ``target`` with letterbox, scaling, and scanlines (§13)."""
+        """Present the canvas into ``target`` through the post-process chain and viewport (§13)."""
         resolved = settings if settings is not None else DisplaySettings()
         use_scanlines = resolved.scanlines if scanlines is None else scanlines
         win_w, win_h = window_size
@@ -352,27 +357,42 @@ class HardDaysRenderer:
             scale_mode=resolved.scale_mode,
         )
 
+        if passes is None:
+            self.post_chain.set_preset(resolved.filter)
+        else:
+            self.post_chain.set_passes(passes)
+        present_tex, present_src, present_tex_size = self.post_chain.execute(
+            self._canvas_tex, pv.source
+        )
+
         target.use()
         self.ctx.viewport = (0, 0, win_w, win_h)
         self.ctx.clear(0.0, 0.0, 0.0, 1.0)
         self.ctx.viewport = pv.gl_viewport
 
         gl_filter = moderngl.LINEAR if pv.uses_linear_filter else moderngl.NEAREST
-        self._canvas_tex.filter = (gl_filter, gl_filter)
+        present_tex.filter = (gl_filter, gl_filter)
 
-        _set_uniform_vec2(self._crt_prog, "u_src_origin", (float(pv.source.x), float(pv.source.y)))
+        prescale_x = max(1, math.floor(pv.dest_width / present_src.width))
+        prescale_y = max(1, math.floor(pv.dest_height / present_src.height))
         _set_uniform_vec2(
-            self._crt_prog, "u_src_size", (float(pv.source.width), float(pv.source.height))
+            self._crt_prog, "u_src_origin", (float(present_src.x), float(present_src.y))
+        )
+        _set_uniform_vec2(
+            self._crt_prog, "u_src_size", (float(present_src.width), float(present_src.height))
+        )
+        _set_uniform_vec2(
+            self._crt_prog,
+            "u_tex_size",
+            (float(present_tex_size[0]), float(present_tex_size[1])),
         )
         _set_uniform_ivec2(self._crt_prog, "u_axis_mode", (int(pv.sampling_x), int(pv.sampling_y)))
-        _set_uniform_vec2(
-            self._crt_prog, "u_prescale", (float(pv.prescale_x), float(pv.prescale_y))
-        )
+        _set_uniform_vec2(self._crt_prog, "u_prescale", (float(prescale_x), float(prescale_y)))
         _set_uniform_int(self._crt_prog, "u_scanlines", 1 if use_scanlines else 0)
         _set_uniform_float(self._crt_prog, "u_dest_top", float(pv.dest_y + pv.dest_height))
         _set_uniform_float(self._crt_prog, "u_scale_y", pv.scale_y)
 
-        self._canvas_tex.use(location=0)
+        present_tex.use(location=0)
         self._fs_vao.render(moderngl.TRIANGLES)
         return pv
 
@@ -382,13 +402,15 @@ class HardDaysRenderer:
         *,
         settings: DisplaySettings | None = None,
         scanlines: bool | None = None,
+        passes: Sequence[PostPassSpec] | None = None,
     ) -> PresentationViewport:
-        """Blit the 320x256 virtual canvas to the default screen framebuffer (§13.2-§13.3)."""
+        """Blit the 320x256 virtual canvas to the default screen framebuffer (§13.2-§13.4)."""
         return self.present_to_framebuffer(
             self.ctx.screen,
             (viewport[2], viewport[3]),
             settings=settings,
             scanlines=scanlines,
+            passes=passes,
         )
 
     def read_canvas_rgba(self) -> npt.NDArray[np.uint8]:
@@ -399,6 +421,7 @@ class HardDaysRenderer:
 
     def release(self) -> None:
         """Release all GPU resources owned by this renderer."""
+        self.post_chain.release()
         self._fs_vao.release()
         self._fs_vbo.release()
         self._crt_prog.release()

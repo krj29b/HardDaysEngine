@@ -73,6 +73,7 @@ and confirm each with Enter. Keyboard slots follow portrait selection order.
 | Continue a message or Next Day | Press and release Enter or Space |
 | Leave a sheet or town | Move the pointer to its close/Exit region and confirm |
 | Quit the campaign to farewell on the map | Q |
+| Cycle filter preset (not recorded in replays) | F9 (Shift+F9 backwards) |
 | Toggle fullscreen (not recorded in replays) | F11 or Alt+Enter |
 
 Player 2 uses WASD/F, player 3 IJKL/U, and player 4 the numeric keypad/Keypad 0 for

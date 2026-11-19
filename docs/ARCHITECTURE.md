@@ -5424,11 +5424,19 @@ bands at non-integer scales (fixed by T13.2).
 ### 13.4 Filter chain
 
 Fixed order: indexed canvas → palette lookup → RGB canvas → crop → preset passes → scaling
-to the destination of §13.2 → window. A preset is an ordered list of passes; each pass names
-its output scale and its sampling (nearest or bilinear). `faithful` has no passes (even
-pixels, no effects). `scanlines` adds §13.3. Later presets: `crt` (T13.6) and `smooth`
-(T13.7). Passes run on RGB values, so palette effects (fades, colour cycling, recoloured
-messages, pulses) need no change.
+to the destination of §13.2 → window. A preset is an ordered list of passes; each pass
+(`PostPassSpec` in `render/postfx.py`) names its integer output scale `(scale_x, scale_y)`
+relative to its input, its input-texture sampling mode (`nearest` or `linear`), its GLSL 330
+core shader pair, and optional custom uniforms. Pass 0 crops the 320×256 RGB canvas to
+`SourceRect` (`u_in_origin`, `u_in_size`); subsequent passes read the full intermediate texture
+`(0, 0, prev_w, prev_h)` produced by the preceding pass. `faithful` has no passes (even
+pixels, no effects). `scanlines` adds §13.3 in the final viewport presentation step. Later
+presets: `crt` (T13.6) and `smooth` (T13.7). Switching presets or pass lists releases the
+intermediate framebuffers, textures, vertex arrays and shader programs of the previous chain.
+Passes run on RGB values, so palette effects (fades, colour cycling, recoloured messages,
+pulses) need no change. In the game window and inspector, `F9` (`Shift+F9` to cycle backwards)
+cycles the active `FilterPreset` at runtime; `WindowController` consumes the press and release
+before `InputRouter`, so preset switches never affect simulation state or replay recordings.
 
 ### 13.5 Surround (optional, T13.8)
 

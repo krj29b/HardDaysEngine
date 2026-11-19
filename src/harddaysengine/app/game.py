@@ -2565,7 +2565,10 @@ def run_game_window(
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
     window = WindowController(
-        initial_window_size(settings), settings.fullscreen, vsync=settings.vsync
+        initial_window_size(settings),
+        settings.fullscreen,
+        initial_filter=settings.filter,
+        vsync=settings.vsync,
     )
     window.open()
 
@@ -2591,7 +2594,13 @@ def run_game_window(
                 step.ticks, session, router, replay_rec, replay_idx, recorded, max_ticks
             )
             if step.should_present:
-                _present_game_frame(session, scene_renderer, base_renderer, font, settings)
+                _present_game_frame(
+                    session,
+                    scene_renderer,
+                    base_renderer,
+                    font,
+                    window.apply_display_settings(settings),
+                )
             elif not settings.vsync:
                 pygame.time.wait(1)
     finally:

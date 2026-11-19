@@ -383,7 +383,10 @@ def _pump_events(
     state: InspectorState, renderer: HardDaysRenderer, window: WindowController
 ) -> bool:
     for event in pygame.event.get():
+        prev_preset = window.filter_preset
         if window.consume_event(event):
+            if window.filter_preset is not prev_preset:
+                state.scanlines = window.filter_preset.value == "scanlines"
             continue
         if event.type == pygame.QUIT:
             return False
@@ -445,7 +448,10 @@ def run_inspector_window(
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
     window = WindowController(
-        initial_window_size(settings), settings.fullscreen, vsync=settings.vsync
+        initial_window_size(settings),
+        settings.fullscreen,
+        initial_filter=settings.filter,
+        vsync=settings.vsync,
     )
     window.open()
 
@@ -471,7 +477,7 @@ def run_inspector_window(
                 state.tick_vbl()
 
             if step.should_present:
-                _present_inspector_frame(state, renderer, settings)
+                _present_inspector_frame(state, renderer, window.apply_display_settings(settings))
                 rendered_frames += 1
                 if max_frames is not None and rendered_frames >= max_frames:
                     break
