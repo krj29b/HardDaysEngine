@@ -63,10 +63,19 @@ if TYPE_CHECKING:
 
     from harddaysengine.app.fight_scene import FightScene
     from harddaysengine.app.scene_assets import GameAssetBundle
+    from harddaysengine.render.presentation import DisplaySettings
 
 _PRIMARY = KnightId.RED
 _LABEL_HEIGHT = 12
 _SHEET_COLUMNS = 4
+DEFAULT_PRESENT_SIZE: tuple[int, int] = (1920, 1080)
+PRESENTATION_SCENARIOS: tuple[str, ...] = (
+    "presentation",
+    "menu_map",
+    "places",
+    "fights",
+    "next_day",
+)
 _INTRO_SAMPLE_TICKS: tuple[int, ...] = (50, 415, 900, 1500, 2500, 3250, 4100, 5050)
 _REGION_NAMES: tuple[str, ...] = ("forest", "glen", "swamp", "wasteland")
 _NO_NODE = -1
@@ -103,33 +112,76 @@ def _tap(session: GameSession, player_input: PlayerInput) -> None:
     _step(session, 2)
 
 
+def parse_present_size(spec: str) -> tuple[int, int]:
+    """Parse a ``WxH`` presentation resolution string such as ``1920x1080`` (T13.9)."""
+    parts = spec.lower().split("x")
+    if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        msg = f"size must be WxH positive integers (e.g. 1920x1080), got {spec!r}"
+        raise ValueError(msg)
+    width, height = int(parts[0]), int(parts[1])
+    if width < 1 or height < 1:
+        msg = f"size dimensions must be >= 1, got {spec!r}"
+        raise ValueError(msg)
+    return (width, height)
+
+
 class AuditRig:
     """Standalone GL canvas plus the session factory used by all audit scenarios."""
 
-    def __init__(self, adf_dir: Path) -> None:
+    def __init__(
+        self,
+        adf_dir: Path,
+        *,
+        display: DisplaySettings | None = None,
+        present_size: tuple[int, int] | None = None,
+    ) -> None:
         self._adf_dir = adf_dir
         self._ctx = moderngl.create_standalone_context(require=330)
         self._base = HardDaysRenderer(self._ctx)
         self._scene = SceneRenderer(self._base)
         self._scene.set_palette(default_combat_palette())
         self._font = default_bitmap_font()
+        self._display = display
+        self._present_size: tuple[int, int] | None = None
+        self._present_tex: moderngl.Texture | None = None
+        self._present_fbo: moderngl.Framebuffer | None = None
+        if display is not None:
+            size = DEFAULT_PRESENT_SIZE if present_size is None else present_size
+            if size[0] < 1 or size[1] < 1:
+                msg = f"present_size must be positive, got {size!r}"
+                raise ValueError(msg)
+            self._present_size = size
+            self._present_tex = self._ctx.texture(size, 4)
+            self._present_fbo = self._ctx.framebuffer(color_attachments=[self._present_tex])
+
+    def _read_shot(self, name: str) -> AuditShot:
+        if self._present_fbo is None or self._display is None or self._present_size is None:
+            rgba = self._base.read_canvas_rgba()
+            return AuditShot(name=name, rgb=np.ascontiguousarray(rgba[..., :3]))
+        width, height = self._present_size
+        self._base.present_to_framebuffer(
+            self._present_fbo,
+            (width, height),
+            settings=self._display,
+        )
+        raw = self._present_fbo.read(components=4)
+        arr = np.frombuffer(raw, dtype=np.uint8).reshape((height, width, 4))
+        return AuditShot(name=name, rgb=np.ascontiguousarray(arr[::-1, :, :3]))
 
     def new_session(self, players: tuple[KnightId, ...] = (_PRIMARY,)) -> GameSession:
         """Return a fresh single-player session on the real disks."""
         return GameSession(disk_set=DiskSet.from_directory(self._adf_dir), players=players)
 
     def capture(self, session: GameSession, name: str) -> AuditShot:
-        """Render the session's current scene and return its canvas as RGB."""
+        """Render the session's current scene and return its canvas or presented frame as RGB."""
         session.render_to_scene(self._scene, self._font)
-        rgba = self._base.read_canvas_rgba()
-        return AuditShot(name=name, rgb=np.ascontiguousarray(rgba[..., :3]))
+        return self._read_shot(name)
 
     def capture_fight(self, scene: FightScene, name: str) -> AuditShot:
         """Capture the persistent engine's last output without stepping it (§10.17)."""
         scene.render(self._scene)
         self._scene.flush_to_fbo()
-        rgba = self._base.read_canvas_rgba()
-        return AuditShot(name=name, rgb=np.ascontiguousarray(rgba[..., :3]))
+        return self._read_shot(name)
 
     def capture_map_frames(self, frames: tuple[int, ...]) -> AuditShot:
         """Preview every used mi.c frame separately from natural map captures (§11.15)."""
@@ -141,10 +193,7 @@ class AuditRig:
         compose_map(self._scene.canvas, picture.pixels, cel, sprites)
         self._scene.set_palette(picture.palette)
         self._scene.flush_to_fbo()
-        rgba = self._base.read_canvas_rgba()
-        return AuditShot(
-            name="mi_frames_" + "_".join(map(str, frames)), rgb=np.ascontiguousarray(rgba[..., :3])
-        )
+        return self._read_shot("mi_frames_" + "_".join(map(str, frames)))
 
     def fight_assets(self) -> GameAssetBundle:
         """Return the real-disk bundle used for fight-engine audit fixtures."""
@@ -154,6 +203,12 @@ class AuditRig:
 
     def release(self) -> None:
         """Free the GL resources."""
+        if self._present_fbo is not None:
+            self._present_fbo.release()
+            self._present_fbo = None
+        if self._present_tex is not None:
+            self._present_tex.release()
+            self._present_tex = None
         self._scene.release()
         self._base.release()
         self._ctx.release()
@@ -823,6 +878,68 @@ def _stone_shots(rig: AuditRig) -> Iterator[AuditShot]:
     yield rig.capture(session, f"stone_program_flags_{flags:02X}")
 
 
+def _next_day_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    """Natural Next Day screen (T12.1 palette), representative moon phases and farewell (T13.9)."""
+    session = rig.new_session(tuple(KnightId))
+    session.scene = GameScene.OVERWORLD
+    for _ in range(4):
+        _step(session, 20)
+        session.step_tick(InputFrame(key=ord("E")))
+        session.step_tick(InputFrame(key=ord("E")))
+    _step(session, 40)
+    yield rig.capture(session, "next_day_round1")
+    rules = session.overworld.turn_rules
+    if rules is None or not rules.moons:
+        raise ValueError("next_day audit requires original turn rules")
+    mid_frame = rules.moons[len(rules.moons) // 2]
+    session.overworld.moon_frame = mid_frame
+    yield rig.capture(session, f"next_day_moon_f{mid_frame}")
+    last_frame = rules.moons[-1]
+    session.overworld.moon_frame = last_frame
+    yield rig.capture(session, f"next_day_moon_f{last_frame}")
+    farewell = rig.new_session()
+    farewell.scene = GameScene.OVERWORLD
+    farewell.step_tick(InputFrame(key=ord("Q")))
+    farewell.step_tick(InputFrame(key=ord("Q")))
+    _step(farewell, 30)
+    yield rig.capture(farewell, "farewell")
+
+
+def _presentation_shots(rig: AuditRig) -> Iterator[AuditShot]:
+    """Four representative scenes for 1:1 presentation review (T13.9, ADR-053)."""
+    s_map = rig.new_session()
+    _step(s_map, 5)
+    _tap(s_map, PlayerInput(skip_intro=True))
+    _step(s_map, 40)
+    for _ in range(3):
+        _tap(s_map, PlayerInput(dy=1))
+    _tap(s_map, PlayerInput(confirm=True))
+    _step(s_map, 30)
+    _tap(s_map, PlayerInput(confirm=True))
+    _step(s_map, 60)
+    yield rig.capture(s_map, "map_start")
+
+    s_town = rig.new_session()
+    s_town.actors[_PRIMARY].gold = 40
+    s_town._open_town(_PRIMARY, waterdeep=False)
+    _settle_fade(s_town)
+    yield rig.capture(s_town, "highwood_town")
+
+    s_fight = _host_fight_session(rig, TROGG_ARENAS[0])
+    while s_fight.tick_count < 120 and s_fight.active_encounter is not None:
+        s_fight.step_tick(fight_host_input(s_fight))
+    yield rig.capture(s_fight, "trogg_fight")
+
+    s_day = rig.new_session(tuple(KnightId))
+    s_day.scene = GameScene.OVERWORLD
+    for _ in range(4):
+        _step(s_day, 20)
+        s_day.step_tick(InputFrame(key=ord("E")))
+        s_day.step_tick(InputFrame(key=ord("E")))
+    _step(s_day, 40)
+    yield rig.capture(s_day, "next_day")
+
+
 AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
     "ending": ending_shots,
     "meetings": meeting_shots,
@@ -845,6 +962,8 @@ AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
     "menu_map": _menu_and_map_shots,
     "pixel_map": _pixel_map_shots,
     "turns_clock_dragon": _turn_and_dragon_shots,
+    "next_day": _next_day_shots,
+    "presentation": _presentation_shots,
     "places": _place_shots,
     "fights": _fight_shots,
     "regions": _region_shots,
@@ -853,36 +972,90 @@ AUDIT_SCENARIOS: dict[str, Callable[[AuditRig], Iterator[AuditShot]]] = {
 }
 
 
-def build_contact_sheet(shots: list[AuditShot], columns: int = _SHEET_COLUMNS) -> Image.Image:
-    """Tile ``shots`` into one labelled RGB image."""
+def build_contact_sheet(
+    shots: list[AuditShot],
+    columns: int = _SHEET_COLUMNS,
+    *,
+    max_cell_width: int | None = None,
+) -> Image.Image:
+    """Tile ``shots`` into one labelled RGB image, optionally capping each cell's width."""
     if not shots:
         raise ValueError("no audit shots to tile")
     height, width = shots[0].rgb.shape[:2]
-    cell_height = height + _LABEL_HEIGHT
+    if max_cell_width is not None and width > max_cell_width:
+        cell_w = max_cell_width
+        cell_h = max(1, round(height * max_cell_width / width))
+    else:
+        cell_w = width
+        cell_h = height
+    row_height = cell_h + _LABEL_HEIGHT
     rows = (len(shots) + columns - 1) // columns
-    sheet = Image.new("RGB", (columns * width, rows * cell_height), (40, 40, 40))
+    sheet = Image.new("RGB", (columns * cell_w, rows * row_height), (40, 40, 40))
     draw = ImageDraw.Draw(sheet)
     for index, shot in enumerate(shots):
-        x = (index % columns) * width
-        y = (index // columns) * cell_height
+        x = (index % columns) * cell_w
+        y = (index // columns) * row_height
         draw.text((x + 2, y), shot.name, fill=(255, 255, 0))
-        sheet.paste(Image.fromarray(shot.rgb), (x, y + _LABEL_HEIGHT))
+        img = Image.fromarray(shot.rgb)
+        if (cell_w, cell_h) != (width, height):
+            img = img.resize((cell_w, cell_h), Image.Resampling.LANCZOS)
+        sheet.paste(img, (x, y + _LABEL_HEIGHT))
     return sheet
 
 
+def _sheet_layout(
+    shot_count: int,
+    present_size: tuple[int, int] | None,
+) -> tuple[int, int | None]:
+    if present_size is None:
+        return (_SHEET_COLUMNS, None)
+    if shot_count <= 4:
+        return (min(2, max(1, shot_count)), None)
+    cols = 2 if shot_count <= 10 else _SHEET_COLUMNS
+    max_w = 960 if present_size[0] > 960 else None
+    return (cols, max_w)
+
+
 def run_audit(
-    adf_dir: Path, out_dir: Path, scenarios: Sequence[str] | None = None
+    adf_dir: Path,
+    out_dir: Path,
+    scenarios: Sequence[str] | None = None,
+    *,
+    display: DisplaySettings | None = None,
+    present_size: tuple[int, int] | None = None,
 ) -> dict[str, Path]:
-    """Capture selected scenarios (all by default), writing one contact sheet per scenario."""
+    """Capture selected scenarios, writing one contact sheet per scenario.
+
+    When ``display`` is provided, each shot is rendered through the real presentation path into an
+    offscreen framebuffer of ``present_size`` (default ``1920x1080``) and written as
+    ``<scenario>_<preset>_<W>x<H>.png``.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
-    rig = AuditRig(adf_dir)
+    resolved_size = (
+        None
+        if display is None
+        else (DEFAULT_PRESENT_SIZE if present_size is None else present_size)
+    )
+    rig = AuditRig(adf_dir, display=display, present_size=resolved_size)
     written: dict[str, Path] = {}
     try:
-        names = tuple(AUDIT_SCENARIOS) if scenarios is None else tuple(scenarios)
+        if scenarios is not None:
+            names = tuple(scenarios)
+        elif display is not None:
+            names = PRESENTATION_SCENARIOS
+        else:
+            names = tuple(AUDIT_SCENARIOS)
         for name in names:
-            scenario = AUDIT_SCENARIOS[name]
-            path = out_dir / f"{name}.png"
-            build_contact_sheet(list(scenario(rig))).save(path)
+            shots = list(AUDIT_SCENARIOS[name](rig))
+            cols, max_w = _sheet_layout(len(shots), resolved_size)
+            if display is not None and resolved_size is not None:
+                filename = (
+                    f"{name}_{display.filter.value}_{resolved_size[0]}x{resolved_size[1]}.png"
+                )
+            else:
+                filename = f"{name}.png"
+            path = out_dir / filename
+            build_contact_sheet(shots, columns=cols, max_cell_width=max_w).save(path)
             written[name] = path
     finally:
         rig.release()

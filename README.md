@@ -60,6 +60,16 @@ surround = "off"            # off, blur, solid
 surround_brightness = 0.28  # 0.0..1.0 (blur mode)
 surround_color = "#101014"  # #RRGGBB (solid mode)
 ```
+
+Presentation presets (`--filter` or `F9` / `Shift+F9` at runtime; all presets run strictly after the palette lookup and never affect simulation or replay hashes):
+
+| Preset | Look |
+|---|---|
+| `faithful` *(default)* | Even, crisp pixels at the selected aspect and scale mode with no effects |
+| `scanlines` | Crisp pixels with output-grid scanlines (no non-integer moiré banding) |
+| `crt` | Linear-light intensity-widening scanline beams, aperture/shadow phosphor mask, optional barrel curvature + rounded bezel, and separable bloom |
+| `smooth` | 4× xBR-style edge-directed upscaler preserving 90° corners and dithered textures across palette cycling |
+
 - `--inspect-assets`: launch the 50 Hz ModernGL Lair Background, Sprite, and Hitbox Inspector (`--cel kn4 --background fol1.t`)
 - `--extract-assets`: unpack ADF assets into `--output-dir` (default `./build/assets`) with `manifest.json`
 - `--headless-frames <N>`: run `N` 50 Hz ticks on a standalone OpenGL 3.3 context without opening a window
@@ -98,7 +108,8 @@ uv run python scripts/quality_gate.py    # ruff format/lint, mypy --strict, impo
 uv run pytest -m "not adf and not gl"    # unit tests needing neither disks nor OpenGL
 uv run pytest -m adf                     # integration tests against your local ./disks/*.adf
 uv run pytest -m gl                      # ModernGL rendering tests
-uv run python scripts/verify_campaign.py # input-only campaign replay + reviewed checkpoints
+uv run python scripts/verify_campaign.py                              # input-only campaign replay + reviewed checkpoints
+uv run python scripts/audit_shots.py --present crt --size 1920x1080  # per-preset presentation contact sheets into build/audit/
 ```
 
 The campaign command writes `build/campaign/replay.json`, `verification.json` (checkpoint
