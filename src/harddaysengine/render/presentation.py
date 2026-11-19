@@ -31,6 +31,7 @@ class FilterPreset(StrEnum):
     FAITHFUL = "faithful"
     SCANLINES = "scanlines"
     CRT = "crt"
+    SMOOTH = "smooth"
 
 
 class CrtMaskMode(StrEnum):

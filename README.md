@@ -32,7 +32,7 @@ uv run harddaysengine                       # launch the game (default 3x scale)
 Useful CLI flags:
 
 - `--scale <N>`: initial window size, 1..8 canvas pixels per pixel (default `3`)
-- `--filter faithful|scanlines|crt`: presentation preset (default `faithful`, crisp pixels without effects)
+- `--filter faithful|scanlines|crt|smooth`: presentation preset (default `faithful`, crisp pixels without effects)
 - `--scale-mode integer|sharp-bilinear|fit`: viewport scaling mode (default `integer`)
 - `--aspect square|pal`: source pixel shape (default `square`; `pal` gives 4:3 on the full 320x256 frame)
 - `--crop full|playfield`: show the full 320x256 PAL canvas or crop to the 320x200 playfield (default `full`)

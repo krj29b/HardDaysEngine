@@ -134,10 +134,20 @@ CRT_BLOOM_V_PASS = PostPassSpec(
     sampling=PassSampling.LINEAR,
 )
 
+SMOOTH_PASS = PostPassSpec(
+    name="smooth",
+    vertex_shader=load_shader("smooth.vert"),
+    fragment_shader=load_shader("smooth.frag"),
+    scale_x=4,
+    scale_y=4,
+    sampling=PassSampling.NEAREST,
+)
+
 _PRESET_PASSES: dict[FilterPreset, tuple[PostPassSpec, ...]] = {
     FilterPreset.FAITHFUL: (),
     FilterPreset.SCANLINES: (),
     FilterPreset.CRT: (CRT_BLOOM_H_PASS, CRT_BLOOM_V_PASS),
+    FilterPreset.SMOOTH: (SMOOTH_PASS,),
 }
 
 
@@ -151,6 +161,7 @@ def preset_passes(
     ``faithful`` has no intermediate passes. ``scanlines`` also uses zero intermediate passes
     and applies output-grid scanlines in the final viewport presentation step (§13.3).
     ``crt`` runs two separable source-resolution bloom passes when ``crt_bloom_enabled`` is true.
+    ``smooth`` runs a single 4x xBR-style edge-directed upscaling pass (§13.4.2).
     """
     if preset is FilterPreset.CRT and not crt_bloom_enabled:
         return ()

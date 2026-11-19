@@ -5432,7 +5432,8 @@ core shader pair, and optional custom uniforms. Pass 0 crops the 320×256 RGB ca
 `(0, 0, prev_w, prev_h)` produced by the preceding pass. `faithful` has no passes (even
 pixels, no effects). `scanlines` adds §13.3 in the final viewport presentation step. `crt`
 (§13.4.1, T13.6) runs a two-pass separable source-resolution bloom in the post-process chain
-followed by a native-resolution CRT presentation pass. Later preset: `smooth` (T13.7).
+followed by a native-resolution CRT presentation pass. `smooth` (§13.4.2, T13.7) runs a 4×
+edge-directed upscaling pass in the post-process chain before final viewport presentation.
 Switching presets or pass lists releases the intermediate framebuffers, textures, vertex arrays
 and shader programs of the previous chain.
 Passes run on RGB values, so palette effects (fades, colour cycling, recoloured messages,
@@ -5470,6 +5471,51 @@ The `crt` preset models four physical properties of a PAL RGB CRT monitor in lin
    - `shadow`: 3-column × 2-row staggered RGB phosphor triads with subtle horizontal slot bridges.
    - `none`: no phosphor mask.
 
+#### 13.4.2 Edge-smoothing preset (`render/shaders/smooth.*`, T13.7)
+
+The `smooth` preset is a clean-room GLSL 330 core xBR-style edge-directed 4× upscaler
+(`smooth.vert`, `smooth.frag`) executed as a single intermediate `PostProcessChain` pass
+(`scale_x = 4, scale_y = 4`, nearest input sampling, integer `texelFetch` clamped strictly inside
+`SourceRect` so overscan border rows never bleed into `playfield` crop), applied before the final
+§13.2 viewport presentation pass:
+
+1. **Perceptual colour metric:** each pixel in the 21-texel 5×5 cross stencil around the source
+   pixel $E$ (the 5×5 grid minus its four outer corners) is converted to weighted YUV
+   ($Y = 0.299R + 0.587G + 0.114B$, $U = -0.14713R - 0.28886G + 0.436B$,
+   $V = 0.615R - 0.51499G - 0.10001B$) with Manhattan perceptual distance
+   $\operatorname{df}(A, B) = 48|\Delta Y| + 7|\Delta U| + 6|\Delta V|$ on $[0, 1]$ RGB. Two
+   pixels are perceptually similar when $\operatorname{df}(A, B) \le 2.0$.
+2. **Symmetric four-corner edge detection:** all four corners of $E$ (bottom-right, bottom-left,
+   top-left, top-right) are evaluated by exact 90° rotations of one canonical rule on the 13-texel
+   corner neighbourhood $(E, F, H, I, B, D, A, C, G, F_4, H_5, I_4, I_5)$. Along the canonical
+   bottom-right corner:
+   - Edge discontinuity along the $F\text{--}H$ diagonal:
+     $w_e = \operatorname{df}(E, C) + \operatorname{df}(E, G) + \operatorname{df}(I, F_4) + \operatorname{df}(I, H_5) + 4\,\operatorname{df}(F, H)$.
+   - Perpendicular discontinuity along $E\text{--}I$:
+     $w_i = \operatorname{df}(F, B) + \operatorname{df}(F, I_4) + \operatorname{df}(H, D) + \operatorname{df}(H, I_5) + 4\,\operatorname{df}(E, I)$.
+   - An edge is accepted only when $E$ differs perceptually from both $F$ and $H$,
+     $w_e \cdot 1.15 + 0.5 < w_i$ (clear directional dominance margin), $F$ and $H$ agree along
+     the edge ($\operatorname{df}(F, H) < 0.5 \min(\operatorname{df}(E, F), \operatorname{df}(E, H))$),
+     at least one side has local orthogonal continuity (anti-dither guard:
+     $\operatorname{eq}(E, B) \lor \operatorname{eq}(E, D) \lor \operatorname{eq}(F, I) \lor \operatorname{eq}(H, I)$),
+     and $E$ is not a 90° solid box corner
+     ($\neg(\operatorname{eq}(E, B) \land \operatorname{eq}(E, D) \land \operatorname{eq}(E, A) \land \neg\operatorname{eq}(E, C) \land \neg\operatorname{eq}(E, G))$).
+3. **Slope classification and analytic subpixel blending:** accepted corners are classified as
+   2:1 shallow ($2\,\operatorname{df}(F, G) \le \operatorname{df}(H, C)$ with $E, D \not\approx G$,
+   line $u + 2v = 2.0$), 1:2 steep ($2\,\operatorname{df}(H, C) \le \operatorname{df}(F, G)$ with
+   $E, B \not\approx C$, line $2u + v = 2.0$), or 45° diagonal (line $u + v = 1.5$), with crisp
+   subpixel antialiasing over one 4× subpixel width. The corner colour is whichever of $F$ or $H$
+   is perceptually closer to $E$; overlapping corner weights combine symmetrically without
+   directional bias.
+4. **Dither and palette-cycling stability:** the orthogonal-support anti-dither gate, edge
+   similarity bound, and 15% dominance margin keep checkerboard and multi-shade dithered textures
+   (such as the map's forests) un-sliced and rock-solid across palette cycling without crawling.
+5. **Final viewport presentation:** when an intermediate pass scales the texture (e.g. 4×),
+   `_present_standard` keeps exact `NEAREST` sampling on any `integer` axis where the destination
+   size is an exact positive multiple of the intermediate pass size (e.g. 4× at 1080p `full`, 8× at
+   4K), and switches to `LINEAR` on axes whose destination is not an exact multiple (e.g. 3× at
+   960×768 or 1366×768) so subpixels are never dropped or unevenly duplicated.
+
 ### 13.5 Surround (optional, T13.8)
 
 When the window is wider than the destination, the side bars may show a strongly blurred and
@@ -5495,7 +5541,7 @@ silently falls back to a default. Each key is added by the task that implements 
 | Key | Type / values | Default | CLI | Task |
 |---|---|---|---|---|
 | `scale` | integer 1..8: initial window size, in canvas pixels | 3 | `--scale` | T13.1 |
-| `filter` | `faithful`, `scanlines`, `crt` | `faithful` | `--filter` | T13.1, T13.6 |
+| `filter` | `faithful`, `scanlines`, `crt`, `smooth` | `faithful` | `--filter` | T13.1, T13.6, T13.7 |
 | `scale_mode` | `integer`, `sharp-bilinear`, `fit` | `integer` | `--scale-mode` | T13.2 |
 | `aspect` | `square`, `pal` | `square` | `--aspect` | T13.2 |
 | `crop` | `full`, `playfield` | `full` | `--crop` | T13.2 |

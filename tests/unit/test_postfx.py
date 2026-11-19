@@ -15,6 +15,7 @@ from harddaysengine.render.postfx import (
     DEFAULT_POST_VERT,
     IDENTITY_PASS,
     IDENTITY_POST_FRAG,
+    SMOOTH_PASS,
     PassSampling,
     PostPassSpec,
     make_identity_pass,
@@ -78,6 +79,10 @@ def test_preset_passes_for_built_in_presets() -> None:
     assert preset_passes(FilterPreset.SCANLINES) == ()
     assert preset_passes(FilterPreset.CRT) == (CRT_BLOOM_H_PASS, CRT_BLOOM_V_PASS)
     assert preset_passes(FilterPreset.CRT, crt_bloom_enabled=False) == ()
+    assert preset_passes(FilterPreset.SMOOTH) == (SMOOTH_PASS,)
+    assert SMOOTH_PASS.scale_x == 4
+    assert SMOOTH_PASS.scale_y == 4
+    assert SMOOTH_PASS.sampling is PassSampling.NEAREST
 
 
 def test_f9_cycles_filter_preset_and_is_consumed_before_router() -> None:
@@ -110,21 +115,29 @@ def test_f9_cycles_filter_preset_and_is_consumed_before_router() -> None:
         players={kid: router.sample_frame().for_player(kid) for kid in KnightId}
     )
 
-    # Second F9 cycles SCANLINES -> CRT
+    # Second F9 cycles SCANLINES -> CRT, third CRT -> SMOOTH, fourth wraps to FAITHFUL
     assert window.consume_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=0))
     assert window.filter_preset is FilterPreset.CRT
     assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
 
-    # Shift+F9 cycles backwards CRT -> SCANLINES -> FAITHFUL
+    assert window.consume_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=0))
+    assert window.filter_preset is FilterPreset.SMOOTH
+    assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
+
+    assert window.consume_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=0))
+    assert window.filter_preset is FilterPreset.FAITHFUL
+    assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
+
+    # Shift+F9 cycles backwards FAITHFUL -> SMOOTH -> CRT
     assert window.consume_event(
         pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=pygame.KMOD_LSHIFT)
     )
-    assert window.filter_preset is FilterPreset.SCANLINES
+    assert window.filter_preset is FilterPreset.SMOOTH
     assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
     assert window.consume_event(
         pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=pygame.KMOD_LSHIFT)
     )
-    assert window.filter_preset is FilterPreset.FAITHFUL
+    assert window.filter_preset is FilterPreset.CRT
     assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
 
 

@@ -28,6 +28,7 @@ from harddaysengine.render.viewport import (
     CANVAS_WIDTH as CANVAS_WIDTH,
     PLAYFIELD_HEIGHT as PLAYFIELD_HEIGHT,
     PLAYFIELD_Y_OFFSET as PLAYFIELD_Y_OFFSET,
+    AxisSampling,
     PresentationViewport,
     SourceRect,
     compute_viewport,
@@ -176,6 +177,17 @@ def _set_uniform_ivec2(prog: moderngl.Program, name: str, value: tuple[int, int]
     member = prog[name]
     if isinstance(member, moderngl.Uniform):
         member.value = value
+
+
+def _resolve_axis_sampling(
+    sampling: AxisSampling,
+    dest_dim: int,
+    src_dim: int,
+    present_dim: int,
+) -> AxisSampling:
+    if sampling is AxisSampling.NEAREST and present_dim != src_dim and dest_dim % present_dim != 0:
+        return AxisSampling.LINEAR
+    return sampling
 
 
 def _quad_vertices(
@@ -375,7 +387,16 @@ class HardDaysRenderer:
         self.ctx.clear(0.0, 0.0, 0.0, 1.0)
         self.ctx.viewport = pv.gl_viewport
 
-        gl_filter = moderngl.LINEAR if pv.uses_linear_filter else moderngl.NEAREST
+        sampling_x = _resolve_axis_sampling(
+            pv.sampling_x, pv.dest_width, pv.source.width, present_src.width
+        )
+        sampling_y = _resolve_axis_sampling(
+            pv.sampling_y, pv.dest_height, pv.source.height, present_src.height
+        )
+        uses_linear = sampling_x is not AxisSampling.NEAREST or (
+            sampling_y is not AxisSampling.NEAREST
+        )
+        gl_filter = moderngl.LINEAR if uses_linear else moderngl.NEAREST
         present_tex.filter = (gl_filter, gl_filter)
 
         prescale_x = max(1, math.floor(pv.dest_width / present_src.width))
@@ -391,7 +412,7 @@ class HardDaysRenderer:
             "u_tex_size",
             (float(present_tex_size[0]), float(present_tex_size[1])),
         )
-        _set_uniform_ivec2(self._crt_prog, "u_axis_mode", (int(pv.sampling_x), int(pv.sampling_y)))
+        _set_uniform_ivec2(self._crt_prog, "u_axis_mode", (int(sampling_x), int(sampling_y)))
         _set_uniform_vec2(self._crt_prog, "u_prescale", (float(prescale_x), float(prescale_y)))
         _set_uniform_int(self._crt_prog, "u_scanlines", 1 if use_scanlines else 0)
         _set_uniform_float(self._crt_prog, "u_dest_top", float(pv.dest_y + pv.dest_height))
