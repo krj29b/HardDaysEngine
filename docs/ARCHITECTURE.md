@@ -5378,3 +5378,86 @@ When `progress` reaches 1000, copy `SCREEN` to `WORK` and `SHOWN` (`$0638..$0656
     (`hunk4 $0076, $0060, $008C, $00A2`: portrait 0 Blue is `"SIR_GODBER"`, portrait 1 Yellow is
     `"SIR_RICHARD"`, portrait 2 Green is `"SIR_JEFFREY"`, portrait 3 Red is `"SIR_EDWARD"`). This
     corrects the earlier swapped `(96, 118, 140, 162)` tuple in `app/intro_player.py`.
+
+## 13. Host Presentation (not original; Phase 13, ADR-053)
+
+Nothing in this section is original behaviour. Presentation starts from the RGB image produced
+by the palette lookup of the 320×256 indexed canvas, and ends at the window. It never writes to
+the canvas, the palette, any `sim/` state or the recorded input, so replay hashes are identical
+under every setting.
+
+### 13.1 Source image
+
+- The canvas is 320×256 (a PAL low-resolution frame). The game's 320×200 playfield sits at
+  rows 28..227 (`PLAYFIELD_Y_OFFSET`); the rows above and below are border (normally colour 0).
+- **Crop** selects the source rectangle: `full` (320×256) or `playfield` (320×200 at y = 28).
+- **Pixel aspect** selects the shape of one source pixel: `square` (1:1), or `pal`, where the
+  full 320×256 frame fills a 4:3 display, so one pixel is (4/3) / (320/256) = 16/15 as wide as it
+  is tall. The pixel shape does not depend on the crop.
+
+### 13.2 Destination rectangle
+
+For a window of W×H output pixels, a source of w×h pixels and a pixel aspect a (horizontal
+scale per unit of vertical scale: 1 or 16/15):
+
+- **fit:** vertical scale `s = min(H / h, W / (w·a))`, horizontal scale `s·a`.
+- **integer:** vertical scale `k = max(1, floor(min(H / h, W / (w·a))))`. With square pixels
+  the horizontal scale is also k. With `pal` pixels the destination width is `round(k·a·w)`,
+  drawn with the sharp-bilinear rule below on that axis only, because `k·16/15` is not a whole
+  number for k < 15.
+- **sharp-bilinear:** the fit size, sampled as if the source were first enlarged by the whole
+  part of the scale with nearest-neighbour, then filtered bilinearly to the final size. Each
+  source pixel then covers the same width to within one blended output pixel at its edge, and
+  no source column is skipped or doubled.
+- The destination size is rounded to whole output pixels and centred. The remainder of the
+  window is black (or the surround of §13.5).
+
+### 13.3 Scanlines
+
+Scanlines are computed in output space. For an output pixel row y inside the destination,
+the source-row phase is `fract((y + 0.5 − dest_y) / s_y)`, where `s_y` is the vertical
+scale. Rows in the lower half of a source row (phase ≥ 0.5) are darkened by a fixed factor
+(0.82). With an integer vertical scale every source row produces the same pattern, so there is
+no banding. The current shader computes the phase from texture coordinates instead, which
+bands at non-integer scales (fixed by T13.2).
+
+### 13.4 Filter chain
+
+Fixed order: indexed canvas → palette lookup → RGB canvas → crop → preset passes → scaling
+to the destination of §13.2 → window. A preset is an ordered list of passes; each pass names
+its output scale and its sampling (nearest or bilinear). `faithful` has no passes (even
+pixels, no effects). `scanlines` adds §13.3. Later presets: `crt` (T13.6) and `smooth`
+(T13.7). Passes run on RGB values, so palette effects (fades, colour cycling, recoloured
+messages, pulses) need no change.
+
+### 13.5 Surround (optional, T13.8)
+
+When the window is wider than the destination, the side bars may show a strongly blurred and
+darkened copy of the current frame instead of black. The game image itself is never cropped or
+stretched for this.
+
+### 13.6 Refresh pacing (T13.4)
+
+The simulation advances one tick per 20 ms of host time (§7.1); presentation never changes
+that. A displayed frame shows the latest completed tick. On a display refreshing at a
+multiple of 50 Hz (n × 50 Hz), each tick should be shown for exactly n refreshes. In exclusive
+fullscreen, a 50 Hz mode may be requested when the display lists one. With vsync off or a
+variable-refresh display, present once per tick. On 60 Hz, ticks are shown for one or two
+refreshes (unavoidable without blending). Blending or interpolating between ticks is not
+allowed (ADR-053).
+
+### 13.7 Settings
+
+The `[display]` table of `config.toml` holds the settings. A CLI flag beats the file, which
+beats the default. An unknown key or a wrong type or value is a `ConfigError`, so a typo never
+silently falls back to a default. Each key is added by the task that implements it:
+
+| Key | Type / values | Default | CLI | Task |
+|---|---|---|---|---|
+| `scale` | integer 1..8: initial window size, in canvas pixels | 3 | `--scale` | T13.1 |
+| `filter` | `faithful`, `scanlines` | `faithful` | `--filter` | T13.1 |
+| `scale_mode` | `integer`, `sharp-bilinear`, `fit` | `integer` | `--scale-mode` | T13.2 |
+| `aspect` | `square`, `pal` | `square` | `--aspect` | T13.2 |
+| `crop` | `full`, `playfield` | `full` | `--crop` | T13.2 |
+| `fullscreen` | `off`, `desktop`, `exclusive` | `off` | `--fullscreen` | T13.3 |
+| `vsync` | boolean | true | `--vsync` / `--no-vsync` | T13.4 |

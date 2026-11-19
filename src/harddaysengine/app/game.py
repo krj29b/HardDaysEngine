@@ -53,6 +53,7 @@ from harddaysengine.assets.service_data import parse_service_rules
 from harddaysengine.assets.service_screen_data import parse_service_screens
 from harddaysengine.assets.sound_rules import parse_sound_rules
 from harddaysengine.assets.village_data import parse_village_rules
+from harddaysengine.render.presentation import DisplaySettings
 from harddaysengine.render.renderer import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
@@ -2513,13 +2514,14 @@ def _step_window_ticks(
 def run_game_window(
     adf_dir: Path,
     *,
-    scale: int = 3,
+    display: DisplaySettings | None = None,
     seed: int = DEFAULT_SEED,
     record_path: Path | None = None,
     replay_path: Path | None = None,
     max_ticks: int | None = None,
 ) -> int:
-    """Open the interactive ``pygame-ce`` + ModernGL 3.3 Moonstone game window."""
+    """Open the interactive ``pygame-ce`` + ModernGL 3.3 Moonstone game window (§13)."""
+    settings = display if display is not None else DisplaySettings()
     replay_rec = load_replay(replay_path) if replay_path is not None else None
     active_seed = replay_rec.seed if replay_rec is not None else seed
     active_players = replay_rec.players if replay_rec is not None else (KnightId.RED,)
@@ -2537,8 +2539,8 @@ def run_game_window(
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
-    win_w = CANVAS_WIDTH * max(1, scale)
-    win_h = CANVAS_HEIGHT * max(1, scale)
+    win_w = CANVAS_WIDTH * settings.scale
+    win_h = CANVAS_HEIGHT * settings.scale
     pygame.display.set_mode((win_w, win_h), pygame.OPENGL | pygame.DOUBLEBUF | pygame.RESIZABLE)
 
     ctx = moderngl.create_context(require=330)
@@ -2565,7 +2567,7 @@ def run_game_window(
             )
             cur_w, cur_h = pygame.display.get_window_size()
             session.render_to_scene(scene_renderer, font)
-            base_renderer.present_to_screen((0, 0, cur_w, cur_h), scanlines=True)
+            base_renderer.present_to_screen((0, 0, cur_w, cur_h), scanlines=settings.scanlines)
             pygame.display.set_caption(
                 f"HardDaysEngine | {session.scene.name} | {session.last_status}"
             )

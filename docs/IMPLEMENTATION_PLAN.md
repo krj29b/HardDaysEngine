@@ -377,10 +377,12 @@ side panels is also out of scope.
   write §13 "Host presentation (not original)". It covers the canvas and the 320×200 playfield
   inside it, the overscan crop (full 320×256 or playfield only), the pixel-aspect options (square,
   or PAL 4:3 display), the scaling modes (integer, sharp-bilinear, fit), the filter chain order
-  and the refresh-pacing rules. Add a `[display]` table to `config.toml` (`scale_mode`, `aspect`,
-  `crop`, `filter`, `fullscreen`, `vsync`) with CLI overrides, validated through `ConfigError`.
-  *Accept:* unit tests for parsing, precedence (CLI > env > file > default) and invalid values;
-  the defaults reproduce the faithful look.
+  and the refresh-pacing rules. Add a strict `[display]` table to `config.toml` with CLI
+  overrides, validated through `ConfigError`. Only keys that work today are added here
+  (`scale`, `filter` = `faithful` | `scanlines`); each later task adds its own key with its
+  implementation (§13.7 table), per the AGENTS.md rule against placeholders. *Accept:* unit
+  tests for parsing, precedence (CLI > file > default) and invalid values; the defaults
+  reproduce the faithful look.
 - **T13.2 Aspect-correct viewport and even pixels (`render/viewport.py`, `render/renderer.py`):**
   a pure function maps (window size, crop, aspect, scale mode) to a letterboxed destination
   rectangle and scale. Integer mode uses the largest whole scale that fits. Sharp-bilinear

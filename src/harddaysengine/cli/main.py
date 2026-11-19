@@ -8,10 +8,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from harddaysengine import __version__
-from harddaysengine.app.config import ConfigError, find_adf_images, resolve_adf_dir
+from harddaysengine.app.config import (
+    ConfigError,
+    find_adf_images,
+    resolve_adf_dir,
+    resolve_display_settings,
+)
 from harddaysengine.app.game import run_game_window, run_headless_session
 from harddaysengine.cli.extract import run_extraction
 from harddaysengine.cli.inspect_assets import run_inspector_cli
+from harddaysengine.render.presentation import FilterPreset
 from harddaysengine.sim.rng import DEFAULT_SEED
 
 if TYPE_CHECKING:
@@ -70,8 +76,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--scale",
         type=int,
-        default=3,
-        help="integer window scaling factor for --inspect-assets or game window (default: 3)",
+        default=None,
+        help="initial window size in canvas pixels, 1..8 (default: [display] scale or 3)",
+    )
+    parser.add_argument(
+        "--filter",
+        choices=[preset.value for preset in FilterPreset],
+        default=None,
+        help="presentation preset (default: [display] filter or faithful)",
     )
     parser.add_argument(
         "--headless-frames",
@@ -146,6 +158,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             config_path=Path(args.config),
             default=Path("disks"),
         )
+        display = resolve_display_settings(
+            Path(args.config), scale=args.scale, filter_name=args.filter
+        )
     except ConfigError as exc:
         parser.error(str(exc))
     if args.list_disks:
@@ -157,7 +172,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             adf_dir,
             cel_name=args.cel,
             background_name=args.background,
-            scale=args.scale,
+            scale=display.scale,
             headless_frames=args.headless_frames,
             screenshot=args.screenshot,
         )
@@ -182,7 +197,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     return run_game_window(
         adf_dir,
-        scale=args.scale,
+        display=display,
         seed=seed,
         record_path=record_path,
         replay_path=replay_path,

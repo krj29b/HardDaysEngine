@@ -1038,13 +1038,13 @@ still uses its own 16 colours with the upper half black; it renders correctly an
 changed.
 
 ## ADR-053: Host presentation is a non-original, opt-in layer after the palette lookup
-**Status:** PROPOSED (2026-11-19, Phase 13 plan; awaiting user acceptance)
+**Status:** ACCEPTED (2026-11-19, Phase 13 plan; accepted by the user)
 **Context:** The present path stretches the canvas to the window without an aspect lock. It
 samples nearest-neighbour at non-integer scales (uneven pixel widths) and computes scanlines in
 texture space (moiré). The 50 Hz simulation also judders on 60 Hz displays. Better filters
 (CRT, edge smoothing) are wanted, but the project's goal is the original model, and palette
 effects work on colour indices.
-**Decision (proposed):**
+**Decision:**
 1. Presentation is everything after the palette lookup of the 320×256 indexed canvas. It may
    scale, filter, letterbox and pace frames. It never writes to the canvas, the palette or any
    `sim/` state, and never consumes recorded input.
