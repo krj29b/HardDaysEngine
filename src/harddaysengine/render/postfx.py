@@ -15,9 +15,14 @@ from typing import TYPE_CHECKING
 import moderngl
 import numpy as np
 
-from harddaysengine.render.presentation import FilterPreset
+from harddaysengine.render.presentation import FilterPreset, SurroundMode, SurroundSettings
 from harddaysengine.render.shaders import load_shader
-from harddaysengine.render.viewport import CANVAS_HEIGHT, CANVAS_WIDTH, SourceRect
+from harddaysengine.render.viewport import (
+    CANVAS_HEIGHT,
+    CANVAS_WIDTH,
+    PresentationViewport,
+    SourceRect,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -379,4 +384,242 @@ class PostProcessChain:
     def release(self) -> None:
         """Release all intermediate stages and the fullscreen quad VBO."""
         self._release_stages()
+        self._quad_vbo.release()
+
+
+SURROUND_BLUR_SIZE: tuple[int, int] = (80, 64)
+
+
+def _create_quad_vbo(ctx: moderngl.Context) -> moderngl.Buffer:
+    quad = np.array(
+        [
+            [-1.0, -1.0, 0.0, 0.0],
+            [1.0, -1.0, 1.0, 0.0],
+            [-1.0, 1.0, 0.0, 1.0],
+            [-1.0, 1.0, 0.0, 1.0],
+            [1.0, -1.0, 1.0, 0.0],
+            [1.0, 1.0, 1.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    return ctx.buffer(quad.tobytes())
+
+
+def _create_rgba_target(
+    ctx: moderngl.Context,
+    size: tuple[int, int],
+) -> tuple[moderngl.Texture, moderngl.Framebuffer]:
+    tex = ctx.texture(size, 4)
+    tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+    tex.repeat_x = False
+    tex.repeat_y = False
+    fbo = ctx.framebuffer(color_attachments=[tex])
+    return (tex, fbo)
+
+
+@dataclass(slots=True)
+class _SurroundBlurBuffers:
+    """Allocated GPU resources for the four-pass widescreen surround blur (§13.5)."""
+
+    prog_blur: moderngl.Program
+    vao_blur: moderngl.VertexArray
+    prog_comp: moderngl.Program
+    vao_comp: moderngl.VertexArray
+    tex_a: moderngl.Texture
+    fbo_a: moderngl.Framebuffer
+    tex_b: moderngl.Texture
+    fbo_b: moderngl.Framebuffer
+
+    def release(self) -> None:
+        """Release all blur ping-pong framebuffers, textures, VAOs, and shader programs."""
+        self.fbo_b.release()
+        self.tex_b.release()
+        self.fbo_a.release()
+        self.tex_a.release()
+        self.vao_comp.release()
+        self.prog_comp.release()
+        self.vao_blur.release()
+        self.prog_blur.release()
+
+
+class SurroundRenderer:
+    """Renders decorative widescreen surround side bars behind the game viewport (T13.8, §13.5).
+
+    Allocates its two ``80x64`` ping-pong blur textures lazily only when ``surround.mode`` is
+    ``blur`` and the window is wider than the letterboxed destination, releasing them immediately
+    when disabled or unneeded. When ``mode`` is ``off``, clears the target to black so output stays
+    byte-identical to §13.2.
+    """
+
+    def __init__(self, ctx: moderngl.Context) -> None:
+        self.ctx = ctx
+        self._quad_vbo = _create_quad_vbo(ctx)
+        self._blur: _SurroundBlurBuffers | None = None
+        self._total_textures_created = 0
+        self._total_textures_released = 0
+
+    @property
+    def active_texture_count(self) -> int:
+        """Number of currently allocated surround blur textures (0 or 2)."""
+        return 2 if self._blur is not None else 0
+
+    @property
+    def total_textures_created(self) -> int:
+        """Cumulative number of surround blur textures allocated."""
+        return self._total_textures_created
+
+    @property
+    def total_textures_released(self) -> int:
+        """Cumulative number of surround blur textures released."""
+        return self._total_textures_released
+
+    def render(
+        self,
+        target: moderngl.Framebuffer,
+        canvas_tex: moderngl.Texture,
+        pv: PresentationViewport,
+        surround: SurroundSettings,
+        *,
+        canvas_size: tuple[int, int] = (CANVAS_WIDTH, CANVAS_HEIGHT),
+    ) -> bool:
+        """Clear or decorate ``target`` behind ``pv``; returns ``True`` if surround was drawn."""
+        has_side_bars = pv.dest_width < pv.window_width
+        if surround.mode is SurroundMode.OFF or not has_side_bars:
+            self._release_blur_resources()
+            self._clear_target(target, pv, (0.0, 0.0, 0.0))
+            return False
+        if surround.mode is SurroundMode.SOLID:
+            self._release_blur_resources()
+            r, g, b = surround.color
+            self._clear_target(target, pv, (r / 255.0, g / 255.0, b / 255.0))
+            return True
+
+        buf = self._ensure_blur_resources()
+        self._run_blur_passes(buf, canvas_tex, pv.source, canvas_size)
+        self._draw_composite(buf, target, pv, surround.brightness)
+        return True
+
+    def _clear_target(
+        self,
+        target: moderngl.Framebuffer,
+        pv: PresentationViewport,
+        rgb: tuple[float, float, float],
+    ) -> None:
+        target.use()
+        self.ctx.viewport = (0, 0, pv.window_width, pv.window_height)
+        self.ctx.clear(rgb[0], rgb[1], rgb[2], 1.0)
+
+    def _ensure_blur_resources(self) -> _SurroundBlurBuffers:
+        if self._blur is not None:
+            return self._blur
+        prog_blur = self.ctx.program(
+            vertex_shader=DEFAULT_POST_VERT,
+            fragment_shader=load_shader("surround_blur.frag"),
+        )
+        vao_blur = self.ctx.vertex_array(
+            prog_blur,
+            [(self._quad_vbo, "2f 2f", "in_pos", "in_uv")],
+        )
+        prog_comp = self.ctx.program(
+            vertex_shader=DEFAULT_POST_VERT,
+            fragment_shader=load_shader("surround.frag"),
+        )
+        vao_comp = self.ctx.vertex_array(
+            prog_comp,
+            [(self._quad_vbo, "2f 2f", "in_pos", "in_uv")],
+        )
+        tex_a, fbo_a = _create_rgba_target(self.ctx, SURROUND_BLUR_SIZE)
+        tex_b, fbo_b = _create_rgba_target(self.ctx, SURROUND_BLUR_SIZE)
+        self._total_textures_created += 2
+        self._blur = _SurroundBlurBuffers(
+            prog_blur=prog_blur,
+            vao_blur=vao_blur,
+            prog_comp=prog_comp,
+            vao_comp=vao_comp,
+            tex_a=tex_a,
+            fbo_a=fbo_a,
+            tex_b=tex_b,
+            fbo_b=fbo_b,
+        )
+        return self._blur
+
+    def _blur_step(
+        self,
+        buf: _SurroundBlurBuffers,
+        in_tex: moderngl.Texture,
+        out_fbo: moderngl.Framebuffer,
+        in_origin: tuple[float, float],
+        in_size: tuple[float, float],
+        in_tex_size: tuple[float, float],
+        step_px: tuple[float, float],
+    ) -> None:
+        bw, bh = SURROUND_BLUR_SIZE
+        in_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        out_fbo.use()
+        self.ctx.viewport = (0, 0, bw, bh)
+        prog = buf.prog_blur
+        _set_optional_uniform(prog, "u_input_tex", 0)
+        _set_optional_uniform(prog, "u_in_origin", in_origin)
+        _set_optional_uniform(prog, "u_in_size", in_size)
+        _set_optional_uniform(prog, "u_in_tex_size", in_tex_size)
+        _set_optional_uniform(prog, "u_step_px", step_px)
+        in_tex.use(location=0)
+        buf.vao_blur.render(moderngl.TRIANGLES)
+
+    def _run_blur_passes(
+        self,
+        buf: _SurroundBlurBuffers,
+        canvas_tex: moderngl.Texture,
+        source: SourceRect,
+        canvas_size: tuple[int, int],
+    ) -> None:
+        blur_dim = (float(SURROUND_BLUR_SIZE[0]), float(SURROUND_BLUR_SIZE[1]))
+        self._blur_step(
+            buf,
+            canvas_tex,
+            buf.fbo_a,
+            (float(source.x), float(source.y)),
+            (float(source.width), float(source.height)),
+            (float(canvas_size[0]), float(canvas_size[1])),
+            (2.5, 0.0),
+        )
+        self._blur_step(buf, buf.tex_a, buf.fbo_b, (0.0, 0.0), blur_dim, blur_dim, (0.0, 1.5))
+        self._blur_step(buf, buf.tex_b, buf.fbo_a, (0.0, 0.0), blur_dim, blur_dim, (1.5, 0.0))
+        self._blur_step(buf, buf.tex_a, buf.fbo_b, (0.0, 0.0), blur_dim, blur_dim, (0.0, 1.5))
+
+    def _draw_composite(
+        self,
+        buf: _SurroundBlurBuffers,
+        target: moderngl.Framebuffer,
+        pv: PresentationViewport,
+        brightness: float,
+    ) -> None:
+        buf.tex_b.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        target.use()
+        self.ctx.viewport = (0, 0, pv.window_width, pv.window_height)
+        prog = buf.prog_comp
+        _set_optional_uniform(prog, "u_blur_tex", 0)
+        _set_optional_uniform(
+            prog, "u_blur_tex_size", (float(SURROUND_BLUR_SIZE[0]), float(SURROUND_BLUR_SIZE[1]))
+        )
+        _set_optional_uniform(prog, "u_win_size", (float(pv.window_width), float(pv.window_height)))
+        _set_optional_uniform(
+            prog,
+            "u_dest_rect",
+            (float(pv.dest_x), float(pv.dest_y), float(pv.dest_width), float(pv.dest_height)),
+        )
+        _set_optional_uniform(prog, "u_brightness", brightness)
+        buf.tex_b.use(location=0)
+        buf.vao_comp.render(moderngl.TRIANGLES)
+
+    def _release_blur_resources(self) -> None:
+        if self._blur is None:
+            return
+        self._blur.release()
+        self._blur = None
+        self._total_textures_released += 2
+
+    def release(self) -> None:
+        """Release all surround GPU resources."""
+        self._release_blur_resources()
         self._quad_vbo.release()

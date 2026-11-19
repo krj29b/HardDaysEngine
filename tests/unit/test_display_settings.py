@@ -17,6 +17,9 @@ from harddaysengine.render.presentation import (
     FilterPreset,
     FullscreenMode,
     ScaleMode,
+    SurroundMode,
+    SurroundSettings,
+    parse_hex_rgb,
 )
 
 if TYPE_CHECKING:
@@ -118,6 +121,16 @@ def test_cli_values_beat_the_file(tmp_path: Path) -> None:
         ("[display]\ncrt_curvature = 0.5\n", "0.0..0.3"),
         ("[display]\ncrt_bloom = nan\n", "0.0..1.0"),
         ("[display]\ncrt_bloom = inf\n", "0.0..1.0"),
+        ('[display]\nsurround = "ambient"\n', "off, blur, solid"),
+        ("[display]\nsurround = 1\n", "off, blur, solid"),
+        ("[display]\nsurround_brightness = true\n", "number"),
+        ("[display]\nsurround_brightness = -0.1\n", "0.0..1.0"),
+        ("[display]\nsurround_brightness = 1.2\n", "0.0..1.0"),
+        ("[display]\nsurround_brightness = nan\n", "0.0..1.0"),
+        ('[display]\nsurround_color = "101014"\n', "#RRGGBB"),
+        ('[display]\nsurround_color = "#123"\n', "#RRGGBB"),
+        ('[display]\nsurround_color = "#GGGGGG"\n', "#RRGGBB"),
+        ("[display]\nsurround_color = 123456\n", "#RRGGBB"),
     ],
 )
 def test_invalid_file_values_raise(tmp_path: Path, text: str, message: str) -> None:
@@ -160,6 +173,45 @@ def test_crt_settings_dataclass_validates_bounds() -> None:
         CrtSettings(curvature=0.35)
     with pytest.raises(ValueError, match="crt_bloom"):
         CrtSettings(bloom=float("nan"))
+
+
+def test_surround_file_and_cli_resolution(tmp_path: Path) -> None:
+    cfg = _config(
+        tmp_path,
+        '[display]\nsurround = "solid"\nsurround_brightness = 0.45\nsurround_color = "#1a2B3c"\n',
+    )
+    settings = resolve_display_settings(cfg)
+    assert settings.surround == SurroundSettings(
+        mode=SurroundMode.SOLID,
+        brightness=0.45,
+        color=(0x1A, 0x2B, 0x3C),
+    )
+    # CLI --surround overrides file while keeping file brightness/color
+    overridden = resolve_display_settings(cfg, surround="blur")
+    assert overridden.surround == SurroundSettings(
+        mode=SurroundMode.BLUR,
+        brightness=0.45,
+        color=(0x1A, 0x2B, 0x3C),
+    )
+
+
+def test_surround_settings_validation() -> None:
+    assert parse_hex_rgb("#00ff80") == (0, 255, 128)
+    with pytest.raises(ValueError, match="#RRGGBB"):
+        parse_hex_rgb("00ff80")
+    with pytest.raises(ValueError, match="#RRGGBB"):
+        parse_hex_rgb("#00ffzz")
+    with pytest.raises(ValueError, match="surround_brightness"):
+        SurroundSettings(brightness=1.5)
+    with pytest.raises(ValueError, match="surround_color"):
+        SurroundSettings(color=(0, 256, 0))
+    with pytest.raises(ValueError, match="surround_color"):
+        SurroundSettings(color=(True, 0, 0))
+
+
+def test_invalid_cli_surround_raises(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="--surround"):
+        resolve_display_settings(tmp_path / "missing.toml", surround="ambient")
 
 
 @pytest.mark.parametrize(
@@ -220,6 +272,8 @@ def test_cli_passes_resolved_settings_to_the_game_window(
             "--fullscreen",
             "desktop",
             "--no-vsync",
+            "--surround",
+            "blur",
         ]
     )
     assert rc == 0
@@ -232,6 +286,7 @@ def test_cli_passes_resolved_settings_to_the_game_window(
             crop=CropMode.PLAYFIELD,
             fullscreen=FullscreenMode.DESKTOP,
             vsync=False,
+            surround=SurroundSettings(mode=SurroundMode.BLUR),
         )
     ]
 
@@ -259,6 +314,8 @@ def test_inspector_cli_passes_resolved_settings(
             "scanlines",
             "--fullscreen",
             "exclusive",
+            "--surround",
+            "solid",
         ]
     )
     assert rc == 0
@@ -270,6 +327,7 @@ def test_inspector_cli_passes_resolved_settings(
             aspect=AspectMode.PAL,
             crop=CropMode.PLAYFIELD,
             fullscreen=FullscreenMode.EXCLUSIVE,
+            surround=SurroundSettings(mode=SurroundMode.SOLID),
         )
     ]
 

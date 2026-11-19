@@ -15,7 +15,7 @@ from harddaysengine.render.overlay import (
     build_frame_overlay,
     pack_overlay_vertex_array,
 )
-from harddaysengine.render.postfx import PostPassSpec, PostProcessChain
+from harddaysengine.render.postfx import PostPassSpec, PostProcessChain, SurroundRenderer
 from harddaysengine.render.presentation import (
     CrtMaskMode,
     CrtSettings,
@@ -287,6 +287,7 @@ class HardDaysRenderer:
             [(self._fs_vbo, "2f 2f", "in_pos", "in_uv")],
         )
         self.post_chain = PostProcessChain(ctx)
+        self.surround = SurroundRenderer(ctx)
 
     def set_palette(self, palette: Sequence[RGBColor]) -> None:
         """Upload a 32-entry RGB888 palette to the GPU lookup texture."""
@@ -373,7 +374,6 @@ class HardDaysRenderer:
     def _present_standard(
         self,
         target: moderngl.Framebuffer,
-        window_size: tuple[int, int],
         pv: PresentationViewport,
         present_tex: moderngl.Texture,
         present_src: SourceRect,
@@ -381,10 +381,7 @@ class HardDaysRenderer:
         *,
         use_scanlines: bool,
     ) -> None:
-        win_w, win_h = window_size
         target.use()
-        self.ctx.viewport = (0, 0, win_w, win_h)
-        self.ctx.clear(0.0, 0.0, 0.0, 1.0)
         self.ctx.viewport = pv.gl_viewport
 
         sampling_x = _resolve_axis_sampling(
@@ -424,15 +421,11 @@ class HardDaysRenderer:
     def _present_crt(
         self,
         target: moderngl.Framebuffer,
-        window_size: tuple[int, int],
         pv: PresentationViewport,
         crt: CrtSettings,
         bloom_tex: moderngl.Texture,
     ) -> None:
-        win_w, win_h = window_size
         target.use()
-        self.ctx.viewport = (0, 0, win_w, win_h)
-        self.ctx.clear(0.0, 0.0, 0.0, 1.0)
         self.ctx.viewport = pv.gl_viewport
 
         self._canvas_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
@@ -477,7 +470,8 @@ class HardDaysRenderer:
         if passes is None and resolved.filter is FilterPreset.CRT:
             self.post_chain.set_preset(FilterPreset.CRT, crt_bloom_enabled=resolved.crt.bloom > 0.0)
             bloom_tex, _, _ = self.post_chain.execute(self._canvas_tex, pv.source)
-            self._present_crt(target, window_size, pv, resolved.crt, bloom_tex)
+            self.surround.render(target, self._canvas_tex, pv, resolved.surround)
+            self._present_crt(target, pv, resolved.crt, bloom_tex)
             return pv
 
         if passes is None:
@@ -487,9 +481,9 @@ class HardDaysRenderer:
         present_tex, present_src, present_tex_size = self.post_chain.execute(
             self._canvas_tex, pv.source
         )
+        self.surround.render(target, self._canvas_tex, pv, resolved.surround)
         self._present_standard(
             target,
-            window_size,
             pv,
             present_tex,
             present_src,
@@ -523,6 +517,7 @@ class HardDaysRenderer:
 
     def release(self) -> None:
         """Release all GPU resources owned by this renderer."""
+        self.surround.release()
         self.post_chain.release()
         self._crt_shader_vao.release()
         self._crt_shader_prog.release()

@@ -23,6 +23,7 @@ from harddaysengine.render.presentation import (
     FilterPreset,
     FullscreenMode,
     ScaleMode,
+    SurroundMode,
 )
 
 if TYPE_CHECKING:
@@ -99,6 +100,12 @@ def build_inspect_parser() -> argparse.ArgumentParser:
         help="enable or disable vertical sync (default: [display] vsync or true)",
     )
     parser.add_argument(
+        "--surround",
+        choices=[mode.value for mode in SurroundMode],
+        default=None,
+        help="widescreen side-bar surround fill (default: [display] surround or off)",
+    )
+    parser.add_argument(
         "--headless-frames",
         type=int,
         default=None,
@@ -168,6 +175,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             crop=args.crop,
             fullscreen=args.fullscreen,
             vsync=args.vsync,
+            surround=args.surround,
         )
     except ConfigError as exc:
         parser.error(str(exc))

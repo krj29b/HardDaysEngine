@@ -5518,9 +5518,25 @@ The `smooth` preset is a clean-room GLSL 330 core xBR-style edge-directed 4× up
 
 ### 13.5 Surround (optional, T13.8)
 
-When the window is wider than the destination, the side bars may show a strongly blurred and
-darkened copy of the current frame instead of black. The game image itself is never cropped or
-stretched for this.
+When the window is wider than the letterboxed destination (`dest_width < window_width`), the side
+bars (and any remaining frame margin outside the game viewport) may be decorated before the game
+viewport is drawn on top. The game image itself is never cropped, stretched, or altered:
+
+- **`off` (default):** skips surround entirely and clears the window to black, remaining
+  byte-identical to §13.2.
+- **`solid`:** clears the window to the configured `#RRGGBB` colour (`surround_color`, default
+  `#101014`) before presenting the game viewport. Allocates zero extra GPU textures.
+- **`blur`:** downsamples the cropped RGB canvas (`SourceRect`, clamped strictly inside crop bounds
+  so overscan rows never bleed into `playfield` crop) into an `80×64` ping-pong RGBA8 texture pair
+  in `render/postfx.py` (`SurroundRenderer`), runs four separable 9-tap Gaussian blur passes
+  (`H → V → H → V`, effective $\sigma \approx 13\text{--}17$ source pixels), and draws the
+  stretched ambient backdrop across the full window with `surround_brightness` darkening
+  (`0.0..1.0`, default `0.28`), a gentle outer vignette, a soft dark edge shadow bordering the game
+  viewport rectangle, and sub-LSB gradient dithering ($\pm 0.5/255$, suppressed at zero brightness)
+  to prevent 8-bit dark-gradient banding. Switching away from `blur` (or resizing to a window no
+  wider than the destination) immediately releases the two ping-pong textures.
+- When `dest_width >= window_width` (no side bars), surround is inactive and any top/bottom
+  letterbox remains black.
 
 ### 13.6 Refresh pacing (T13.4)
 
@@ -5552,3 +5568,6 @@ silently falls back to a default. Each key is added by the task that implements 
 | `crt_scanlines` | float 0.0..1.0 | 0.65 | — | T13.6 |
 | `crt_curvature` | float 0.0..0.3 | 0.08 | — | T13.6 |
 | `crt_bloom` | float 0.0..1.0 | 0.22 | — | T13.6 |
+| `surround` | `off`, `blur`, `solid` | `off` | `--surround` | T13.8 |
+| `surround_brightness` | float 0.0..1.0 | 0.28 | — | T13.8 |
+| `surround_color` | `#RRGGBB` hex string | `"#101014"` | — | T13.8 |

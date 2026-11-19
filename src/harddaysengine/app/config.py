@@ -15,11 +15,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from harddaysengine.render.presentation import (
+    DEFAULT_SURROUND_COLOR_HEX,
     MAX_CRT_CURVATURE,
     MAX_CRT_STRENGTH,
+    MAX_SURROUND_BRIGHTNESS,
     MAX_WINDOW_SCALE,
     MIN_CRT_CURVATURE,
     MIN_CRT_STRENGTH,
+    MIN_SURROUND_BRIGHTNESS,
     MIN_WINDOW_SCALE,
     AspectMode,
     CropMode,
@@ -29,6 +32,9 @@ from harddaysengine.render.presentation import (
     FilterPreset,
     FullscreenMode,
     ScaleMode,
+    SurroundMode,
+    SurroundSettings,
+    parse_hex_rgb,
 )
 
 if TYPE_CHECKING:
@@ -53,6 +59,9 @@ _DISPLAY_KEYS = frozenset(
         "crt_scanlines",
         "crt_curvature",
         "crt_bloom",
+        "surround",
+        "surround_brightness",
+        "surround_color",
     }
 )
 
@@ -222,6 +231,47 @@ def _resolve_crt_settings(
     )
 
 
+def _hex_color_setting(value: object, key: str, source: str) -> tuple[int, int, int]:
+    if not isinstance(value, str):
+        raise ConfigError(
+            f"{source}: {key} must be a #RRGGBB hex string, got {type(value).__name__}"
+        )
+    try:
+        return parse_hex_rgb(value)
+    except ValueError as exc:
+        raise ConfigError(f"{source}: {key} must be a #RRGGBB hex string, got {value!r}") from exc
+
+
+def _resolve_surround_settings(
+    surround_cli: str | None,
+    table: Mapping[str, object],
+    defaults: SurroundSettings,
+    file_source: str,
+) -> SurroundSettings:
+    mode = _resolve_enum(
+        surround_cli,
+        table,
+        SurroundMode,
+        "surround",
+        "--surround",
+        defaults.mode,
+        file_source,
+    )
+    brightness = _float_setting(
+        table.get("surround_brightness", defaults.brightness),
+        "surround_brightness",
+        MIN_SURROUND_BRIGHTNESS,
+        MAX_SURROUND_BRIGHTNESS,
+        file_source,
+    )
+    color = _hex_color_setting(
+        table.get("surround_color", DEFAULT_SURROUND_COLOR_HEX),
+        "surround_color",
+        file_source,
+    )
+    return SurroundSettings(mode=mode, brightness=brightness, color=color)
+
+
 def resolve_display_settings(
     config_path: Path,
     *,
@@ -232,6 +282,7 @@ def resolve_display_settings(
     crop: str | None = None,
     fullscreen: str | None = None,
     vsync: bool | None = None,
+    surround: str | None = None,
 ) -> DisplaySettings:
     """Resolve ``[display]`` settings: CLI value, then the config file, then the default (§13.7)."""
     table = _display_table(load_config_file(config_path), config_path)
@@ -276,4 +327,5 @@ def resolve_display_settings(
         ),
         vsync=resolved_vsync,
         crt=_resolve_crt_settings(table, defaults.crt, file_source),
+        surround=_resolve_surround_settings(surround, table, defaults.surround, file_source),
     )
