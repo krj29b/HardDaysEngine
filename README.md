@@ -32,7 +32,7 @@ uv run harddaysengine                       # launch the game (default 3x scale)
 Useful CLI flags:
 
 - `--scale <N>`: initial window size, 1..8 canvas pixels per pixel (default `3`)
-- `--filter faithful|scanlines`: presentation preset (default `faithful`, crisp pixels without effects)
+- `--filter faithful|scanlines|crt`: presentation preset (default `faithful`, crisp pixels without effects)
 - `--scale-mode integer|sharp-bilinear|fit`: viewport scaling mode (default `integer`)
 - `--aspect square|pal`: source pixel shape (default `square`; `pal` gives 4:3 on the full 320x256 frame)
 - `--crop full|playfield`: show the full 320x256 PAL canvas or crop to the 320x200 playfield (default `full`)
@@ -44,12 +44,17 @@ Display settings can also live in `config.toml` (CLI flags win; unknown keys are
 ```toml
 [display]
 scale = 4
-filter = "scanlines"
+filter = "crt"
 scale_mode = "integer"
 aspect = "square"
 crop = "full"
 fullscreen = "off"
 vsync = true
+crt_mask = "aperture"       # aperture, shadow, none
+crt_mask_strength = 0.25    # 0.0..1.0
+crt_scanlines = 0.65        # 0.0..1.0
+crt_curvature = 0.08        # 0.0..0.3 (0 disables curvature and corner mask)
+crt_bloom = 0.22            # 0.0..1.0 (0 disables bloom)
 ```
 - `--inspect-assets`: launch the 50 Hz ModernGL Lair Background, Sprite, and Hitbox Inspector (`--cel kn4 --background fol1.t`)
 - `--extract-assets`: unpack ADF assets into `--output-dir` (default `./build/assets`) with `manifest.json`

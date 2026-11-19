@@ -11,6 +11,8 @@ from harddaysengine.cli import inspect_assets as inspect_cli, main as cli_main
 from harddaysengine.render.presentation import (
     AspectMode,
     CropMode,
+    CrtMaskMode,
+    CrtSettings,
     DisplaySettings,
     FilterPreset,
     FullscreenMode,
@@ -98,8 +100,8 @@ def test_cli_values_beat_the_file(tmp_path: Path) -> None:
         ("[display]\nscale = true\n", "integer"),
         ("[display]\nscale = 0\n", "1..8"),
         ("[display]\nscale = 9\n", "1..8"),
-        ('[display]\nfilter = "crt"\n', "faithful, scanlines"),
-        ("[display]\nfilter = 1\n", "faithful, scanlines"),
+        ('[display]\nfilter = "vhs"\n', "faithful, scanlines, crt"),
+        ("[display]\nfilter = 1\n", "faithful, scanlines, crt"),
         ('[display]\nscale_mode = "nearest"\n', "integer, sharp-bilinear, fit"),
         ("[display]\nscale_mode = 2\n", "integer, sharp-bilinear, fit"),
         ('[display]\naspect = "4:3"\n', "square, pal"),
@@ -108,6 +110,14 @@ def test_cli_values_beat_the_file(tmp_path: Path) -> None:
         ("[display]\nfullscreen = true\n", "off, desktop, exclusive"),
         ('[display]\nvsync = "true"\n', "boolean"),
         ("[display]\nvsync = 1\n", "boolean"),
+        ('[display]\ncrt_mask = "grille"\n', "aperture, shadow, none"),
+        ("[display]\ncrt_mask = 1\n", "aperture, shadow, none"),
+        ("[display]\ncrt_mask_strength = true\n", "number"),
+        ("[display]\ncrt_mask_strength = 1.5\n", "0.0..1.0"),
+        ("[display]\ncrt_scanlines = -0.1\n", "0.0..1.0"),
+        ("[display]\ncrt_curvature = 0.5\n", "0.0..0.3"),
+        ("[display]\ncrt_bloom = nan\n", "0.0..1.0"),
+        ("[display]\ncrt_bloom = inf\n", "0.0..1.0"),
     ],
 )
 def test_invalid_file_values_raise(tmp_path: Path, text: str, message: str) -> None:
@@ -115,12 +125,41 @@ def test_invalid_file_values_raise(tmp_path: Path, text: str, message: str) -> N
         resolve_display_settings(_config(tmp_path, text))
 
 
+def test_crt_file_values_and_int_coercion(tmp_path: Path) -> None:
+    cfg = _config(
+        tmp_path,
+        '[display]\nfilter = "crt"\ncrt_mask = "shadow"\n'
+        "crt_mask_strength = 0.4\ncrt_scanlines = 1\ncrt_curvature = 0\ncrt_bloom = 0.35\n",
+    )
+    settings = resolve_display_settings(cfg)
+    assert settings.filter is FilterPreset.CRT
+    assert not settings.scanlines
+    assert settings.crt == CrtSettings(
+        mask=CrtMaskMode.SHADOW,
+        mask_strength=0.4,
+        scanlines=1.0,
+        curvature=0.0,
+        bloom=0.35,
+    )
+
+
+def test_crt_settings_dataclass_validates_bounds() -> None:
+    with pytest.raises(ValueError, match="crt_mask_strength"):
+        CrtSettings(mask_strength=-0.01)
+    with pytest.raises(ValueError, match="crt_scanlines"):
+        CrtSettings(scanlines=1.1)
+    with pytest.raises(ValueError, match="crt_curvature"):
+        CrtSettings(curvature=0.35)
+    with pytest.raises(ValueError, match="crt_bloom"):
+        CrtSettings(bloom=float("nan"))
+
+
 @pytest.mark.parametrize(
     ("scale", "filter_name", "scale_mode", "aspect", "crop", "fullscreen"),
     [
         (0, None, None, None, None, None),
         (9, None, None, None, None, None),
-        (None, "crt", None, None, None, None),
+        (None, "vhs", None, None, None, None),
         (None, None, "nearest", None, None, None),
         (None, None, None, "4:3", None, None),
         (None, None, None, None, "overscan", None),

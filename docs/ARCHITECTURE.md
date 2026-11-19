@@ -5430,13 +5430,45 @@ relative to its input, its input-texture sampling mode (`nearest` or `linear`), 
 core shader pair, and optional custom uniforms. Pass 0 crops the 320×256 RGB canvas to
 `SourceRect` (`u_in_origin`, `u_in_size`); subsequent passes read the full intermediate texture
 `(0, 0, prev_w, prev_h)` produced by the preceding pass. `faithful` has no passes (even
-pixels, no effects). `scanlines` adds §13.3 in the final viewport presentation step. Later
-presets: `crt` (T13.6) and `smooth` (T13.7). Switching presets or pass lists releases the
-intermediate framebuffers, textures, vertex arrays and shader programs of the previous chain.
+pixels, no effects). `scanlines` adds §13.3 in the final viewport presentation step. `crt`
+(§13.4.1, T13.6) runs a two-pass separable source-resolution bloom in the post-process chain
+followed by a native-resolution CRT presentation pass. Later preset: `smooth` (T13.7).
+Switching presets or pass lists releases the intermediate framebuffers, textures, vertex arrays
+and shader programs of the previous chain.
 Passes run on RGB values, so palette effects (fades, colour cycling, recoloured messages,
 pulses) need no change. In the game window and inspector, `F9` (`Shift+F9` to cycle backwards)
 cycles the active `FilterPreset` at runtime; `WindowController` consumes the press and release
 before `InputRouter`, so preset switches never affect simulation state or replay recordings.
+
+#### 13.4.1 CRT preset (`render/shaders/crt.*`, T13.6)
+
+The `crt` preset models four physical properties of a PAL RGB CRT monitor in linear light
+($\gamma = 2.2$), implemented clean-room from published descriptions of CRT optics:
+
+1. **Light phosphor bloom (intermediate chain passes):** two separable 9-tap Gaussian passes
+   (`crt_bloom_h.frag` and `crt_bloom_v.frag`, $\sigma \approx 2.0$ source pixels) run in
+   `PostProcessChain` at 1× cropped source resolution (`320×256` or `320×200`). Pass 0 converts
+   cropped canvas pixels to linear light and extracts highlights through a smooth luminance knee
+   (`[0.12, 0.65]`). Intermediate values are square-root encoded in RGBA8 to prevent 8-bit
+   banding in dark tails. When `crt_bloom == 0.0`, no bloom passes are executed.
+2. **Optional barrel curvature and rounded bezel mask:** in the final destination-resolution pass
+   (`crt.vert` / `crt.frag`), centred viewport coordinates $c \in [-1, 1]^2$ undergo an
+   axis-coupled barrel warp $c' = c + c \cdot (c_y^2, c_x^2) \cdot k$ where $k$ is
+   `crt_curvature` (`0.0..0.3`). Edge midpoints remain flush with the letterboxed viewport while
+   corners curve inward; an aspect-corrected rounded-rectangle signed distance field smoothly
+   feathers the glass bezel over ~1.5 output pixels. Setting `crt_curvature = 0.0` disables both
+   warp and corner masking.
+3. **Intensity-dependent scanline beam profile:** horizontal sampling uses analytic
+   sharp-bilinear reconstruction to keep 1-pixel art crisp under curvature. Vertically, the two
+   nearest source rows are combined in linear light using a Gaussian spot weight whose sharpness
+   narrows for dark pixels and widens for bright pixels (`crt_scanlines` in `0.0..1.0`; `0.0`
+   reduces to flat linear interpolation). Evaluating the beam from continuous source-row offsets
+   eliminates moiré banding at arbitrary output resolutions and under barrel warp.
+4. **Phosphor mask:** applied in output pixel coordinates (`gl_FragCoord.xy`) with gentle
+   average-luminance compensation:
+   - `aperture`: 3-pixel vertical RGB phosphor stripes repeating every 3 output columns.
+   - `shadow`: 3-column × 2-row staggered RGB phosphor triads with subtle horizontal slot bridges.
+   - `none`: no phosphor mask.
 
 ### 13.5 Surround (optional, T13.8)
 
@@ -5463,9 +5495,14 @@ silently falls back to a default. Each key is added by the task that implements 
 | Key | Type / values | Default | CLI | Task |
 |---|---|---|---|---|
 | `scale` | integer 1..8: initial window size, in canvas pixels | 3 | `--scale` | T13.1 |
-| `filter` | `faithful`, `scanlines` | `faithful` | `--filter` | T13.1 |
+| `filter` | `faithful`, `scanlines`, `crt` | `faithful` | `--filter` | T13.1, T13.6 |
 | `scale_mode` | `integer`, `sharp-bilinear`, `fit` | `integer` | `--scale-mode` | T13.2 |
 | `aspect` | `square`, `pal` | `square` | `--aspect` | T13.2 |
 | `crop` | `full`, `playfield` | `full` | `--crop` | T13.2 |
 | `fullscreen` | `off`, `desktop`, `exclusive` | `off` | `--fullscreen` | T13.3 |
 | `vsync` | boolean | true | `--vsync` / `--no-vsync` | T13.4 |
+| `crt_mask` | `aperture`, `shadow`, `none` | `aperture` | — | T13.6 |
+| `crt_mask_strength` | float 0.0..1.0 | 0.25 | — | T13.6 |
+| `crt_scanlines` | float 0.0..1.0 | 0.65 | — | T13.6 |
+| `crt_curvature` | float 0.0..0.3 | 0.08 | — | T13.6 |
+| `crt_bloom` | float 0.0..1.0 | 0.22 | — | T13.6 |

@@ -16,6 +16,7 @@ import moderngl
 import numpy as np
 
 from harddaysengine.render.presentation import FilterPreset
+from harddaysengine.render.shaders import load_shader
 from harddaysengine.render.viewport import CANVAS_HEIGHT, CANVAS_WIDTH, SourceRect
 
 if TYPE_CHECKING:
@@ -117,18 +118,42 @@ def make_identity_pass(
     )
 
 
+CRT_BLOOM_H_PASS = PostPassSpec(
+    name="crt_bloom_h",
+    fragment_shader=load_shader("crt_bloom_h.frag"),
+    scale_x=1,
+    scale_y=1,
+    sampling=PassSampling.LINEAR,
+)
+
+CRT_BLOOM_V_PASS = PostPassSpec(
+    name="crt_bloom_v",
+    fragment_shader=load_shader("crt_bloom_v.frag"),
+    scale_x=1,
+    scale_y=1,
+    sampling=PassSampling.LINEAR,
+)
+
 _PRESET_PASSES: dict[FilterPreset, tuple[PostPassSpec, ...]] = {
     FilterPreset.FAITHFUL: (),
     FilterPreset.SCANLINES: (),
+    FilterPreset.CRT: (CRT_BLOOM_H_PASS, CRT_BLOOM_V_PASS),
 }
 
 
-def preset_passes(preset: FilterPreset) -> tuple[PostPassSpec, ...]:
+def preset_passes(
+    preset: FilterPreset,
+    *,
+    crt_bloom_enabled: bool = True,
+) -> tuple[PostPassSpec, ...]:
     """Return the ordered intermediate pass list for ``preset`` (§13.4).
 
     ``faithful`` has no intermediate passes. ``scanlines`` also uses zero intermediate passes
     and applies output-grid scanlines in the final viewport presentation step (§13.3).
+    ``crt`` runs two separable source-resolution bloom passes when ``crt_bloom_enabled`` is true.
     """
+    if preset is FilterPreset.CRT and not crt_bloom_enabled:
+        return ()
     return _PRESET_PASSES[preset]
 
 
@@ -213,9 +238,9 @@ class PostProcessChain:
         """Currently allocated intermediate output textures in pass order."""
         return tuple(stage.texture for stage in self._stages)
 
-    def set_preset(self, preset: FilterPreset) -> None:
+    def set_preset(self, preset: FilterPreset, *, crt_bloom_enabled: bool = True) -> None:
         """Switch to ``preset``, releasing intermediate GPU resources when the passes change."""
-        passes = preset_passes(preset)
+        passes = preset_passes(preset, crt_bloom_enabled=crt_bloom_enabled)
         if self._active_preset is preset and self._active_passes == passes:
             return
         self._release_stages()

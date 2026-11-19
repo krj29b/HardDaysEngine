@@ -16,13 +16,20 @@ from harddaysengine.render.overlay import (
     pack_overlay_vertex_array,
 )
 from harddaysengine.render.postfx import PostPassSpec, PostProcessChain
-from harddaysengine.render.presentation import DisplaySettings
+from harddaysengine.render.presentation import (
+    CrtMaskMode,
+    CrtSettings,
+    DisplaySettings,
+    FilterPreset,
+)
+from harddaysengine.render.shaders import load_shader
 from harddaysengine.render.viewport import (
     CANVAS_HEIGHT as CANVAS_HEIGHT,
     CANVAS_WIDTH as CANVAS_WIDTH,
     PLAYFIELD_HEIGHT as PLAYFIELD_HEIGHT,
     PLAYFIELD_Y_OFFSET as PLAYFIELD_Y_OFFSET,
     PresentationViewport,
+    SourceRect,
     compute_viewport,
 )
 
@@ -33,6 +40,11 @@ if TYPE_CHECKING:
     from harddaysengine.assets.hit import HitFrame
 
 MAX_OVERLAY_LINES = 2048
+_CRT_MASK_IDS: dict[CrtMaskMode, int] = {
+    CrtMaskMode.NONE: 0,
+    CrtMaskMode.APERTURE: 1,
+    CrtMaskMode.SHADOW: 2,
+}
 
 _INDEXED_VERT = """
 #version 330 core
@@ -252,6 +264,16 @@ class HardDaysRenderer:
             self._crt_prog,
             [(self._fs_vbo, "2f 2f", "in_pos", "in_uv")],
         )
+        self._crt_shader_prog = ctx.program(
+            vertex_shader=load_shader("crt.vert"),
+            fragment_shader=load_shader("crt.frag"),
+        )
+        _set_uniform_int(self._crt_shader_prog, "u_canvas_tex", 0)
+        _set_uniform_int(self._crt_shader_prog, "u_bloom_tex", 1)
+        self._crt_shader_vao = ctx.vertex_array(
+            self._crt_shader_prog,
+            [(self._fs_vbo, "2f 2f", "in_pos", "in_uv")],
+        )
         self.post_chain = PostProcessChain(ctx)
 
     def set_palette(self, palette: Sequence[RGBColor]) -> None:
@@ -336,35 +358,18 @@ class HardDaysRenderer:
 
         return lines
 
-    def present_to_framebuffer(
+    def _present_standard(
         self,
         target: moderngl.Framebuffer,
         window_size: tuple[int, int],
+        pv: PresentationViewport,
+        present_tex: moderngl.Texture,
+        present_src: SourceRect,
+        present_tex_size: tuple[int, int],
         *,
-        settings: DisplaySettings | None = None,
-        scanlines: bool | None = None,
-        passes: Sequence[PostPassSpec] | None = None,
-    ) -> PresentationViewport:
-        """Present the canvas into ``target`` through the post-process chain and viewport (§13)."""
-        resolved = settings if settings is not None else DisplaySettings()
-        use_scanlines = resolved.scanlines if scanlines is None else scanlines
+        use_scanlines: bool,
+    ) -> None:
         win_w, win_h = window_size
-        pv = compute_viewport(
-            win_w,
-            win_h,
-            crop=resolved.crop,
-            aspect=resolved.aspect,
-            scale_mode=resolved.scale_mode,
-        )
-
-        if passes is None:
-            self.post_chain.set_preset(resolved.filter)
-        else:
-            self.post_chain.set_passes(passes)
-        present_tex, present_src, present_tex_size = self.post_chain.execute(
-            self._canvas_tex, pv.source
-        )
-
         target.use()
         self.ctx.viewport = (0, 0, win_w, win_h)
         self.ctx.clear(0.0, 0.0, 0.0, 1.0)
@@ -394,6 +399,82 @@ class HardDaysRenderer:
 
         present_tex.use(location=0)
         self._fs_vao.render(moderngl.TRIANGLES)
+
+    def _present_crt(
+        self,
+        target: moderngl.Framebuffer,
+        window_size: tuple[int, int],
+        pv: PresentationViewport,
+        crt: CrtSettings,
+        bloom_tex: moderngl.Texture,
+    ) -> None:
+        win_w, win_h = window_size
+        target.use()
+        self.ctx.viewport = (0, 0, win_w, win_h)
+        self.ctx.clear(0.0, 0.0, 0.0, 1.0)
+        self.ctx.viewport = pv.gl_viewport
+
+        self._canvas_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        bloom_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+
+        prog = self._crt_shader_prog
+        _set_uniform_vec2(prog, "u_src_origin", (float(pv.source.x), float(pv.source.y)))
+        _set_uniform_vec2(prog, "u_src_size", (float(pv.source.width), float(pv.source.height)))
+        _set_uniform_vec2(prog, "u_tex_size", (float(CANVAS_WIDTH), float(CANVAS_HEIGHT)))
+        _set_uniform_vec2(prog, "u_dest_size", (float(pv.dest_width), float(pv.dest_height)))
+        _set_uniform_int(prog, "u_mask_type", _CRT_MASK_IDS[crt.mask])
+        _set_uniform_float(prog, "u_mask_strength", crt.mask_strength)
+        _set_uniform_float(prog, "u_scanline_strength", crt.scanlines)
+        _set_uniform_float(prog, "u_curvature", crt.curvature)
+        _set_uniform_float(prog, "u_bloom_strength", crt.bloom)
+
+        self._canvas_tex.use(location=0)
+        bloom_tex.use(location=1)
+        self._crt_shader_vao.render(moderngl.TRIANGLES)
+
+    def present_to_framebuffer(
+        self,
+        target: moderngl.Framebuffer,
+        window_size: tuple[int, int],
+        *,
+        settings: DisplaySettings | None = None,
+        scanlines: bool | None = None,
+        passes: Sequence[PostPassSpec] | None = None,
+    ) -> PresentationViewport:
+        """Present the canvas into ``target`` through the post-process chain and viewport (§13)."""
+        resolved = settings if settings is not None else DisplaySettings()
+        use_scanlines = resolved.scanlines if scanlines is None else scanlines
+        win_w, win_h = window_size
+        pv = compute_viewport(
+            win_w,
+            win_h,
+            crop=resolved.crop,
+            aspect=resolved.aspect,
+            scale_mode=resolved.scale_mode,
+        )
+
+        if passes is None and resolved.filter is FilterPreset.CRT:
+            self.post_chain.set_preset(FilterPreset.CRT, crt_bloom_enabled=resolved.crt.bloom > 0.0)
+            bloom_tex, _, _ = self.post_chain.execute(self._canvas_tex, pv.source)
+            self._present_crt(target, window_size, pv, resolved.crt, bloom_tex)
+            return pv
+
+        if passes is None:
+            self.post_chain.set_preset(resolved.filter)
+        else:
+            self.post_chain.set_passes(passes)
+        present_tex, present_src, present_tex_size = self.post_chain.execute(
+            self._canvas_tex, pv.source
+        )
+        self._present_standard(
+            target,
+            window_size,
+            pv,
+            present_tex,
+            present_src,
+            present_tex_size,
+            use_scanlines=use_scanlines,
+        )
         return pv
 
     def present_to_screen(
@@ -422,6 +503,8 @@ class HardDaysRenderer:
     def release(self) -> None:
         """Release all GPU resources owned by this renderer."""
         self.post_chain.release()
+        self._crt_shader_vao.release()
+        self._crt_shader_prog.release()
         self._fs_vao.release()
         self._fs_vbo.release()
         self._crt_prog.release()

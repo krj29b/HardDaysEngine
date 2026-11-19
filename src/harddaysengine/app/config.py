@@ -8,16 +8,23 @@ Display settings come from the ``[display]`` table, with CLI flags taking preced
 
 from __future__ import annotations
 
+import math
 import tomllib
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from harddaysengine.render.presentation import (
+    MAX_CRT_CURVATURE,
+    MAX_CRT_STRENGTH,
     MAX_WINDOW_SCALE,
+    MIN_CRT_CURVATURE,
+    MIN_CRT_STRENGTH,
     MIN_WINDOW_SCALE,
     AspectMode,
     CropMode,
+    CrtMaskMode,
+    CrtSettings,
     DisplaySettings,
     FilterPreset,
     FullscreenMode,
@@ -33,7 +40,20 @@ ADF_IMAGE_SIZE = 901_120
 ENV_ADF_DIR = "HARDDAYSENGINE_ADF_DIR"
 DISPLAY_TABLE = "display"
 _DISPLAY_KEYS = frozenset(
-    {"scale", "filter", "scale_mode", "aspect", "crop", "fullscreen", "vsync"}
+    {
+        "scale",
+        "filter",
+        "scale_mode",
+        "aspect",
+        "crop",
+        "fullscreen",
+        "vsync",
+        "crt_mask",
+        "crt_mask_strength",
+        "crt_scanlines",
+        "crt_curvature",
+        "crt_bloom",
+    }
 )
 
 
@@ -147,6 +167,61 @@ def _bool_setting(value: object, key: str, source: str) -> bool:
     return value
 
 
+def _float_setting(
+    value: object,
+    key: str,
+    lo: float,
+    hi: float,
+    source: str,
+) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ConfigError(f"{source}: {key} must be a number, got {type(value).__name__}")
+    number = float(value)
+    if not math.isfinite(number) or not lo <= number <= hi:
+        raise ConfigError(f"{source}: {key} must be {lo}..{hi}, got {value!r}")
+    return number
+
+
+def _resolve_crt_settings(
+    table: Mapping[str, object],
+    defaults: CrtSettings,
+    file_source: str,
+) -> CrtSettings:
+    return CrtSettings(
+        mask=_enum_setting(
+            table.get("crt_mask", defaults.mask.value), CrtMaskMode, "crt_mask", file_source
+        ),
+        mask_strength=_float_setting(
+            table.get("crt_mask_strength", defaults.mask_strength),
+            "crt_mask_strength",
+            MIN_CRT_STRENGTH,
+            MAX_CRT_STRENGTH,
+            file_source,
+        ),
+        scanlines=_float_setting(
+            table.get("crt_scanlines", defaults.scanlines),
+            "crt_scanlines",
+            MIN_CRT_STRENGTH,
+            MAX_CRT_STRENGTH,
+            file_source,
+        ),
+        curvature=_float_setting(
+            table.get("crt_curvature", defaults.curvature),
+            "crt_curvature",
+            MIN_CRT_CURVATURE,
+            MAX_CRT_CURVATURE,
+            file_source,
+        ),
+        bloom=_float_setting(
+            table.get("crt_bloom", defaults.bloom),
+            "crt_bloom",
+            MIN_CRT_STRENGTH,
+            MAX_CRT_STRENGTH,
+            file_source,
+        ),
+    )
+
+
 def resolve_display_settings(
     config_path: Path,
     *,
@@ -200,4 +275,5 @@ def resolve_display_settings(
             file_source,
         ),
         vsync=resolved_vsync,
+        crt=_resolve_crt_settings(table, defaults.crt, file_source),
     )

@@ -10,6 +10,8 @@ from harddaysengine.app.game import GameSession
 from harddaysengine.app.input import InputFrame, InputRouter, ReplayRecording
 from harddaysengine.app.window import WindowController
 from harddaysengine.render.postfx import (
+    CRT_BLOOM_H_PASS,
+    CRT_BLOOM_V_PASS,
     DEFAULT_POST_VERT,
     IDENTITY_PASS,
     IDENTITY_POST_FRAG,
@@ -74,6 +76,8 @@ def test_post_pass_spec_defaults_and_validation() -> None:
 def test_preset_passes_for_built_in_presets() -> None:
     assert preset_passes(FilterPreset.FAITHFUL) == ()
     assert preset_passes(FilterPreset.SCANLINES) == ()
+    assert preset_passes(FilterPreset.CRT) == (CRT_BLOOM_H_PASS, CRT_BLOOM_V_PASS)
+    assert preset_passes(FilterPreset.CRT, crt_bloom_enabled=False) == ()
 
 
 def test_f9_cycles_filter_preset_and_is_consumed_before_router() -> None:
@@ -89,7 +93,7 @@ def test_f9_cycles_filter_preset_and_is_consumed_before_router() -> None:
     assert window.filter_preset is FilterPreset.FAITHFUL
     assert window.apply_display_settings(base_settings) == base_settings
 
-    # F9 keydown cycles FAITHFUL -> SCANLINES
+    # F9 keydown cycles FAITHFUL -> SCANLINES -> CRT -> FAITHFUL
     assert window.consume_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=0))
     assert window.filter_preset is FilterPreset.SCANLINES
     assert window.apply_display_settings(base_settings).filter is FilterPreset.SCANLINES
@@ -106,7 +110,17 @@ def test_f9_cycles_filter_preset_and_is_consumed_before_router() -> None:
         players={kid: router.sample_frame().for_player(kid) for kid in KnightId}
     )
 
-    # Shift+F9 cycles backwards SCANLINES -> FAITHFUL
+    # Second F9 cycles SCANLINES -> CRT
+    assert window.consume_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=0))
+    assert window.filter_preset is FilterPreset.CRT
+    assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
+
+    # Shift+F9 cycles backwards CRT -> SCANLINES -> FAITHFUL
+    assert window.consume_event(
+        pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=pygame.KMOD_LSHIFT)
+    )
+    assert window.filter_preset is FilterPreset.SCANLINES
+    assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
     assert window.consume_event(
         pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=pygame.KMOD_LSHIFT)
     )
@@ -145,7 +159,7 @@ def test_f9_preset_hotkey_is_never_recorded_in_replays() -> None:
             live.step_tick(frame)
             live_hashes.append(live.state_hash())
 
-        assert window.filter_preset is FilterPreset.FAITHFUL
+        assert window.filter_preset is FilterPreset.CRT
 
         rec = ReplayRecording(seed=0xCAFEBABE, players=(KnightId.RED,), frames=tuple(recorded))
         restored = ReplayRecording.from_dict(rec.to_dict())
