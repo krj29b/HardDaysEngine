@@ -21,6 +21,7 @@ from harddaysengine.render.presentation import (
     CropMode,
     DisplaySettings,
     FilterPreset,
+    FullscreenMode,
     ScaleMode,
 )
 
@@ -84,6 +85,12 @@ def build_inspect_parser() -> argparse.ArgumentParser:
         choices=[mode.value for mode in CropMode],
         default=None,
         help="source canvas crop (default: [display] crop or full)",
+    )
+    parser.add_argument(
+        "--fullscreen",
+        choices=[mode.value for mode in FullscreenMode],
+        default=None,
+        help="window fullscreen mode (default: [display] fullscreen or off)",
     )
     parser.add_argument(
         "--headless-frames",
@@ -153,6 +160,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             scale_mode=args.scale_mode,
             aspect=args.aspect,
             crop=args.crop,
+            fullscreen=args.fullscreen,
         )
     except ConfigError as exc:
         parser.error(str(exc))

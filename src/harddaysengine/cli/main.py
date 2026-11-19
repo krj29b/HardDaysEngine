@@ -17,7 +17,13 @@ from harddaysengine.app.config import (
 from harddaysengine.app.game import run_game_window, run_headless_session
 from harddaysengine.cli.extract import run_extraction
 from harddaysengine.cli.inspect_assets import run_inspector_cli
-from harddaysengine.render.presentation import AspectMode, CropMode, FilterPreset, ScaleMode
+from harddaysengine.render.presentation import (
+    AspectMode,
+    CropMode,
+    FilterPreset,
+    FullscreenMode,
+    ScaleMode,
+)
 from harddaysengine.sim.rng import DEFAULT_SEED
 
 if TYPE_CHECKING:
@@ -104,6 +110,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="source canvas crop (default: [display] crop or full)",
     )
     parser.add_argument(
+        "--fullscreen",
+        choices=[mode.value for mode in FullscreenMode],
+        default=None,
+        help="window fullscreen mode (default: [display] fullscreen or off)",
+    )
+    parser.add_argument(
         "--headless-frames",
         type=int,
         default=None,
@@ -183,6 +195,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             scale_mode=args.scale_mode,
             aspect=args.aspect,
             crop=args.crop,
+            fullscreen=args.fullscreen,
         )
     except ConfigError as exc:
         parser.error(str(exc))

@@ -33,6 +33,10 @@ Useful CLI flags:
 
 - `--scale <N>`: initial window size, 1..8 canvas pixels per pixel (default `3`)
 - `--filter faithful|scanlines`: presentation preset (default `faithful`, crisp pixels without effects)
+- `--scale-mode integer|sharp-bilinear|fit`: viewport scaling mode (default `integer`)
+- `--aspect square|pal`: source pixel shape (default `square`; `pal` gives 4:3 on the full 320x256 frame)
+- `--crop full|playfield`: show the full 320x256 PAL canvas or crop to the 320x200 playfield (default `full`)
+- `--fullscreen off|desktop|exclusive`: start windowed, borderless desktop fullscreen, or exclusive fullscreen (default `off`)
 
 Display settings can also live in `config.toml` (CLI flags win; unknown keys are an error):
 
@@ -40,6 +44,10 @@ Display settings can also live in `config.toml` (CLI flags win; unknown keys are
 [display]
 scale = 4
 filter = "scanlines"
+scale_mode = "integer"
+aspect = "square"
+crop = "full"
+fullscreen = "off"
 ```
 - `--inspect-assets`: launch the 50 Hz ModernGL Lair Background, Sprite, and Hitbox Inspector (`--cel kn4 --background fol1.t`)
 - `--extract-assets`: unpack ADF assets into `--output-dir` (default `./build/assets`) with `manifest.json`
@@ -63,6 +71,7 @@ and confirm each with Enter. Keyboard slots follow portrait selection order.
 | Continue a message or Next Day | Press and release Enter or Space |
 | Leave a sheet or town | Move the pointer to its close/Exit region and confirm |
 | Quit the campaign to farewell on the map | Q |
+| Toggle fullscreen (not recorded in replays) | F11 or Alt+Enter |
 
 Player 2 uses WASD/F, player 3 IJKL/U, and player 4 the numeric keypad/Keypad 0 for
 movement/fire. Gamepads use the directional pad or left stick and button 0 for fire.

@@ -13,6 +13,7 @@ from harddaysengine.render.presentation import (
     CropMode,
     DisplaySettings,
     FilterPreset,
+    FullscreenMode,
     ScaleMode,
 )
 
@@ -34,6 +35,7 @@ def test_defaults_are_the_faithful_look(tmp_path: Path) -> None:
         scale_mode=ScaleMode.INTEGER,
         aspect=AspectMode.SQUARE,
         crop=CropMode.FULL,
+        fullscreen=FullscreenMode.OFF,
     )
     assert not settings.scanlines
 
@@ -42,7 +44,8 @@ def test_file_values_apply(tmp_path: Path) -> None:
     cfg = _config(
         tmp_path,
         '[display]\nscale = 5\nfilter = "scanlines"\n'
-        'scale_mode = "sharp-bilinear"\naspect = "pal"\ncrop = "playfield"\n',
+        'scale_mode = "sharp-bilinear"\naspect = "pal"\ncrop = "playfield"\n'
+        'fullscreen = "desktop"\n',
     )
     settings = resolve_display_settings(cfg)
     assert settings == DisplaySettings(
@@ -51,6 +54,7 @@ def test_file_values_apply(tmp_path: Path) -> None:
         scale_mode=ScaleMode.SHARP_BILINEAR,
         aspect=AspectMode.PAL,
         crop=CropMode.PLAYFIELD,
+        fullscreen=FullscreenMode.DESKTOP,
     )
     assert settings.scanlines
 
@@ -59,7 +63,8 @@ def test_cli_values_beat_the_file(tmp_path: Path) -> None:
     cfg = _config(
         tmp_path,
         '[display]\nscale = 5\nfilter = "scanlines"\n'
-        'scale_mode = "fit"\naspect = "pal"\ncrop = "playfield"\n',
+        'scale_mode = "fit"\naspect = "pal"\ncrop = "playfield"\n'
+        'fullscreen = "exclusive"\n',
     )
     settings = resolve_display_settings(
         cfg,
@@ -68,6 +73,7 @@ def test_cli_values_beat_the_file(tmp_path: Path) -> None:
         scale_mode="integer",
         aspect="square",
         crop="full",
+        fullscreen="off",
     )
     assert settings == DisplaySettings(
         scale=2,
@@ -75,6 +81,7 @@ def test_cli_values_beat_the_file(tmp_path: Path) -> None:
         scale_mode=ScaleMode.INTEGER,
         aspect=AspectMode.SQUARE,
         crop=CropMode.FULL,
+        fullscreen=FullscreenMode.OFF,
     )
 
 
@@ -93,6 +100,8 @@ def test_cli_values_beat_the_file(tmp_path: Path) -> None:
         ("[display]\nscale_mode = 2\n", "integer, sharp-bilinear, fit"),
         ('[display]\naspect = "4:3"\n', "square, pal"),
         ('[display]\ncrop = "overscan"\n', "full, playfield"),
+        ('[display]\nfullscreen = "borderless"\n', "off, desktop, exclusive"),
+        ("[display]\nfullscreen = true\n", "off, desktop, exclusive"),
     ],
 )
 def test_invalid_file_values_raise(tmp_path: Path, text: str, message: str) -> None:
@@ -101,14 +110,15 @@ def test_invalid_file_values_raise(tmp_path: Path, text: str, message: str) -> N
 
 
 @pytest.mark.parametrize(
-    ("scale", "filter_name", "scale_mode", "aspect", "crop"),
+    ("scale", "filter_name", "scale_mode", "aspect", "crop", "fullscreen"),
     [
-        (0, None, None, None, None),
-        (9, None, None, None, None),
-        (None, "crt", None, None, None),
-        (None, None, "nearest", None, None),
-        (None, None, None, "4:3", None),
-        (None, None, None, None, "overscan"),
+        (0, None, None, None, None, None),
+        (9, None, None, None, None, None),
+        (None, "crt", None, None, None, None),
+        (None, None, "nearest", None, None, None),
+        (None, None, None, "4:3", None, None),
+        (None, None, None, None, "overscan", None),
+        (None, None, None, None, None, "borderless"),
     ],
 )
 def test_invalid_cli_values_raise(
@@ -118,6 +128,7 @@ def test_invalid_cli_values_raise(
     scale_mode: str | None,
     aspect: str | None,
     crop: str | None,
+    fullscreen: str | None,
 ) -> None:
     with pytest.raises(ConfigError, match="--"):
         resolve_display_settings(
@@ -127,6 +138,7 @@ def test_invalid_cli_values_raise(
             scale_mode=scale_mode,
             aspect=aspect,
             crop=crop,
+            fullscreen=fullscreen,
         )
 
 
@@ -152,6 +164,8 @@ def test_cli_passes_resolved_settings_to_the_game_window(
             "sharp-bilinear",
             "--crop",
             "playfield",
+            "--fullscreen",
+            "desktop",
         ]
     )
     assert rc == 0
@@ -162,6 +176,7 @@ def test_cli_passes_resolved_settings_to_the_game_window(
             scale_mode=ScaleMode.SHARP_BILINEAR,
             aspect=AspectMode.PAL,
             crop=CropMode.PLAYFIELD,
+            fullscreen=FullscreenMode.DESKTOP,
         )
     ]
 
@@ -178,7 +193,18 @@ def test_inspector_cli_passes_resolved_settings(
     monkeypatch.setattr(inspect_cli, "run_inspector_cli", fake_inspect)
     cfg = _config(tmp_path, '[display]\nscale = 4\ncrop = "playfield"\n')
     rc = inspect_cli.main(
-        ["--config", str(cfg), "--aspect", "pal", "--scale-mode", "fit", "--filter", "scanlines"]
+        [
+            "--config",
+            str(cfg),
+            "--aspect",
+            "pal",
+            "--scale-mode",
+            "fit",
+            "--filter",
+            "scanlines",
+            "--fullscreen",
+            "exclusive",
+        ]
     )
     assert rc == 0
     assert seen == [
@@ -188,6 +214,7 @@ def test_inspector_cli_passes_resolved_settings(
             scale_mode=ScaleMode.FIT,
             aspect=AspectMode.PAL,
             crop=CropMode.PLAYFIELD,
+            fullscreen=FullscreenMode.EXCLUSIVE,
         )
     ]
 

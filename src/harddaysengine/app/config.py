@@ -20,6 +20,7 @@ from harddaysengine.render.presentation import (
     CropMode,
     DisplaySettings,
     FilterPreset,
+    FullscreenMode,
     ScaleMode,
 )
 
@@ -31,7 +32,7 @@ ADF_IMAGE_SIZE = 901_120
 
 ENV_ADF_DIR = "HARDDAYSENGINE_ADF_DIR"
 DISPLAY_TABLE = "display"
-_DISPLAY_KEYS = frozenset({"scale", "filter", "scale_mode", "aspect", "crop"})
+_DISPLAY_KEYS = frozenset({"scale", "filter", "scale_mode", "aspect", "crop", "fullscreen"})
 
 
 class ConfigError(Exception):
@@ -146,6 +147,7 @@ def resolve_display_settings(
     scale_mode: str | None = None,
     aspect: str | None = None,
     crop: str | None = None,
+    fullscreen: str | None = None,
 ) -> DisplaySettings:
     """Resolve ``[display]`` settings: CLI value, then the config file, then the default (§13.7)."""
     table = _display_table(load_config_file(config_path), config_path)
@@ -174,4 +176,13 @@ def resolve_display_settings(
             aspect, table, AspectMode, "aspect", "--aspect", defaults.aspect, file_source
         ),
         crop=_resolve_enum(crop, table, CropMode, "crop", "--crop", defaults.crop, file_source),
+        fullscreen=_resolve_enum(
+            fullscreen,
+            table,
+            FullscreenMode,
+            "fullscreen",
+            "--fullscreen",
+            defaults.fullscreen,
+            file_source,
+        ),
     )

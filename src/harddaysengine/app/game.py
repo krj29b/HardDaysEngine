@@ -39,6 +39,7 @@ from harddaysengine.app.sheet_screen import SheetScreen
 from harddaysengine.app.stonehenge_screen import StoneScreen
 from harddaysengine.app.town_screen import TownScreen
 from harddaysengine.app.valley_screen import ValleyScreen
+from harddaysengine.app.window import WindowController
 from harddaysengine.app.wizard_screen import WizardScreen
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.dice_house_data import SCRIPT_HUNK as DICE_SCRIPT_HUNK, parse_dice_house
@@ -2511,6 +2512,12 @@ def _step_window_ticks(
     return True, replay_idx
 
 
+def _pump_game_events(window: WindowController, router: InputRouter) -> None:
+    for event in pygame.event.get():
+        if not window.consume_event(event):
+            router.process_pygame_event(event)
+
+
 def run_game_window(
     adf_dir: Path,
     *,
@@ -2539,8 +2546,8 @@ def run_game_window(
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
-    win_w, win_h = initial_window_size(settings)
-    pygame.display.set_mode((win_w, win_h), pygame.OPENGL | pygame.DOUBLEBUF | pygame.RESIZABLE)
+    window = WindowController(initial_window_size(settings), settings.fullscreen)
+    window.open()
 
     ctx = moderngl.create_context(require=330)
     base_renderer = HardDaysRenderer(ctx)
@@ -2556,8 +2563,7 @@ def run_game_window(
     try:
         running = True
         while running:
-            for event in pygame.event.get():
-                router.process_pygame_event(event)
+            _pump_game_events(window, router)
             now_ns = time.perf_counter_ns()
             ticks = acc.advance(now_ns - prev_ns)
             prev_ns = now_ns

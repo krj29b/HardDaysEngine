@@ -43,6 +43,14 @@ class CropMode(StrEnum):
     PLAYFIELD = "playfield"
 
 
+class FullscreenMode(StrEnum):
+    """Host window fullscreen mode (§13.7)."""
+
+    OFF = "off"
+    DESKTOP = "desktop"
+    EXCLUSIVE = "exclusive"
+
+
 @dataclass(slots=True, frozen=True)
 class DisplaySettings:
     """Resolved ``[display]`` settings (§13.7)."""
@@ -52,6 +60,7 @@ class DisplaySettings:
     scale_mode: ScaleMode = ScaleMode.INTEGER
     aspect: AspectMode = AspectMode.SQUARE
     crop: CropMode = CropMode.FULL
+    fullscreen: FullscreenMode = FullscreenMode.OFF
 
     @property
     def scanlines(self) -> bool:

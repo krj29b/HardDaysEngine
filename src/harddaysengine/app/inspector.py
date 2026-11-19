@@ -15,6 +15,7 @@ from harddaysengine.app.loop import (
     FIGHT_FRAME_DIVISOR_NORMAL,
     Accumulator50Hz,
 )
+from harddaysengine.app.window import WindowController
 from harddaysengine.assets.arena import composite_arena_background, decode_arena
 from harddaysengine.assets.cel import CelFrame, DecodedCel, decode_cel, flip_cel_frame
 from harddaysengine.assets.extract import CEL_EXTENSIONS, PICTURE_EXTENSIONS, encode_rgba_png_bytes
@@ -378,8 +379,12 @@ def _handle_keydown(key: int, state: InspectorState, renderer: HardDaysRenderer)
     return True
 
 
-def _pump_events(state: InspectorState, renderer: HardDaysRenderer) -> bool:
+def _pump_events(
+    state: InspectorState, renderer: HardDaysRenderer, window: WindowController
+) -> bool:
     for event in pygame.event.get():
+        if window.consume_event(event):
+            continue
         if event.type == pygame.QUIT:
             return False
         if event.type == pygame.KEYDOWN and not _handle_keydown(event.key, state, renderer):
@@ -420,8 +425,8 @@ def run_inspector_window(
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
-    win_w, win_h = initial_window_size(settings)
-    pygame.display.set_mode((win_w, win_h), pygame.OPENGL | pygame.DOUBLEBUF | pygame.RESIZABLE)
+    window = WindowController(initial_window_size(settings), settings.fullscreen)
+    window.open()
 
     ctx = moderngl.create_context(require=330)
     renderer = HardDaysRenderer(ctx)
@@ -434,7 +439,7 @@ def run_inspector_window(
     try:
         running = True
         while running:
-            running = _pump_events(state, renderer)
+            running = _pump_events(state, renderer, window)
             now_ns = time.perf_counter_ns()
             ticks = acc.advance(now_ns - prev_ns)
             prev_ns = now_ns
