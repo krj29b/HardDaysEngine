@@ -1006,3 +1006,33 @@ altar and druids on `P4`) carry into later scenes.
 hunk offsets remain in `app/intro_player.py`. The `program` intro runs for 5,332 deterministic
 VBLs, and the `mog` knight-select screen maps portrait 0 (Blue) to `"SIR GODBER"` and portrait
 1 (Yellow) to `"SIR RICHARD"` directly from the `$1EFE..$1FBC` compare blocks.
+
+## ADR-051: Stream host audio through an SDL callback ring, not per-VBL mixer sounds
+**Status:** ACCEPTED (2026-11-19, T12.2)
+**Context:** `AudioEngine.step_vbl` made one 20 ms `pygame.mixer.Sound` per VBL and queued it
+on a channel. A channel holds one queued sound, and the 50 Hz simulation runs 0, 1 or 2 VBLs per
+60 Hz display frame. Measured over 3 s: 17% of chunks were overwritten before playing, and the
+channel ran dry 65 times. The result was the jittery sound reported in the playthrough.
+**Decision:** Put rendered PCM into a thread-safe ring (`app/audio_stream.py`). A
+`pygame._sdl2.audio.AudioDevice` callback drains it at the exact render rate
+(`allowed_changes=0`). The ring prebuffers one device chunk (512 frames) plus two VBLs,
+primes again after an underrun, and drops the oldest frames above six further VBLs.
+`pygame.mixer.init` still brings up the SDL audio subsystem. `_sdl2.audio` is a typed module
+that pygame-ce ships, but it is underscored: pin pygame-ce upgrades against
+`tests/unit/test_audio_stream.py`.
+**Consequences:** Measured over 10 s at 60 Hz: zero underruns, zero drops, about 62 ms
+latency. The simulation, Paula rendering and replay hashes are unchanged, because only the
+host's delivery of the PCM changed.
+
+## ADR-052: The "Next Day" screen uses `ch.piv` colours 0..15 over the map's 16..31
+**Status:** ACCEPTED (2026-11-19, T12.1; corrects §11.12)
+**Context:** §11.12 said the screen is shown "under the map palette", and the host faded to the
+whole map palette. The original installs the shared "last picture" palette buffer just after
+decoding `ch.piv`. That decode writes the picture's 16 words (4 planes) into the buffer. The
+playthrough showed orange trees on olive green ("inverted colours").
+**Decision:** `GameSession._calendar_target_palette` combines `ch.piv` colours 0..15 with the
+map picture's 16..31. The tick-time fade and the render path both use it.
+**Consequences:** Night sky, dark trees and a dark moon shadow, as in the original. A real-disk
+test checks the faded-in palette words. The farewell screen (`message.piv`, also 4 planes)
+still uses its own 16 colours with the upper half black; it renders correctly and was not
+changed.

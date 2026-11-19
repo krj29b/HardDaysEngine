@@ -670,6 +670,14 @@ This part is not original code. It turns register writes into sound:
   of a second. The original makes its starts during the frame after the VBL, so only sub-frame
   timing differs. ADKCON is not modelled: init writes it to clear modulation, which the synth
   never enables.
+- Host output (not original): the host loop runs VBLs in bursts that follow the display (0, 1
+  or 2 per 60 Hz frame), so each rendered fiftieth goes into a PCM ring. An SDL audio callback
+  drains it at exactly the render rate (no device-side rate change). Playback starts once one
+  device chunk plus two VBLs are queued, and starts again the same way after any underrun.
+  Above six further VBLs the oldest frames are dropped to the middle of that window, which
+  bounds latency when the host clock drifts ahead (`app/audio_stream.py`, ADR-051). Queueing
+  one `pygame.mixer` sound per VBL is wrong: a channel holds a single queued sound, so bursts
+  overwrite chunks and gaps starve the channel (Audit v4 "jittery sound").
 
 ### 6.2.10 Bank loading and instrument relocation (T11.23c)
 
@@ -3249,8 +3257,13 @@ rounds. `moon_index` starts at 0 and `moon_frame` at 45; the cycle of eight moon
 
 **"Next Day" screen:** the map colours are stopped (fade out); the `ch.piv` picture is shown
 with the "Next Day" text from `mog` and the moon as frame `moon_frame` of `ki.cel` at
-(119, 12), under the map palette; the game waits for a fire press and release; the palette
-goes to black.
+(119, 12); the game waits for a fire press and release; the palette goes to black.
+
+The palette faded in (36-tick fade-to) is the shared "last picture" palette. Decoding a picture
+writes its palette words into that buffer, but `ch.piv` has 4 planes and writes only words
+0..15. So the screen shows `ch.piv`'s own colours 0..15 (the night sky and trees) over the map
+picture's colours 16..31, which the moon cel and the bold text use. Showing the whole map
+palette instead gives orange trees on olive green: the Audit v4 "inverted colours" defect.
 
 ### 11.13 Computer-controlled knights
 

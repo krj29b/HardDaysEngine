@@ -473,6 +473,15 @@ class GameSession:
                 return self._overworld_palette(map_pic.palette)
         return self._picture_target_palette("bg2.PIV")
 
+    def _calendar_target_palette(self) -> tuple[RGBColor, ...]:
+        """The "Next Day" palette: ``ch.piv`` colours 0..15 over the map's 16..31 (§11.12).
+
+        Decoding the 4-plane picture rewrites only the first 16 words of the shared picture
+        palette, so the upper half keeps the map picture's colours (the moon cel uses them).
+        """
+        picture = self._picture_target_palette("ch.piv")
+        return tuple(picture[:16]) + tuple(self._overworld_target_palette()[16:32])
+
     def _begin_fade_in(self, target_palette: Sequence[RGBColor]) -> None:
         self.palette_fx.fade_in(_palette_to_rgb12(target_palette), divisor=1, from_black=True)
 
@@ -1816,7 +1825,7 @@ class GameSession:
             return
         if self._calendar_phase == 0:
             self._calendar_phase = 1
-            self._begin_fade_in(self._overworld_target_palette())
+            self._begin_fade_in(self._calendar_target_palette())
             return
         if self.overworld.turns.wait_fire(primary.fire or primary.confirm):
             self.palette_fx.set_palette([0] * 32)
@@ -2311,7 +2320,7 @@ class GameSession:
         palette = (
             self._picture_target_palette("message.piv")
             if farewell
-            else self._overworld_target_palette()
+            else self._calendar_target_palette()
         )
         renderer.set_palette(palette)
 

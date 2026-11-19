@@ -2,6 +2,9 @@
 
 Each host VBL runs the synth tick, then the sound requests reported during that tick, then
 renders one fiftieth of a second (§6.2.9). Without synth data the channels stay silent.
+
+Rendered PCM goes into a ring that an SDL audio callback drains at the device rate, so VBL
+bursts from the host loop never drop or starve audio (ADR-051).
 """
 
 from __future__ import annotations
@@ -10,7 +13,9 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 import pygame
+from pygame._sdl2 import audio as sdl_audio
 
+from harddaysengine.app.audio_stream import PcmRing
 from harddaysengine.app.module_player import ModulePlayer
 from harddaysengine.app.paula import Paula, SampleMemory, address
 from harddaysengine.app.sound_front import SoundFront
@@ -29,6 +34,8 @@ if TYPE_CHECKING:
     from harddaysengine.sim.sound import SoundRequest
 
 DEFAULT_MIX_RATE = 22050
+DEVICE_CHUNK = 512
+_BYTES_PER_FRAME = 4
 
 
 class AudioEngine:
@@ -46,22 +53,38 @@ class AudioEngine:
         self._pending: list[Callable[[], None]] = []
         self._headless = headless
         self._mixer_initialized = False
-        self._output_channel: pygame.mixer.Channel | None = None
+        self._device: sdl_audio.AudioDevice | None = None
+        self._ring = PcmRing.for_device(sample_rate, DEVICE_CHUNK)
         self._current_music_title: str | None = None
         self._is_music_playing = False
         if not headless:
             self._init_pygame_mixer(sample_rate)
 
     def _init_pygame_mixer(self, sample_rate: int) -> None:
+        """Bring up SDL audio, then open a callback device at exactly ``sample_rate``."""
         try:
             if pygame.mixer.get_init() is None:
-                pygame.mixer.init(frequency=sample_rate, size=-16, channels=2, buffer=1024)
-            self._output_channel = pygame.mixer.Channel(0)
+                pygame.mixer.init(frequency=sample_rate, size=-16, channels=2, buffer=DEVICE_CHUNK)
+            self._device = sdl_audio.AudioDevice(
+                devicename=None,
+                iscapture=False,
+                frequency=sample_rate,
+                audioformat=sdl_audio.AUDIO_S16,
+                numchannels=2,
+                chunksize=DEVICE_CHUNK,
+                allowed_changes=0,
+                callback=self._fill_device,
+            )
+            self._device.pause(0)
             self._mixer_initialized = True
         except pygame.error:
             self._headless = True
             self._mixer_initialized = False
-            self._output_channel = None
+            self._device = None
+
+    def _fill_device(self, _device: sdl_audio.AudioDevice, stream: memoryview) -> None:
+        """SDL audio thread: copy the next queued frames, or silence, into ``stream``."""
+        stream[:] = self._ring.read(len(stream) // _BYTES_PER_FRAME).tobytes()
 
     @property
     def headless(self) -> bool:
@@ -154,16 +177,8 @@ class AudioEngine:
         for action in pending:
             action()
         pcm = self.paula.render_frame()
-        if self._mixer_initialized and self._output_channel is not None and len(pcm) > 0:
-            try:
-                sound = pygame.sndarray.make_sound(pcm)
-                if not self._output_channel.get_busy():
-                    self._output_channel.play(sound)
-                else:
-                    self._output_channel.queue(sound)
-            except pygame.error:
-                self._mixer_initialized = False
-                self._headless = True
+        if self._device is not None:
+            self._ring.write(pcm)
         return pcm
 
     def play_music(self, module: DecodedModule, *, loops: int = -1) -> bool:
@@ -188,12 +203,12 @@ class AudioEngine:
     def close(self) -> None:
         """Stop music and shut down `pygame.mixer` if initialized."""
         self.stop_music()
+        if self._device is not None:
+            self._device.close()
+            self._device = None
         if self._mixer_initialized:
+            self._mixer_initialized = False
             try:
                 pygame.mixer.quit()
             except pygame.error:
-                self._mixer_initialized = False
-                self._output_channel = None
                 return
-            self._mixer_initialized = False
-            self._output_channel = None

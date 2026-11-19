@@ -217,3 +217,22 @@ def test_changed_map_handler_instruction_is_rejected(adf_dir: Path) -> None:
     sections[36] = replace(sections[36], data=bytes(data))
     with pytest.raises(MogVersionError, match="unexpected map instruction"):
         parse_turn_rules(replace(executable, sections=tuple(sections)))
+
+
+def test_next_day_fades_to_ch_piv_colours_over_the_map_upper_half(adf_dir: Path) -> None:
+    """The 4-plane ``ch.piv`` decode replaces only picture palette words 0..15 (§11.12)."""
+    from harddaysengine.app.game import _palette_to_rgb12
+
+    session = _session(adf_dir)
+    bundle = session.asset_bundle
+    assert bundle is not None
+    picture, world_map = bundle.get_picture("ch.piv"), bundle.get_test_picture(8)
+    assert picture is not None and world_map is not None and len(picture.palette) == 16
+    session._show_next_day()
+    for _ in range(200):
+        _ticks(session, 1)
+        if session._calendar_phase == 1 and not session.palette_fx.is_fading:
+            break
+    expected = _palette_to_rgb12(tuple(picture.palette) + tuple(world_map.palette[16:32]))
+    assert session.scene == GameScene.NEW_DAY
+    assert tuple(session.palette_fx.current_palette()) == expected
