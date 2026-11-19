@@ -347,6 +347,103 @@ T11.11, Troggs first). **M2** walking the map into that fight and out again (T11
 T11.13, T11.15 for the loot sheet). **M3** all places (T11.16 to T11.21). **M4** a campaign that
 can be finished (the remaining T11.10 handlers, T11.14, T11.22 to T11.24).
 
+### Phase 12: Playthrough Audit v4
+
+Defects reported from a human playthrough after Phase 11: the "Next Day" screen palette
+(**T12.1**, ADR-052) and jittery host audio delivery (**T12.2**, ADR-051). Both are done; see
+`PROGRESS.md`.
+
+### Phase 13: Host presentation quality
+
+**Scope.** Everything here is host presentation and is *not original behaviour*. It runs after
+the palette lookup, on the RGB image of the 320×256 canvas, and never feeds back into `sim/`, the
+indexed canvas, palette effects or replay state. The default must keep the look of the original
+(crisp pixels, correct shape). Every filter is opt-in. ADR-053 (PROPOSED) governs the phase.
+
+**Current defects this phase fixes** (in `render/renderer.py` / `app/game.py`, as of `f45f0d5`):
+the canvas is stretched to the resizable window with no aspect lock; nearest-neighbour sampling at
+non-integer scales gives uneven pixel widths that shimmer in motion; the scanline term uses
+texture coordinates (`fract(v_uv.y * 256.0)`) and bands into moiré at non-integer heights; the
+50 Hz simulation on a 60 Hz display shows ticks for one or two refreshes (uneven motion); and
+there is no fullscreen.
+
+**Out of scope (deferred):** replacement or enhanced art packs and truecolour or AI-upscaled
+assets. Palette effects (fades, map colour cycling, recoloured messages, pulses) work on colour
+indices, so these need a new RGBA path and their own ADR. Widescreen content beyond decorative
+side panels is also out of scope.
+
+#### 13A: Correct presentation
+- **T13.1 Presentation spec and settings (`ARCHITECTURE.md` §13, `app/config.py`, `cli/main.py`):**
+  write §13 "Host presentation (not original)". It covers the canvas and the 320×200 playfield
+  inside it, the overscan crop (full 320×256 or playfield only), the pixel-aspect options (square,
+  or PAL 4:3 display), the scaling modes (integer, sharp-bilinear, fit), the filter chain order
+  and the refresh-pacing rules. Add a `[display]` table to `config.toml` (`scale_mode`, `aspect`,
+  `crop`, `filter`, `fullscreen`, `vsync`) with CLI overrides, validated through `ConfigError`.
+  *Accept:* unit tests for parsing, precedence (CLI > env > file > default) and invalid values;
+  the defaults reproduce the faithful look.
+- **T13.2 Aspect-correct viewport and even pixels (`render/viewport.py`, `render/renderer.py`):**
+  a pure function maps (window size, crop, aspect, scale mode) to a letterboxed destination
+  rectangle and scale. Integer mode uses the largest whole scale that fits. Sharp-bilinear
+  nearest-scales by an integer, then bilinear-filters the small remainder, so every source pixel
+  covers the same screen width to within the antialiasing seam. Scanlines move to the
+  output-pixel grid (per source row, in screen space). Both the game and the inspector use the
+  same path. *Accept:* table tests of the viewport maths (including odd sizes and both aspects); a
+  `gl` test renders a 1-pixel checkerboard canvas at 1920×1080 and 1366×768 and measures column
+  widths (integer mode: all equal; sharp-bilinear: max−min ≤ 1 and no missing columns); no
+  scanline banding (row-luminance period equals the scale); `state_hash` unchanged across all
+  modes.
+- **T13.3 Window modes (`app/game.py`, `app/inspector.py`, `app/input.py`):** borderless
+  desktop fullscreen and exclusive fullscreen, toggled by `F11` (unbound today; `F1`..`F3` are
+  pause) and `Alt+Enter`, plus window resize while keeping the T13.2 letterbox. `Return` is the
+  confirm key, so `app` consumes the `Alt+Enter` press (and its release) before the input router.
+  The toggle therefore never confirms a menu and is never recorded in replays. *Accept:* the
+  toggle round-trips without losing the GL context or the textures; `Alt+Enter` on a menu does not
+  confirm; a recorded replay with toggles replays to the same hashes; README controls updated.
+- **T13.4 Refresh pacing (`app/loop.py`, `app/game.py`):** first *measure*. Log, per presented
+  frame, which simulation tick it shows, and report the histogram of refreshes per tick on the
+  developer's 60 Hz display. Then offer the options §13 specifies. On a display whose refresh is a
+  multiple of 50 Hz (50, 100, 150, 200), present each tick for an equal number of refreshes. In
+  exclusive fullscreen, request a 50 Hz mode when the display lists one. With vsync off or VRR,
+  present once per tick. On 60 Hz, keep the current behaviour (frame blending is rejected: it
+  breaks the indexed pixel-exact look). The audio ring of ADR-051 needs no change. *Accept:* the
+  measured histograms before and after are recorded in `PROGRESS.md`; a pure pacing-schedule unit
+  test proves equal refreshes per tick for 50/100/150/200 Hz; simulation tick timing is unchanged
+  (replay hashes identical).
+
+#### 13B: Optional filters
+- **T13.5 Post-process chain (`render/postfx.py`):** after the palette lookup, the RGB canvas
+  goes through an ordered list of shader passes into intermediate textures, then into the T13.2
+  viewport. Presets are `faithful` (default: even pixels, no effects), `scanlines`, `crt` (T13.6)
+  and `smooth` (T13.7). Each pass declares its scale and filtering. *Accept:* the `faithful` preset
+  is byte-identical to T13.2 output; a pass list with one identity pass is byte-identical too;
+  resources are released on preset switch (no leaked textures across 100 switches in a `gl`
+  test); preset selection comes from config/CLI and a hotkey that is not recorded in replays.
+- **T13.6 CRT preset (`render/shaders/crt.*`):** an aperture-grille or shadow mask, optional
+  barrel curvature with corner mask, scanline beam profile and a light bloom. Written in our own
+  words from published descriptions of CRT behaviour, never ported from GPL shader code. The
+  parameters live in config with sane defaults. *Accept:* a contact sheet at 1920×1080 of the
+  map, a fight, a town and a message screen, reviewed; GPU time measured on the developer machine
+  and recorded (target ≤ 2 ms per frame at 1080p); `state_hash` unchanged.
+- **T13.7 Edge-smoothing preset (`render/shaders/smooth.*`):** an xBR-style edge-directed
+  upscaler (rules from the published algorithm description), applied before the final integer
+  scale. *Accept:* reviewed contact sheet with the same scenes as T13.6; dithered areas (the map's
+  forests) stay stable, without crawling, across palette cycling; GPU time recorded.
+- **T13.8 Widescreen surround (optional, `render/postfx.py`):** for windows wider than the
+  letterbox, fill the side bars with a heavily blurred, darkened stretch of the current frame or a
+  solid colour (config). Purely decorative; the game image is never cropped or stretched.
+  *Accept:* contact sheet at 2560×1080; the off setting is byte-identical to T13.2.
+
+#### 13C: Close-out
+- **T13.9 Presentation verification:** extend the audit tool so `scripts/audit_shots.py --present
+  <preset> --size WxH` renders through the real present path into an offscreen framebuffer. Write
+  per-preset contact sheets for the menu/map, places, fights and the Next Day screen. *Accept:*
+  sheets reviewed for every preset at 1920×1080 and 1366×768; the full gate is green; one replay
+  run under every preset produces identical hashes; README documents settings, presets and keys.
+
+Order: T13.1 → T13.2 → (T13.3, T13.4 in either order) → T13.5 → (T13.6, T13.7, T13.8) → T13.9.
+**M5** is reached after 13A (a correct, crisp, fullscreen-capable picture); 13B is optional
+polish.
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:

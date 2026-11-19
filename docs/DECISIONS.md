@@ -1036,3 +1036,28 @@ map picture's 16..31. The tick-time fade and the render path both use it.
 test checks the faded-in palette words. The farewell screen (`message.piv`, also 4 planes)
 still uses its own 16 colours with the upper half black; it renders correctly and was not
 changed.
+
+## ADR-053: Host presentation is a non-original, opt-in layer after the palette lookup
+**Status:** PROPOSED (2026-11-19, Phase 13 plan; awaiting user acceptance)
+**Context:** The present path stretches the canvas to the window without an aspect lock. It
+samples nearest-neighbour at non-integer scales (uneven pixel widths) and computes scanlines in
+texture space (moiré). The 50 Hz simulation also judders on 60 Hz displays. Better filters
+(CRT, edge smoothing) are wanted, but the project's goal is the original model, and palette
+effects work on colour indices.
+**Decision (proposed):**
+1. Presentation is everything after the palette lookup of the 320×256 indexed canvas. It may
+   scale, filter, letterbox and pace frames. It never writes to the canvas, the palette or any
+   `sim/` state, and never consumes recorded input.
+2. The default (`faithful`) shows even, crisp pixels at the correct shape with no effects. Every
+   other look is an opt-in preset selected in `[display]` config, on the CLI or by an unrecorded
+   hotkey.
+3. All passes live in `render/` (no pygame). Window modes and refresh pacing live in `app/`.
+   Shaders are written from published descriptions of CRT behaviour and scaling algorithms,
+   never ported from GPL shader code.
+4. Frame blending and interpolation between ticks are rejected: they break the indexed,
+   pixel-exact image.
+5. Replacement, enhanced or truecolour art is out of scope here and needs its own ADR, because
+   palette effects would have to be reimplemented for it.
+**Consequences:** Presentation changes are verified by measured pixel geometry, by reviewed
+per-preset contact sheets and by identical replay hashes under every preset. They are never
+verified by fidelity tests of the simulation.

@@ -145,6 +145,23 @@ fix needs a measured or reviewed real-disk reproduction before and after.
 | T12.1 | "Next Day" screen colours | T11.13 | DONE | Claude/2026-11-19. The host faded `ch.piv` to the whole map palette (orange trees on olive green). The original installs the "last picture" buffer after the 4-plane decode has rewritten only words 0..15: `ch.piv` 0..15 over the map's 16..31. §11.12 corrected, ADR-052. Real-disk test fails before, passes after. Reviewed `build/audit-turns/turns_clock_dragon.png`. Farewell (`message.piv`) looks correct and is unchanged. |
 | T12.2 | Jittery sound | T11.23c | DONE | Claude/2026-11-19. One 20 ms `mixer.Sound` per VBL on a channel with a single queue slot: at 60 Hz display, 17% of chunks were overwritten and there were 65 starvation restarts in 3 s. Now an SDL callback drains a prebuffered PCM ring (`app/audio_stream.py`): 0 underruns and 0 drops in 10 s, about 62 ms latency. §6.2.9 host-output note, ADR-051. Sim, Paula output and replay hashes unchanged. Paula mix verified overflow-free (max ±32768). |
 
+## Phase 13 — Host presentation quality (plan: `IMPLEMENTATION_PLAN.md` Phase 13, ADR-053 PROPOSED)
+
+Presentation only: nothing here changes `sim/`, the indexed canvas, palette effects or replay
+hashes. ADR-053 must be ACCEPTED by the user before T13.2 starts.
+
+| ID | Task | Deps | Status | Notes |
+|---|---|---|---|---|
+| T13.1 | Presentation spec (§13) & `[display]` settings | T12.2 | TODO | |
+| T13.2 | Aspect-correct letterbox, integer / sharp-bilinear scaling, output-grid scanlines | T13.1 | TODO | |
+| T13.3 | Fullscreen / window modes (`F11`, `Alt+Enter` consumed before the router) | T13.2 | TODO | |
+| T13.4 | Refresh pacing: measure 60 Hz judder, equal refreshes per tick on 50 Hz multiples, 50 Hz exclusive mode | T13.2 | TODO | |
+| T13.5 | Post-process chain & presets (`faithful` default) | T13.2 | TODO | |
+| T13.6 | CRT preset | T13.5 | TODO | |
+| T13.7 | Edge-smoothing (xBR-style) preset | T13.5 | TODO | |
+| T13.8 | Widescreen surround (optional) | T13.5 | TODO | |
+| T13.9 | Presentation verification: audit `--present`, per-preset sheets, hash invariance, README | T13.3, T13.4, T13.6, T13.7 | TODO | |
+
 ## Session log
 
 - 2026-11-14 · Antigravity · Phase 1 (T1.1–T1.6) · Skeleton, governance, gate and CI.
