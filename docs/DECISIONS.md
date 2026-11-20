@@ -1070,3 +1070,19 @@ missing disks. Command-line invocations retain the CLI's working-directory seman
 Each build stages a fresh directory, adds the renderer shaders, and ships an empty disk folder.
 The workflow tests the extracted archive before a tag-scoped job receives release write access.
 Manual branch runs make the same ZIP available for testing.
+
+## ADR-055: One tag workflow builds both release formats before publishing
+
+**Status:** ACCEPTED (2026-11-20, T14.2)
+**Context:** Windows releases followed version tags, while PyPI required a manual run and
+checked out a fixed 0.1.1 commit. The two outputs could therefore describe different source.
+**Decision:** Consolidate in `publish.yml`, retaining the `pypi` environment and Trusted
+Publisher identity. Validate the exact `v<version>` tag against both package version declarations,
+run the full quality gate, then build the Python archives and tested Windows ZIP in separate
+jobs from the triggering commit. Both publication jobs require both builds. Manual branch
+runs produce artifacts only. Remove the superseded Windows-only workflow.
+**Consequences:** A tag publishes to both services with job-scoped write/OIDC permissions.
+Publication is not atomic across services; retry failed jobs only. PyPI duplicate versions
+fail rather than silently skipping existing files. GitHub retries replace named assets while
+retaining release notes. No simulation or asset format architecture changes. Hosted publication
+and Trusted Publisher/environment configuration require verification on GitHub/PyPI.

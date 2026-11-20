@@ -452,6 +452,11 @@ polish.
   Verify the extracted executable and empty disk folder before attaching the ZIP to a tagged
   GitHub Release. A manual branch run produces a test artifact.
 
+- **T14.2 Unified tag release.** Use one version tag to build and check the Python archives and
+  Windows ZIP from the same commit, then publish to PyPI and GitHub Releases. Validate tag/package
+  version equality, require the full gate and both builds before publication, preserve branch
+  previews, and retain the existing PyPI Trusted Publisher workflow/environment identity.
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:

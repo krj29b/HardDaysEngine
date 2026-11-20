@@ -1,44 +1,101 @@
-name: Publish HardDaysEngine to PyPI
+name: Release HardDaysEngine
 
 on:
+  push:
+    tags: ['v[0-9]*']
   workflow_dispatch:
 
 permissions: {}
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install
+      - run: uv sync --frozen
+      - name: Check package and tag versions
+        id: version
+        run: |
+          uv run python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+          from harddaysengine import __version__
+
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          if version != __version__:
+              raise SystemExit("pyproject.toml and harddaysengine.__version__ must match")
+          if os.environ["GITHUB_REF_TYPE"] == "tag":
+              if os.environ["GITHUB_REF_NAME"] != f"v{version}":
+                  raise SystemExit(f"Release tag must be v{version}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\n")
+          PY
+      - name: Quality gate
+        run: uv run python scripts/quality_gate.py
+
+  build-python:
+    needs: validate
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
-      - name: Check out the approved 0.1.1 source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: f3aff73051a474c114b2ca50fe9edb85d179e9b2
           persist-credentials: false
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Build and check release archives
         run: |
           python -m pip install build twine
           python -m build
           python -m twine check --strict dist/*
-
       - uses: actions/upload-artifact@v4
         with:
           name: distributions
           path: dist/
           if-no-files-found: error
 
-  publish:
-    needs: build
+  build-windows:
+    needs: validate
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install
+      - run: uv sync --frozen --no-dev
+      - name: Build and test the extracted ZIP
+        run: uv run --no-sync --with pyinstaller==6.22.3 python scripts/build_windows.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: build/HardDaysEngine-Windows-x64.zip
+          if-no-files-found: error
+
+  publish-pypi:
+    needs: [validate, build-python, build-windows]
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/harddaysengine/0.1.1/
+      url: https://pypi.org/project/harddaysengine/${{ needs.validate.outputs.version }}/
     permissions:
       id-token: write
     steps:
@@ -46,6 +103,32 @@ jobs:
         with:
           name: distributions
           path: dist/
-
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-github:
+    needs: [build-python, build-windows]
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-portable
+          path: dist/
+      - name: Attach archives to the tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --verify-tag --generate-notes --title "HardDaysEngine $TAG"
+          fi

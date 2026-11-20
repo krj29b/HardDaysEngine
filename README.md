@@ -10,14 +10,40 @@ Extract the whole ZIP, put your three original Amiga disk images in its `disks` 
 then double-click `HardDaysEngine.exe`. The ZIP includes Python and the engine's libraries.
 Your graphics driver must support OpenGL 3.3.
 
-### Publishing the Windows ZIP
+### Publishing a release
 
-Push a version tag such as `v1.2.3` on a commit containing the **Windows portable release**
-workflow. GitHub Actions builds the ZIP on Windows, extracts and tests it, then attaches it
-to the release for that tag. It creates the release if needed. To test before tagging,
-select **Actions → Windows portable release → Run workflow** on a branch and download the
-`windows-portable` workflow artifact. To run for an existing tag that contains the workflow,
-use `gh workflow run windows-release.yml --ref <tag>`.
+The **Release HardDaysEngine** workflow (`.github/workflows/publish.yml`) builds both the
+Windows portable ZIP and the Python wheel/source distribution from the same tagged commit.
+The full quality gate and both builds must succeed before either publication job starts.
+
+1. Set matching versions in `pyproject.toml` and `src/harddaysengine/__init__.py`.
+2. Commit and push the release changes, then push the matching tag, for example:
+
+   ```powershell
+   git tag v0.1.1
+   git push origin v0.1.1
+   ```
+
+3. Watch **Actions → Release HardDaysEngine**. The workflow publishes the Python archives to
+   PyPI and attaches the ZIP, wheel and source distribution to the tagged GitHub Release,
+   creating that release if needed. You can then edit its generated release notes.
+
+The tag must be `v` followed by the exact package version; `0.1.1` without `v` does not trigger
+this workflow. The tagged commit must contain the unified workflow.
+To test before tagging, select **Actions → Release HardDaysEngine → Run workflow** on a branch.
+This runs the same checks and builds, but only uploads the `windows-portable` and
+`distributions` workflow artifacts, without publishing. To run for an existing tag, use
+`gh workflow run publish.yml --ref v0.1.1`.
+
+PyPI uses Trusted Publishing: configure owner `krj29b`, repository `HardDaysEngine`, workflow
+`publish.yml` and environment `pypi` in the project's PyPI publishing settings. These identifiers
+are unchanged from the earlier PyPI workflow. GitHub environment protection rules must allow
+release tags (and may require a reviewer if you have configured one).
+
+The two services publish independently after the shared checks, so one publication can succeed
+while the other fails. Use **Re-run failed jobs** to retry the failed side. PyPI versions cannot
+be overwritten: if `0.1.1` has already been published, use a new version for the next release.
+A GitHub publication retry replaces assets with the same filenames while keeping release notes.
 
 ## Architecture
 
