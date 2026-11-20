@@ -2,6 +2,23 @@
 
 A clean-room Python 3.12+ reimplementation of the 1991 Amiga game *Moonstone: A Hard Days Knight* (Mindscape / Rob Anderson), built around a deterministic 50 Hz integer simulation core and a ModernGL + `pygame-ce` presentation layer.
 
+## Play on Windows
+
+Download `HardDaysEngine-Windows-x64.zip` from the assets of a
+[GitHub Release](https://github.com/krj29b/HardDaysEngine/releases) that includes a Windows build.
+Extract the whole ZIP, put your three original Amiga disk images in its `disks` folder,
+then double-click `HardDaysEngine.exe`. The ZIP includes Python and the engine's libraries.
+Your graphics driver must support OpenGL 3.3.
+
+### Publishing the Windows ZIP
+
+Push a version tag such as `v1.2.3` on a commit containing the **Windows portable release**
+workflow. GitHub Actions builds the ZIP on Windows, extracts and tests it, then attaches it
+to the release for that tag. It creates the release if needed. To test before tagging,
+select **Actions → Windows portable release → Run workflow** on a branch and download the
+`windows-portable` workflow artifact. To run for an existing tag that contains the workflow,
+use `gh workflow run windows-release.yml --ref <tag>`.
+
 ## Architecture
 
 The codebase is organized into strict unidirectional layers (`cli -> app -> render -> assets -> sim`):

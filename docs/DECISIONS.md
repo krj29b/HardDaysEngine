@@ -1061,3 +1061,12 @@ effects work on colour indices.
 **Consequences:** Presentation changes are verified by measured pixel geometry, by reviewed
 per-preset contact sheets and by identical replay hashes under every preset. They are never
 verified by fidelity tests of the simulation.
+
+## ADR-054: Distribute the portable Windows build as a GitHub Release asset
+
+The Windows workflow freezes the CLI and its native dependencies with PyInstaller. The
+double-click launcher resolves configuration beside the executable and explains where to put
+missing disks. Command-line invocations retain the CLI's working-directory semantics.
+Each build stages a fresh directory, adds the renderer shaders, and ships an empty disk folder.
+The workflow tests the extracted archive before a tag-scoped job receives release write access.
+Manual branch runs make the same ZIP available for testing.

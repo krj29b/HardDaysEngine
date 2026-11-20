@@ -446,6 +446,12 @@ Order: T13.1 → T13.2 → (T13.3, T13.4 in either order) → T13.5 → (T13.6, 
 **M5** is reached after 13A (a correct, crisp, fullscreen-capable picture); 13B is optional
 polish.
 
+### Phase 14: Distribution
+
+- **T14.1 Portable Windows release.** Package the engine and its runtime for Windows x64.
+  Verify the extracted executable and empty disk folder before attaching the ZIP to a tagged
+  GitHub Release. A manual branch run produces a test artifact.
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:
