@@ -20,20 +20,20 @@ The full quality gate and both builds must succeed before either publication job
 2. Commit and push the release changes, then push the matching tag, for example:
 
    ```powershell
-   git tag v0.1.1
-   git push origin v0.1.1
+   git tag v0.2.0
+   git push origin v0.2.0
    ```
 
 3. Watch **Actions → Release HardDaysEngine**. The workflow publishes the Python archives to
    PyPI and attaches the ZIP, wheel and source distribution to the tagged GitHub Release,
    creating that release if needed. You can then edit its generated release notes.
 
-The tag must be `v` followed by the exact package version; `0.1.1` without `v` does not trigger
+The tag must be `v` followed by the exact package version; `0.2.0` without `v` does not trigger
 this workflow. The tagged commit must contain the unified workflow.
 To test before tagging, select **Actions → Release HardDaysEngine → Run workflow** on a branch.
 This runs the same checks and builds, but only uploads the `windows-portable` and
 `distributions` workflow artifacts, without publishing. To run for an existing tag, use
-`gh workflow run publish.yml --ref v0.1.1`.
+`gh workflow run publish.yml --ref v0.2.0`.
 
 PyPI uses Trusted Publishing: configure owner `krj29b`, repository `HardDaysEngine`, workflow
 `publish.yml` and environment `pypi` in the project's PyPI publishing settings. These identifiers

@@ -457,6 +457,9 @@ polish.
   version equality, require the full gate and both builds before publication, preserve branch
   previews, and retain the existing PyPI Trusted Publisher workflow/environment identity.
 
+- **T14.3 Prepare 0.2.0 locally.** Update package/runtime versions and lock metadata, verify the
+  release version, commit and create the local annotated `v0.2.0` tag without pushing.
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:
