@@ -4,9 +4,35 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harddaysengine"
-version = "0.1.0"
-description = "Clean-room Python 3.12+ reimplementation of Moonstone: A Hard Days Knight (1991) with a deterministic 50Hz simulation core."
-readme = "README.md"
+version = "0.1.1"
+description = "An unofficial Python engine for playing Moonstone: A Hard Days Knight (1991) from your original Amiga disk images."
+readme = { content-type = "text/markdown", text = """
+# HardDaysEngine
+
+Play *Moonstone: A Hard Days Knight*, the 1991 Amiga game by Rob Anderson and
+Mindscape, using your own three original Amiga disk images (`.adf`). Choose a
+knight, travel the map, fight Troggs and the Dragon, trade in Highwood, or try
+your luck at the tavern dice table.
+
+HardDaysEngine is an independent, clean-room implementation in Python. It reads
+the game's graphics, sound, and combat tables from your disks at runtime. The
+simulation advances at 50 Hz and supports deterministic input recording and replay.
+
+## Getting started
+
+You need Python 3.12 or newer, OpenGL 3.3, and all three Amiga disk images.
+Install the engine in a Python environment, then point it at your disk folder:
+
+```console
+python -m pip install harddaysengine
+harddaysengine --adf-dir "/path/to/disks" --list-disks
+harddaysengine --adf-dir "/path/to/disks"
+```
+
+See the [project README](https://github.com/krj29b/HardDaysEngine#readme) for
+keyboard and gamepad controls, display settings, and instructions for running
+from source.
+""" }
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [
