@@ -460,6 +460,9 @@ polish.
 - **T14.3 Prepare 0.2.0 locally.** Update package/runtime versions and lock metadata, verify the
   release version, commit and create the local annotated `v0.2.0` tag without pushing.
 
+- **T14.4 Prepare 0.2.1.** Patch release for the town sheet fix (T11.16c): update package,
+  runtime and lock versions; the user creates the tag/release on GitHub.
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:

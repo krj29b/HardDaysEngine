@@ -4,4 +4,4 @@ Layers (enforced by `.importlinter` and `tests/unit/test_layering.py`):
 ``cli -> app -> render -> assets -> sim``. ``sim`` is the pure, deterministic 50 Hz kernel.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
