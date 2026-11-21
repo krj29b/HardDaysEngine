@@ -3642,6 +3642,10 @@ not locked, the click handler runs (§12.5). Then flip and redraw the moving par
 to, 2 pixels per VBL, clamped to x 0..314 and y 0..195. It is "locked" except while fire is
 held, so a click is: fire down while over a region. There is no debounce in the loop itself;
 every handler that changes something redraws the sheet, which takes long enough to act as one.
+Opening does not move the pointer: the sheet reuses the caller's shared cursor cells, so a
+sheet opened from a town button starts where that button was pressed. The open and close
+fades block, so no pointer movement or fire is polled while a palette fade runs. Without
+this, a press held across the open would immediately hit whatever lies under the pointer.
 
 **Close:** fade out, pointer off. If the hand-over flag is set (sheet 11), the dragon's
 `engaged_with` takes the knight shown in the second panel and the flag is cleared.

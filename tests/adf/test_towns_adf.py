@@ -48,6 +48,7 @@ def _click(session: GameSession, button: int) -> None:
 
 
 def _close_sheet(session: GameSession) -> None:
+    _settle(session)
     screen = session.sheet_screen
     assert screen is not None
     done = next(r for r in screen.state.regions if r.id == 7)
@@ -92,6 +93,31 @@ def test_town_sheet_call_returns_to_town_without_spending(
     _finish_town_exit(session)
     assert session.scene == GameScene.OVERWORLD and session.town_screen is None
     assert world.spent == world.budget
+
+
+@pytest.mark.parametrize("waterdeep,button", [(False, 1), (True, 1), (False, 4)])
+def test_held_fire_keeps_town_sheet_open_with_inherited_pointer(
+    adf_dir: Path, waterdeep: bool, button: int
+) -> None:
+    """A human press spans many VBLs; the sheet must not close under it (§12.2)."""
+    session = _session(adf_dir, waterdeep)
+    town = session.town_screen
+    assert town is not None
+    region = town.data.buttons[button - 1]
+    town.state.pointer_x = region.x + region.width // 2
+    town.state.pointer_y = region.y + region.height // 2
+    held = InputFrame(players={KnightId.RED: PlayerInput(fire=True)})
+    session.step_tick(held)
+    sheet = session.sheet_screen
+    assert sheet is not None
+    assert (sheet.state.pointer_x, sheet.state.pointer_y) == (
+        town.state.pointer_x,
+        town.state.pointer_y,
+    )
+    for _ in range(60):
+        session.step_tick(held)
+    assert session.scene == GameScene.STATUS and session.sheet_screen is sheet
+    assert not sheet.state.done
 
 
 @pytest.mark.parametrize("waterdeep", [False, True])

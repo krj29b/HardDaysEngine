@@ -56,6 +56,7 @@ def _offer(adf_dir: Path, slot: int = 0) -> GameSession:
     _until(session, lambda: session.sheet_screen is not None)
     assert session.sheet_screen is not None and session.sheet_screen.state.number == 3
     assert session.last_sheet_item == session.sheet_screen.state.last_item == 65535
+    _until(session, lambda: not session.palette_fx.is_fading)
     return session
 
 

@@ -177,6 +177,7 @@ hashes. ADR-053 was accepted by the user on 2026-11-19.
 |---|---|---|
 | T4.4a | Validate the inspector-only headless frame option | DONE. Codex/2026-11-21. Bare flag returns usage error 2. Verified offscreen frames and headless gameplay via the installed CLI. Full gate passed (1865 tests), plus the GL inspector screenshot test. |
 | T2.7a | Correct the original music module signature in §6.3 | DONE. Codex/2026-11-21. Verified both originals decode to FLT4 and distinguished the synthetic M.K. fixture. |
+| T11.16c | Fix Highwood Merchant/High Temple closing at once under held fire | DONE. Claude/2026-11-21. ADR-058, §12.2. Bug report: the town sheet buttons looked unselectable. A press spanning VBLs reached the sheet during its fade, at the invented (160,100) start on the done region. Sheets now poll no input while fading; town-opened sheets inherit the shared cursor position. The regression holds fire for 60 ticks. Test helpers that clicked mid-fade now settle first. Full gate passed (1868 tests). Follow-up: the opening OUT fade and non-town pointer carry-over are not yet modelled. |
 
 ## Session log
 

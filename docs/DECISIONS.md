@@ -1101,3 +1101,14 @@ gameplay runner advances headless simulation ticks. The main CLI rejects
 `--headless-frames` without `--inspect-assets` during argument parsing and points
 gameplay users to `--headless-ticks`. The dedicated inspector command already selects
 the inspector.
+
+## ADR-058: Sheets ignore input during fades and inherit the town cursor
+
+Accepted 2026-11-21 for T11.16c. In the original sheet loop, a blocking fade runs before
+polling starts, and the cursor-on call does not reposition the shared cursor. Our host
+stepped sheets during the fade, starting at (160,100) on the done region. A held town press
+therefore closed sheets 5/6 at once. `SheetScreen.step` now receives the fade flag and
+passes neutral input while fading. Wait/done processing still advances, so close
+continuations are unchanged. Town callers copy their pointer into the new sheet. Recorded
+inputs that clicked a sheet during its fade now replay differently. Other callers keep the
+(160,100) start until their cursor carry-over is specified.

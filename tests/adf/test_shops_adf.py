@@ -140,6 +140,8 @@ def test_startup_inventories_match_independent_rng_and_table_oracle(
 
 
 def _click(session: GameSession, field: int, side: int, mask: int = 0) -> None:
+    while session.palette_fx.is_fading:
+        session.step_tick(InputFrame())
     screen = session.sheet_screen
     assert screen is not None
     region = next(

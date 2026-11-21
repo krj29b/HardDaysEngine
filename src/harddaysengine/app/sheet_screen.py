@@ -50,10 +50,18 @@ class SheetScreen:
             next_knight(self.state, world)
         redraw(self.state, self.rules, world)
 
-    def step(self, world: OverworldState, inp: PlayerInput) -> bool:
-        """Advance one PAL tick using the owning knight's port (§12.2)."""
+    def step(self, world: OverworldState, inp: PlayerInput, *, fading: bool = False) -> bool:
+        """Advance one PAL tick; a palette fade blocks pointer polling (§12.2)."""
         inp = inp.normalized()
-        step(self.state, self.rules, world, inp.dx, inp.dy, inp.fire or inp.confirm)
+        live = not fading
+        step(
+            self.state,
+            self.rules,
+            world,
+            inp.dx * live,
+            inp.dy * live,
+            (inp.fire or inp.confirm) and live,
+        )
         finished = self.state.done and not self.state.wait
         if finished:
             close(self.state, world)

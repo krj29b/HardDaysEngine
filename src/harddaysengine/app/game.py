@@ -1625,6 +1625,10 @@ class GameSession:
                 TownAction.STATUS: screen.data.space_sheet,
             }[action]
             self._open_sheet(number)
+            if self.sheet_screen is not None:
+                # The sheet loop shares the town's cursor cells and never moves them (§12.2).
+                sheet = self.sheet_screen.state
+                sheet.pointer_x, sheet.pointer_y = screen.state.pointer_x, screen.state.pointer_y
         elif action != TownAction.NONE:
             self._open_town_service(action)
 
@@ -1766,7 +1770,9 @@ class GameSession:
             self._open_sheet(9)
             return
         kid = KnightId(screen.state.knight - 1)
-        done = screen.step(self.overworld, self._player_input(frame, kid))
+        done = screen.step(
+            self.overworld, self._player_input(frame, kid), fading=self.palette_fx.is_fading
+        )
         if self.audio is not None and self.asset_bundle is not None:
             self._play_requests(self.asset_bundle.get_scene_sounds().sheet(screen.state.sounds))
         self.bad_luck |= screen.state.bad_luck
