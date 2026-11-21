@@ -132,7 +132,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--headless-frames",
         type=int,
         default=None,
-        help="render N 50 Hz ticks on a standalone OpenGL 3.3 context without opening a window",
+        help="render N inspector frames offscreen (requires --inspect-assets)",
     )
     parser.add_argument(
         "--screenshot",
@@ -190,10 +190,17 @@ def _should_launch_game(argv: Sequence[str] | None, args: argparse.Namespace) ->
     )
 
 
+def _parse_args(parser: argparse.ArgumentParser, argv: Sequence[str] | None) -> argparse.Namespace:
+    args = parser.parse_args(argv)
+    if args.headless_frames is not None and not args.inspect_assets:
+        parser.error("--headless-frames requires --inspect-assets (gameplay uses --headless-ticks)")
+    return args
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Entry point. Returns the process exit code."""
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = _parse_args(parser, argv)
     try:
         adf_dir = resolve_adf_dir(
             args.adf_dir,

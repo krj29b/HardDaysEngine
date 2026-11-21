@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -24,6 +25,17 @@ def test_version(capsys: pytest.CaptureFixture[str]) -> None:
 def test_no_arguments_prints_help(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:
     assert main(["--config", str(tmp_path / "none.toml")]) == 0
     assert "usage: harddaysengine" in capsys.readouterr().out
+
+
+def test_headless_frames_requires_inspector(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(sys, "argv", ["harddaysengine", "--headless-frames", "2"])
+    monkeypatch.setattr("harddaysengine.cli.main.run_game_window", pytest.fail)
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+    assert "--headless-frames requires --inspect-assets" in capsys.readouterr().err
 
 
 def test_list_disks_complete_set(capsys: pytest.CaptureFixture[str], tmp_path: Path) -> None:

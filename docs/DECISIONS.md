@@ -1093,3 +1093,11 @@ Accepted 2026-11-21 for T11.24a. The fight runtime owns combat state, while the 
 the encounter trigger and ordered knight IDs. Both affect subsequent campaign ticks. Hash
 them together for active encounters (§12.41). Existing input recordings remain playable.
 Replaying them produces new hashes for checkpoints taken during combat.
+
+## ADR-057: Require inspector mode for offscreen frames in the main CLI
+
+Accepted 2026-11-21 for T4.4a. The asset inspector renders offscreen frames, and the
+gameplay runner advances headless simulation ticks. The main CLI rejects
+`--headless-frames` without `--inspect-assets` during argument parsing and points
+gameplay users to `--headless-ticks`. The dedicated inspector command already selects
+the inspector.

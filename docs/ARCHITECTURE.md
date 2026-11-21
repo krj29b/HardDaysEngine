@@ -709,7 +709,7 @@ banks are loaded by their existing fight loaders, and wizard/ritual callers
 install their decoded banks before starting their first sequences.
 
 ### 6.3 `.cmp` Music Modules (`music.cmp`, `vmusic.cmp` on Disk A)
-- RNC1-compressed 4-channel, 31-sample **ProTracker (`M.K.`)** modules:
+- Both RNC1-compressed modules use the four-channel, 31-sample MOD layout.
   - Decompress with the RNC1 backward decoder (§2.2).
   - Standard 1,084-byte ProTracker header:
     - `+0..+19`: 20-byte module title.
@@ -718,7 +718,8 @@ install their decoded banks before starting their first sequences.
       repeat length in words).
     - `+950`: `uint8` song length in pattern positions (`1..128`).
     - `+952..+1079`: 128-byte pattern order table (`max_pattern = max(order_table) + 1`).
-    - `+1080..+1083`: `"M.K."` signature.
+    - `+1080..+1083` holds the four ASCII signature bytes. Both original modules contain `FLT4`.
+      The synthetic test module contains `M.K.`.
     - `+1084 .. +1084 + max_pattern * 1024`: Pattern data (`64` rows × `4` channels × `4` bytes).
     - Followed by raw 8-bit signed PCM sample data for all 31 samples.
 
@@ -2169,6 +2170,9 @@ start of recording; menu changes to the roster are reproduced by replaying input
 headless CLI loads the resolved disk directory, so disk-backed gameplay can be replayed
 without a window. Omitting the optional disk directory from the Python helper retains the
 asset-free menu/map test mode, with fights explicitly unavailable.
+The main CLI uses `--headless-ticks` for this simulation. To render inspector frames
+offscreen, use `--inspect-assets --headless-frames N`. Supplying `--headless-frames`
+without selecting the inspector is a usage error.
 
 ### 10.23 Ratmen caster and shared flight slots (`T11.10b`)
 

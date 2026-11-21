@@ -51,7 +51,7 @@ class ModSampleHeader:
 
 @dataclass(slots=True, frozen=True)
 class DecodedModule:
-    """Decompressed `.cmp` 4-channel ProTracker (`M.K.`) module (ARCHITECTURE.md §6.3)."""
+    """Decompressed four-channel MOD with its on-disk signature (ARCHITECTURE.md §6.3)."""
 
     name: str
     title: str
@@ -160,7 +160,7 @@ def _parse_mod_sample(view: memoryview, index: int) -> ModSampleHeader:
 
 
 def parse_protracker_mod(name: str, mod_bytes: bytes) -> DecodedModule:
-    """Parse an uncompressed 31-sample ProTracker (`M.K.`) module (ARCHITECTURE.md §6.3)."""
+    """Read the 31-sample MOD header and its signature (ARCHITECTURE.md §6.3)."""
     if len(mod_bytes) < MOD_HEADER_SIZE:
         msg = f"ProTracker module {name!r} too short ({len(mod_bytes)} bytes < {MOD_HEADER_SIZE})"
         raise AudioFormatError(msg)

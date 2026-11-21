@@ -103,7 +103,8 @@ Presentation presets (`--filter` or `F9` / `Shift+F9` at runtime; all presets ru
 
 - `--inspect-assets`: launch the 50 Hz ModernGL Lair Background, Sprite, and Hitbox Inspector (`--cel kn4 --background fol1.t`)
 - `--extract-assets`: unpack ADF assets into `--output-dir` (default `./build/assets`) with `manifest.json`
-- `--headless-frames <N>`: run `N` 50 Hz ticks on a standalone OpenGL 3.3 context without opening a window
+- `--inspect-assets --headless-frames <N>` renders `N` inspector frames offscreen using OpenGL 3.3. Add `--screenshot <file.png>` to save the final frame.
+- `--headless-ticks <N>` runs `N` gameplay simulation ticks without opening a window and prints the final scene and state hash.
 
 ## Architecture
 

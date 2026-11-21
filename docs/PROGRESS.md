@@ -171,6 +171,13 @@ hashes. ADR-053 was accepted by the user on 2026-11-19.
 |---|---|---|---|---|
 | T11.24a | Hash campaign fight metadata | T11.24 | DONE | Codex/2026-11-21. ADR-056. Regression distinguishes lairs 19 and 20 and knight input order. All 11 fresh campaign checkpoints verified over 1952 ticks. Full quality gate passed (1864 tests), plus the real-disk GL replay across all presets. |
 
+## Audit corrections
+
+| ID | Task | Status |
+|---|---|---|
+| T4.4a | Validate the inspector-only headless frame option | DONE. Codex/2026-11-21. Bare flag returns usage error 2. Verified offscreen frames and headless gameplay via the installed CLI. Full gate passed (1865 tests), plus the GL inspector screenshot test. |
+| T2.7a | Correct the original music module signature in §6.3 | DONE. Codex/2026-11-21. Verified both originals decode to FLT4 and distinguished the synthetic M.K. fixture. |
+
 ## Session log
 
 - 2026-11-14 · Antigravity · Phase 1 (T1.1–T1.6) · Skeleton, governance, gate and CI.
