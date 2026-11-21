@@ -194,6 +194,14 @@ class ActiveEncounter:
     runtime: FightRuntime
     knight_ids: tuple[KnightId, ...]
 
+    def snapshot(self) -> dict[str, object]:
+        """Capture campaign routing, input ownership and combat state (§12.41)."""
+        return {
+            "trigger": asdict(self.trigger),
+            "knight_ids": self.knight_ids,
+            "runtime": self.runtime.snapshot(),
+        }
+
 
 class GameSession:
     """Deterministic 50 Hz multi-scene Moonstone game session (T8.3)."""
@@ -2141,7 +2149,7 @@ class GameSession:
             self.active_encounter.runtime.scene.render(scene_renderer)
 
     def state_hash(self) -> str:
-        """Hash every mutable map/actor/fight cell, independent of rendering (§11.18)."""
+        """Hash campaign replay checkpoint state, independent of rendering (§12.41)."""
         world = asdict(self.overworld)
         world.pop("rules")
         world.pop("turn_rules")
@@ -2186,9 +2194,7 @@ class GameSession:
             "sound_fade": (self._sound_fade_ticks, self._sound_return),
             "map_jobs": self.map_runtime.snapshot() if self.map_runtime else None,
             "legacy": [asdict(self.knight_combat[kid]) for kid in KnightId],
-            "encounter": self.active_encounter.runtime.snapshot()
-            if self.active_encounter
-            else None,
+            "encounter": self.active_encounter.snapshot() if self.active_encounter else None,
             "fight_lanes": self.spawn_lanes.counter,
             "flyer_toggle": self.fight_loader.flyer.toggle if self.fight_loader else 0,
             "drake_cells": asdict(self.fight_loader.drake) if self.fight_loader else None,

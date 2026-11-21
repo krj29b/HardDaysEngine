@@ -24,7 +24,7 @@ CAMPAIGN_PLAYERS = tuple(KnightId)
 
 @dataclass(slots=True, frozen=True)
 class CampaignCheckpoint:
-    """A named VBL and full session hash, stored only in local audit output."""
+    """A named VBL and campaign replay state hash, stored only in local audit output."""
 
     name: str
     tick: int

@@ -1086,3 +1086,10 @@ Publication is not atomic across services; retry failed jobs only. PyPI duplicat
 fail rather than silently skipping existing files. GitHub retries replace named assets while
 retaining release notes. No simulation or asset format architecture changes. Hosted publication
 and Trusted Publisher/environment configuration require verification on GitHub/PyPI.
+
+## ADR-056: Include campaign encounter metadata in fight checkpoints
+
+Accepted 2026-11-21 for T11.24a. The fight runtime owns combat state, while the host owns
+the encounter trigger and ordered knight IDs. Both affect subsequent campaign ticks. Hash
+them together for active encounters (§12.41). Existing input recordings remain playable.
+Replaying them produces new hashes for checkpoints taken during combat.

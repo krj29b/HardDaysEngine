@@ -5217,6 +5217,9 @@ pixel oracle independently centres and advances glyphs by width minus three.
 Menu palette rendering is read-only; the return-to-menu fade is initialized on
 the simulation tick. Selection, roster and input-edge latches participate in the
 session hash, so a rendered and an unrendered replay have identical checkpoints.
+During a fight the checkpoint includes the encounter trigger, the ordered knight IDs
+used for input and settlement, and the fight runtime snapshot. The trigger distinguishes
+otherwise identical fights that write their results to different campaign lairs.
 
 ### 12.42 The intro pass of `program` and the `mog` title & knight-select screens (T11.25)
 

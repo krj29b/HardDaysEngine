@@ -165,6 +165,12 @@ hashes. ADR-053 was accepted by the user on 2026-11-19.
 | T14.2 | Unified tag release (Windows ZIP and PyPI) | T14.1 | DONE | Codex/2026-11-20. One publish.yml validates exact tag/package versions, runs the full gate, builds both formats before either publication, and preserves branch previews and the pypi Trusted Publisher identity; ADR-055. Full gate: 1863 passed, 100 GL deselected. YAML parsed, five version-validation scenarios passed, wheel/sdist built and passed twine strict checks. First hosted tag publication remains to be verified. |
 | T14.3 | Prepare local 0.2.0 release and tag | T14.2 | DONE | Codex/2026-11-20. Package/runtime/lock versions and current README examples updated to 0.2.0. Full gate: 1863 passed, 100 GL deselected; CLI/version consistency and wheel/sdist twine strict checks pass. Local release commit and annotated v0.2.0 tag only; no push or publication. |
 
+## Replay verification follow-up
+
+| ID | Task | Deps | Status | Notes |
+|---|---|---|---|---|
+| T11.24a | Hash campaign fight metadata | T11.24 | DONE | Codex/2026-11-21. ADR-056. Regression distinguishes lairs 19 and 20 and knight input order. All 11 fresh campaign checkpoints verified over 1952 ticks. Full quality gate passed (1864 tests), plus the real-disk GL replay across all presets. |
+
 ## Session log
 
 - 2026-11-14 · Antigravity · Phase 1 (T1.1–T1.6) · Skeleton, governance, gate and CI.

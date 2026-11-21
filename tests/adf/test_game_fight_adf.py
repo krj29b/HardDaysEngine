@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -92,6 +93,21 @@ def test_campaign_host_loses_through_the_death_script_and_settles_one_life(adf_d
     assert session.last_status == "KNIGHT FALLEN"
     assert session.knight_combat[KnightId.BLUE].lives == 1
     assert session.knight_combat[KnightId.BLUE].hp == 20
+
+
+def test_fight_checkpoint_distinguishes_lair_and_knight_order(adf_dir: Path) -> None:
+    session = _session(adf_dir, TROGG_ARENAS[0])
+    active = session.active_encounter
+    assert active is not None
+    active.trigger = replace(active.trigger, kind=TriggerKind.LAIR_BOSS, lair_index=19)
+    initial_hash = session.state_hash()
+    active.trigger = replace(active.trigger, lair_index=20)
+    assert session.state_hash() != initial_hash
+
+    active.knight_ids = (KnightId.BLUE, KnightId.YELLOW)
+    ordered_hash = session.state_hash()
+    active.knight_ids = (KnightId.YELLOW, KnightId.BLUE)
+    assert session.state_hash() != ordered_hash
 
 
 def test_campaign_host_replays_recorded_inputs_with_identical_hashes(
