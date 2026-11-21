@@ -1,58 +1,19 @@
 # HardDaysEngine
 
-A clean-room Python 3.12+ reimplementation of the 1991 Amiga game *Moonstone: A Hard Days Knight* (Mindscape / Rob Anderson), built around a deterministic 50 Hz integer simulation core and a ModernGL + `pygame-ce` presentation layer.
+Play *Moonstone: A Hard Days Knight* on Windows with your original Amiga disks.
+Choose a knight, explore the overworld, and enter lairs for real-time sword fights. Play solo or
+take turns on the map with up to four local players.
+
+**[Download for Windows (x64)](https://github.com/krj29b/HardDaysEngine/releases)** | [Controls](#controls) | [Run from source](#run-from-source)
 
 ## Play on Windows
 
-Download `HardDaysEngine-Windows-x64.zip` from the assets of a
-[GitHub Release](https://github.com/krj29b/HardDaysEngine/releases) that includes a Windows build.
-Extract the whole ZIP, put your three original Amiga disk images in its `disks` folder,
-then double-click `HardDaysEngine.exe`. The ZIP includes Python and the engine's libraries.
-Your graphics driver must support OpenGL 3.3.
+You need the three original Amiga `.adf` disk images and an OpenGL 3.3 graphics driver.
+The Windows build includes Python and the engine's libraries.
 
-### Publishing a release
-
-The **Release HardDaysEngine** workflow (`.github/workflows/publish.yml`) builds both the
-Windows portable ZIP and the Python wheel/source distribution from the same tagged commit.
-The full quality gate and both builds must succeed before either publication job starts.
-
-1. Set matching versions in `pyproject.toml` and `src/harddaysengine/__init__.py`.
-2. Commit and push the release changes, then push the matching tag, for example:
-
-   ```powershell
-   git tag v0.2.0
-   git push origin v0.2.0
-   ```
-
-3. Watch **Actions → Release HardDaysEngine**. The workflow publishes the Python archives to
-   PyPI and attaches the ZIP, wheel and source distribution to the tagged GitHub Release,
-   creating that release if needed. You can then edit its generated release notes.
-
-The tag must be `v` followed by the exact package version; `0.2.0` without `v` does not trigger
-this workflow. The tagged commit must contain the unified workflow.
-To test before tagging, select **Actions → Release HardDaysEngine → Run workflow** on a branch.
-This runs the same checks and builds, but only uploads the `windows-portable` and
-`distributions` workflow artifacts, without publishing. To run for an existing tag, use
-`gh workflow run publish.yml --ref v0.2.0`.
-
-PyPI uses Trusted Publishing: configure owner `krj29b`, repository `HardDaysEngine`, workflow
-`publish.yml` and environment `pypi` in the project's PyPI publishing settings. These identifiers
-are unchanged from the earlier PyPI workflow. GitHub environment protection rules must allow
-release tags (and may require a reviewer if you have configured one).
-
-The two services publish independently after the shared checks, so one publication can succeed
-while the other fails. Use **Re-run failed jobs** to retry the failed side. PyPI versions cannot
-be overwritten: if `0.1.1` has already been published, use a new version for the next release.
-A GitHub publication retry replaces assets with the same filenames while keeping release notes.
-
-## Architecture
-
-The codebase is organized into strict unidirectional layers (`cli -> app -> render -> assets -> sim`):
-
-- **Simulation (`src/harddaysengine/sim/`)**: deterministic 50 Hz integer/fixed-point kernel (persistent combat jobs and handlers, pixel map, turn scheduler, sheets and places, palette FX, PRNG). No floats, no wall clock, no `random`, no I/O.
-- **Assets (`src/harddaysengine/assets/`)**: reads original Amiga `.adf` disk images (OFS) at runtime, unpacks RNC1/LZSS streams, and decodes pictures, cels, `collide.hit` attack sets, `.t` arena layouts, `program`/`mog` hunk tables, and audio banks.
-- **Render (`src/harddaysengine/render/`)**: ModernGL (OpenGL 3.3 core) `320x256` virtual canvas, indexed palette textures, optional CRT post-process, and debug hitbox overlay.
-- **App & CLI (`src/harddaysengine/app/`, `src/harddaysengine/cli/`)**: `pygame-ce` window host, 50 Hz fixed-timestep loop, keyboard/gamepad input, audio mixer, and CLI entry points.
+1. Open a release with a Windows build and download `HardDaysEngine-Windows-x64.zip` from **Assets**.
+2. Extract the whole ZIP and copy your three disk images into its `disks` folder.
+3. Double-click `HardDaysEngine.exe` and press Enter at the title screen.
 
 ## Bring Your Own Amiga Disks
 
@@ -64,7 +25,34 @@ This repository contains **no game data**. Place your three original Amiga disk 
 
 Never commit `.adf` images or anything extracted from them.
 
-## Running the Game
+## Controls
+
+At the title, press Enter to open the menu. Up/Down selects a row; Left/Right on the
+player-count row chooses 1–4 humans. Select Start, then choose portraits with Left/Right
+and confirm each with Enter. Keyboard slots follow portrait selection order.
+
+| Context | Player 1 keys |
+|---|---|
+| Move on the map / move a sheet or town pointer | Arrow keys |
+| Enter a nearby place or lair / select a pointer region | Enter |
+| Choose a row when several map destinations overlap | 1–9 |
+| Status on the map | Space or Left Ctrl |
+| End the current map turn | E or Tab |
+| Fight | Arrows + Space; direction selects the sword move, guard or dagger throw |
+| Pause map or combat | P |
+| Continue a message or Next Day | Press and release Enter or Space |
+| Leave a sheet or town | Move the pointer to its close/Exit region and confirm |
+| Quit the campaign to farewell on the map | Q |
+| Cycle filter preset (not recorded in replays) | F9 (Shift+F9 backwards) |
+| Toggle fullscreen (not recorded in replays) | F11 or Alt+Enter |
+
+Player 2 uses WASD/F, player 3 IJKL/U, and player 4 the numeric keypad/Keypad 0 for
+movement/fire. Gamepads use the directional pad or left stick and button 0 for fire.
+Practice uses two human knights. All nine creature handlers, loot, shops, services,
+place callers and the original ending are implemented; combat requires the original disks.
+See [docs/PROGRESS.md](docs/PROGRESS.md) for acceptance evidence and documented deviations.
+
+## Run from Source
 
 ```powershell
 uv sync                                  # install runtime + dev dependencies (Python 3.12)
@@ -117,32 +105,14 @@ Presentation presets (`--filter` or `F9` / `Shift+F9` at runtime; all presets ru
 - `--extract-assets`: unpack ADF assets into `--output-dir` (default `./build/assets`) with `manifest.json`
 - `--headless-frames <N>`: run `N` 50 Hz ticks on a standalone OpenGL 3.3 context without opening a window
 
-### Controls
+## Architecture
 
-At the title, press Enter to open the menu. Up/Down selects a row; Left/Right on the
-player-count row chooses 1–4 humans. Select Start, then choose portraits with Left/Right
-and confirm each with Enter. Keyboard slots follow portrait selection order.
+HardDaysEngine is a clean-room reimplementation of the 1991 Amiga game. It runs a deterministic 50 Hz simulation in Python 3.12+ and uses ModernGL and `pygame-ce` for presentation. The codebase is organized into strict unidirectional layers (`cli -> app -> render -> assets -> sim`):
 
-| Context | Player 1 keys |
-|---|---|
-| Move on the map / move a sheet or town pointer | Arrow keys |
-| Enter a nearby place or lair / select a pointer region | Enter |
-| Choose a row when several map destinations overlap | 1–9 |
-| Status on the map | Space or Left Ctrl |
-| End the current map turn | E or Tab |
-| Fight | Arrows + Space; direction selects the sword move, guard or dagger throw |
-| Pause map or combat | P |
-| Continue a message or Next Day | Press and release Enter or Space |
-| Leave a sheet or town | Move the pointer to its close/Exit region and confirm |
-| Quit the campaign to farewell on the map | Q |
-| Cycle filter preset (not recorded in replays) | F9 (Shift+F9 backwards) |
-| Toggle fullscreen (not recorded in replays) | F11 or Alt+Enter |
-
-Player 2 uses WASD/F, player 3 IJKL/U, and player 4 the numeric keypad/Keypad 0 for
-movement/fire. Gamepads use the directional pad or left stick and button 0 for fire.
-Practice uses two human knights. All nine creature handlers, loot, shops, services,
-place callers and the original ending are implemented; combat requires the original disks.
-See [docs/PROGRESS.md](docs/PROGRESS.md) for acceptance evidence and documented deviations.
+- **Simulation (`src/harddaysengine/sim/`)**: deterministic 50 Hz integer/fixed-point kernel (persistent combat jobs and handlers, pixel map, turn scheduler, sheets and places, palette FX, PRNG). No floats, no wall clock, no `random`, no I/O.
+- **Assets (`src/harddaysengine/assets/`)**: reads original Amiga `.adf` disk images (OFS) at runtime, unpacks RNC1/LZSS streams, and decodes pictures, cels, `collide.hit` attack sets, `.t` arena layouts, `program`/`mog` hunk tables, and audio banks.
+- **Render (`src/harddaysengine/render/`)**: ModernGL (OpenGL 3.3 core) `320x256` virtual canvas, indexed palette textures, optional CRT post-process, and debug hitbox overlay.
+- **App & CLI (`src/harddaysengine/app/`, `src/harddaysengine/cli/`)**: `pygame-ce` window host, 50 Hz fixed-timestep loop, keyboard/gamepad input, audio mixer, and CLI entry points.
 
 ## Development & Verification
 
