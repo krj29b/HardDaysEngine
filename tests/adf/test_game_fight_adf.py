@@ -18,6 +18,11 @@ from harddaysengine.app.input import (
     save_replay,
 )
 from harddaysengine.assets.adf import DiskSet
+from harddaysengine.sim.fight import Fight, HandlerResult, Restart
+from harddaysengine.sim.fight_ai.caster import CASTER_TYPE, GRABBED, HOLD, SLAM
+from harddaysengine.sim.fight_ai.snatcher import CARRY, RELEASE, SNATCHER_TYPE
+from harddaysengine.sim.fight_moves import DOWN, FIRE
+from harddaysengine.sim.m68k import s16
 from harddaysengine.sim.overworld import EncounterTrigger, TriggerKind
 from harddaysengine.sim.types import KnightId
 
@@ -208,3 +213,100 @@ def test_disk_backed_menu_to_practice_replay_preserves_the_initial_roster(
     replay = run_headless_session(replay_path=path, adf_dir=adf_dir)
     assert replay.scene == first.scene
     assert replay.final_hash == first.final_hash
+
+
+def _step_until_unpaused(session: GameSession, handle: int) -> None:
+    active = session.active_encounter
+    assert active is not None
+    job = active.runtime.fight.find_job(handle)
+    assert job is not None
+    for _ in range(300):
+        if job.paused == 0:
+            return
+        session.step_tick(InputFrame())
+    raise AssertionError("fighter job never unpaused after entry")
+
+
+def test_campaign_host_ratmen_hung_upward_stab_frees_knight(adf_dir: Path) -> None:
+    session = _session(adf_dir, "ratmen")
+    active, loader = session.active_encounter, session.fight_loader
+    assert active is not None and loader is not None
+    fight, first = active.runtime.fight, active.runtime.first
+    assert fight.actor(first).input_port == 2
+    ratman_job = next(j for j in fight.engine.jobs if j.active and j.type == CASTER_TYPE)
+    _step_until_unpaused(session, ratman_job.owner)
+
+    ratman = fight.actor(ratman_job.owner)
+    ratman.hp = 50
+    ratman.behaviour_flags, ratman.behaviour_flags2 = 0, SLAM
+    fight.caster.flags |= HOLD
+    fight.toggle_pause(first)
+    scripts = loader.caster_rules.scripts
+    fight.restart_job(ratman_job.owner, scripts.slam_start)
+
+    seen: list[int] = []
+    original = fight.handlers[CASTER_TYPE]
+
+    def logged(current: Fight, owner: int) -> HandlerResult:
+        result = original(current, owner)
+        if owner == ratman_job.owner and isinstance(result, Restart):
+            seen.append(result.script)
+        return result
+
+    fight.handlers[CASTER_TYPE] = logged
+    escape = InputFrame(players={KnightId.RED: PlayerInput(dy=1, fire=True)})
+    for _ in range(600):
+        session.step_tick(escape)
+        if not (fight.caster.flags & HOLD):
+            break
+
+    knight_job = fight.find_job(first)
+    assert knight_job is not None and knight_job.paused == 0
+    assert fight.ports == [0, FIRE | DOWN]
+    assert scripts.struggle in seen
+    assert scripts.drop in seen
+    assert s16(ratman.hp) <= 0
+    assert not (fight.caster.flags & HOLD)
+
+
+def test_campaign_host_ratmen_grab_and_mudmen_carry_escapes(adf_dir: Path) -> None:
+    escape = InputFrame(players={KnightId.RED: PlayerInput(dy=1, fire=True)})
+
+    rat_session = _session(adf_dir, "ratmen")
+    rat_active, rat_loader = rat_session.active_encounter, rat_session.fight_loader
+    assert rat_active is not None and rat_loader is not None
+    rat_fight, rat_first = rat_active.runtime.fight, rat_active.runtime.first
+    rat_job = next(j for j in rat_fight.engine.jobs if j.active and j.type == CASTER_TYPE)
+    _step_until_unpaused(rat_session, rat_job.owner)
+    rat = rat_fight.actor(rat_job.owner)
+    rat.behaviour_flags, rat.behaviour_flags2, rat.cooldown = GRABBED, 0, 10
+    rat_fight.caster.flags |= GRABBED
+    rat_fight.toggle_pause(rat_first)
+    rat_fight.restart_job(rat_job.owner, rat_loader.caster_rules.scripts.grab)
+    for _ in range(180):
+        rat_session.step_tick(escape)
+        if not (rat_fight.caster.flags & GRABBED):
+            break
+    rat_knight = rat_fight.find_job(rat_first)
+    assert rat_knight is not None and rat_knight.paused == 0
+    assert not (rat_fight.caster.flags & GRABBED)
+
+    mud_session = _session(adf_dir, "mudmen")
+    mud_active, mud_loader = mud_session.active_encounter, mud_session.fight_loader
+    assert mud_active is not None and mud_loader is not None
+    mud_fight, mud_first = mud_active.runtime.fight, mud_active.runtime.first
+    assert mud_fight.actor(mud_first).input_port == 2
+    mud_job = next(j for j in mud_fight.engine.jobs if j.active and j.type == SNATCHER_TYPE)
+    _step_until_unpaused(mud_session, mud_job.owner)
+    mud = mud_fight.actor(mud_job.owner)
+    mud.behaviour_flags, mud.anim_timer = CARRY, 40
+    mud_fight.snatch_flags = CARRY
+    mud_fight.toggle_pause(mud_first)
+    mud_fight.restart_job(mud_job.owner, mud_loader.snatcher_rules.scripts.carry)
+    for _ in range(240):
+        mud_session.step_tick(escape)
+        if not (mud_fight.snatch_flags & (CARRY | RELEASE)):
+            break
+    mud_knight = mud_fight.find_job(mud_first)
+    assert mud_knight is not None and mud_knight.paused == 0
+    assert not (mud_fight.snatch_flags & (CARRY | RELEASE))

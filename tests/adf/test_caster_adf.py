@@ -64,7 +64,7 @@ def _play(bundle: GameAssetBundle, *, defend: bool, hp: int = 200) -> tuple[Figh
     fight.handlers[CASTER_TYPE] = logged
     runtime = FightRuntime(audit.scene, 1)
     for frame in range(2000):
-        fight.ports[0] = audit.input_word() if defend else 0
+        fight.ports[1] = audit.input_word() if defend else 0
         output = audit.scene.advance(frame * 6)
         job = fight.find_job(audit.opponent)
         if job is not None:

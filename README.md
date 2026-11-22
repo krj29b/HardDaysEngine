@@ -62,7 +62,7 @@ and confirm each with Enter. Keyboard slots follow portrait selection order.
 | Choose a row when several map destinations overlap | 1–9 |
 | Status on the map | Space or Left Ctrl |
 | End the current map turn | E or Tab |
-| Fight | Arrows + Space; direction selects the sword move, guard or dagger throw |
+| Fight | Arrows + Space; direction selects the sword move, guard or dagger throw (Down + Space breaks free when grabbed/hung) |
 | Pause map or combat | P |
 | Continue a message or Next Day | Press and release Enter or Space |
 | Leave a sheet or town | Move the pointer to its close/Exit region and confirm |

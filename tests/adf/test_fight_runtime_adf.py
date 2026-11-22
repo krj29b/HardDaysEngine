@@ -45,6 +45,7 @@ def _play(loader: FightLoader, name: str) -> tuple[FightRuntime, list[str]]:
         arena, "fo1.t", records, Actor(), {i: Inventory() for i in range(1, 5)}, Rng(0x2468ACE1), 1
     )
     assert runtime.fight.actor(1) is records[0]
+    assert runtime.fight.actor(1).input_port == 2
     audit = FightAudit(runtime.scene, loader.knight_rules, 6)
     snapshots = []
     for vbl in range(1, 36001):
@@ -57,7 +58,7 @@ def _play(loader: FightLoader, name: str) -> tuple[FightRuntime, list[str]]:
         if targets:
             audit.opponent = targets[0]
             word = audit.input_word()
-        output = runtime.step_vbl(vbl, [word, 0])
+        output = runtime.step_vbl(vbl, [0, word])
         if output is not None:
             snapshots.append(json.dumps(runtime.snapshot(), sort_keys=True))
         if runtime.finished:

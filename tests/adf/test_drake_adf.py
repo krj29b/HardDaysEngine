@@ -59,7 +59,7 @@ def _play(bundle: GameAssetBundle, *, defend: bool) -> tuple[Fight, list[str], l
     fight.handlers[DRAKE_TYPE], fight.routines[FIGHTER_DIED] = handler, died
     runtime = FightRuntime(audit.scene, 1)
     for frame in range(2500):
-        fight.ports[0] = audit.input_word() if defend else 0
+        fight.ports[1] = audit.input_word() if defend else 0
         output = audit.scene.advance(frame * 6)
         assert not output.skipped_calls
         hashes.append(

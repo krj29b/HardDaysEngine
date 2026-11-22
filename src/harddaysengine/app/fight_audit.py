@@ -576,8 +576,9 @@ def guardian_pose_frames(bundle: GameAssetBundle) -> Iterator[tuple[str, FightSc
 def fight_audit_frames(audit: FightAudit) -> Iterator[tuple[str, FightScene]]:
     """Sample a real-handler fight through its death branch, retaining the last frame."""
     fight = audit.scene.fight
+    port = 0 if fight.actor(audit.first).input_port == 1 else 1
     for frame in range(_MAX_FRAMES):
-        fight.ports[0] = audit.input_word() if fight.fight_active else 0
+        fight.ports[port] = audit.input_word() if fight.fight_active else 0
         audit.scene.advance((frame + 1) * 6)
         if frame in _SAMPLE_FRAMES:
             yield f"frame{frame + 1}", audit.scene

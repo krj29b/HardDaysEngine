@@ -56,7 +56,7 @@ def _play(bundle: GameAssetBundle, *, win: bool) -> tuple[Fight, list[str], list
     f.handlers[GUARDIAN_TYPE], f.routines[END_FIGHT] = handler, end
     runtime = FightRuntime(audit.scene, 1)
     for frame in range(1500):
-        f.ports[0] = audit.input_word() if win else 0
+        f.ports[1] = audit.input_word() if win else 0
         output = audit.scene.advance(frame * 6)
         assert not output.skipped_calls
         hashes.append(

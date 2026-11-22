@@ -438,7 +438,8 @@ class FightLoader:
             if f.walls
             else self.knight_rules.clip.top
         )
-        self._enter_knight(f, first, cursor, edge, 1)
+        # Single-player/first fighter uses Amiga port 1 (input_port=2, §10.1/§10.23).
+        self._enter_knight(f, first, cursor, edge, 2)
         if arena.creature.actor_type == DRAGON_TYPE:
             self._dragon(f, arena)
             pause_all(f)
