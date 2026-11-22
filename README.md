@@ -4,7 +4,30 @@ Play *Moonstone: A Hard Days Knight* on Windows with your original Amiga disks.
 Choose a knight, explore the overworld, and enter lairs for real-time sword fights. Play solo or
 take turns on the map with up to four local players.
 
-**[Download for Windows (x64)](https://github.com/krj29b/HardDaysEngine/releases)** | [Controls](#controls) | [Run from source](#run-from-source)
+**[Download for Windows (x64)](https://github.com/krj29b/HardDaysEngine/releases)** | [Screenshots](#screenshots) | [Controls](#controls) | [Run from source](#run-from-source)
+
+## Screenshots
+
+| Intro cinematic | Overworld map |
+| --- | --- |
+| ![Druid summoning the Moonstone vortex][shot-intro] | ![Overworld map with castles, towns, and lairs][shot-map] |
+
+| Forest lair (Axe Trogg) | Wasteland lair (Balok) |
+| --- | --- |
+| ![Knight facing an Axe Trogg in a forest lair][shot-forest] | ![Knight facing Balok in a wasteland lair][shot-wasteland] |
+
+| Swamp lair (Mudman) | Red Dragon |
+| --- | --- |
+| ![Knight facing Mudman in the swamp][shot-swamp] | ![Red Dragon breathing fire in combat][shot-dragon] |
+
+*Captured at 3× integer scale from original Amiga disks in HardDaysEngine (`faithful` preset). Screenshots are shown solely to illustrate the engine; no game data is included in this repository.*
+
+[shot-intro]: https://github.com/krj29b/HardDaysEngine/releases/download/media/intro-moonstone-vortex.png
+[shot-map]: https://github.com/krj29b/HardDaysEngine/releases/download/media/overworld-map.png
+[shot-forest]: https://github.com/krj29b/HardDaysEngine/releases/download/media/fight-trogg-axe-forest.png
+[shot-wasteland]: https://github.com/krj29b/HardDaysEngine/releases/download/media/fight-balok-wasteland-leap.png
+[shot-swamp]: https://github.com/krj29b/HardDaysEngine/releases/download/media/fight-mudmen-swamp.png
+[shot-dragon]: https://github.com/krj29b/HardDaysEngine/releases/download/media/fight-dragon-breath.png
 
 ## Play on Windows
 
