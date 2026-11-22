@@ -173,6 +173,21 @@ hashes. ADR-053 was accepted by the user on 2026-11-19.
 | T14.6 | Build portable Windows x86 releases | T14.2 | DONE | Codex/2026-11-22. Release jobs build x86 and x64 ZIPs with matching Python interpreters (ADR-061). Both builds passed extracted-archive smoke checks, and all bundled binaries matched their target architecture. The x86 ZIP rendered an offscreen inspector frame on the x64 Windows test host. Full quality gate: 1870 passed, 100 GL deselected. Hosted publication and native 32-bit Windows remain unverified. |
 | T15.1 | Opt-in campaign save and load | T11.24, T13.10 | DONE | Codex/2026-11-22. F8 opens the campaign panel when `[gameplay] save_load` is enabled. One versioned, atomically replaced save slot. Verified main-menu load and map save in the game window across fullscreen and windowed modes. Tested failed loads, active map dragon restoration, and deterministic continuation. A fresh CLI replay matched the final campaign hash after 1924 resumed ticks. Spec §13.11 / ADR-063. Full quality gate: 1876 passed, 102 GL deselected. |
 
+## Phase 16 — SDL input diagnostics
+
+Purpose: collect reproducible keyboard, mouse, joystick and game-controller event
+reports for hardware and connection-specific input issues. The diagnostic command is
+opt-in and does not alter gameplay mappings or replay input. Scope: pygame/SDL events
+and device metadata available to the installed runtime. See `IMPLEMENTATION_PLAN.md`
+Phase 16 for acceptance criteria.
+
+| ID | Task | Deps | Status | Notes |
+|---|---|---|---|---|
+| T16.1 | Diagnostic scope and report format | T15.1 | DONE | Antigravity/2026-11-22. Spec §13.12 / ADR-065. Verified pygame-ce 2.5.8 / SDL 2.32.10 metadata and virtual-controller event shapes: `Joystick.get_id()` is deprecated, `Controller.id` is creation-time `device_index` (not `instance_id`), and `Controller.as_joystick()` fails after an earlier device detaches; spec keys both handles strictly by `Joystick.get_instance_id()` and handles paired `Controller`/`Joy` add/remove events without duplicating handles. Covers startup/hotplug discovery, absent-metadata handling, normalized categories/fields, causal-order coalescing with `±0.5`/`±16384` threshold preservation, flushed UTF-8 JSONL (`schema_version: 1`, `--max-records`), concise terminal view, and CLI options. Full quality gate: 1876 passed, 102 GL deselected. No code or game data committed. |
+| T16.2 | Standalone diagnostic console command | T16.1 | TODO | Add `harddaysengine-input-diagnostics`; do not launch game scenes or read ADFs. |
+| T16.3 | Optional JSON Lines report and readable terminal output | T16.1, T16.2 | TODO | Preserve event identity/order while bounding high-rate events and retaining useful partial output. |
+| T16.4 | Virtual devices, Windows/Ubuntu and manual hardware procedure | T16.2, T16.3 | TODO | Verify SDL virtual-device coverage in CI and document USB/Bluetooth Xbox comparison for manual reproduction. |
+
 ## Replay verification follow-up
 
 | ID | Task | Deps | Status | Notes |
@@ -272,3 +287,5 @@ hashes. ADR-053 was accepted by the user on 2026-11-19.
 - 2026-11-20 · Codex · T14.2 done: consolidated Windows/PyPI releases in publish.yml, removed the superseded Windows workflow and fixed-commit PyPI checkout, documented matching versions, tag pushes, branch previews, Trusted Publisher configuration and partial-publication retries. Full quality gate: 1863 passed, 100 GL deselected. YAML parsed; five tag/runtime-version scenarios passed; local wheel and sdist built and passed twine check --strict, with no disk images/build outputs/reference projects in the archives. Initial sandbox cache/temp permissions required running the unchanged gate outside the sandbox. No release was published; first hosted run is pending. No game data committed.
 
 - 2026-11-20 · Codex · T14.3: prepared 0.2.0 in pyproject.toml, runtime __version__ and uv.lock without dependency changes; updated current release examples. Full quality gate: 1863 passed, 100 GL deselected. CLI reports 0.2.0; all three version declarations match; local wheel/sdist build and twine check --strict pass. Commit and annotated v0.2.0 tag are local only, as requested; no push or publication. No architecture decision or game data changes.
+
+- 2026-11-22 · Antigravity · T16.1 done: specified SDL input diagnostics scope, verified `pygame-ce 2.5.8` / SDL `2.32.10` metadata/event quirks (`Controller.id` vs `Joystick.get_instance_id()`), hotplug pairing, causal motion/axis coalescing, and bounded flushed UTF-8 JSONL + terminal formats in `docs/ARCHITECTURE.md` §13.12 and `ADR-065`. Full quality gate: 1876 passed, 102 GL deselected. Next eligible task: T16.2 (`harddaysengine-input-diagnostics` console command).

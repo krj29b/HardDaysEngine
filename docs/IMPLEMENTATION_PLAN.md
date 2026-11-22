@@ -502,6 +502,45 @@ polish.
   hashes under the same inputs. Check malformed and incompatible files with an active
   campaign, and verify the panel in both windowed and fullscreen modes.
 
+### Phase 16: SDL input diagnostics
+
+Add an opt-in diagnostic command for investigating reports of inconsistent Bluetooth
+gamepad input. Cover the keyboard, mouse, joysticks, SDL game controllers and any other
+input events exposed by pygame/SDL. This phase collects evidence for a later mapping fix.
+It does not change gameplay mappings or replay input.
+
+- **T16.1 Diagnostic scope and report format:** document which SDL device metadata and
+  event fields are available on the supported pygame-ce/SDL versions. Define stable,
+  human-readable output for device discovery, connection/removal, key transitions, mouse
+  movement/buttons/wheel, joystick axes/hats/buttons, controller-mapped inputs and other
+  SDL input event types. Treat unavailable metadata as absent, not as a fatal error.
+  *Accept:* the specification covers startup and hotplug discovery, identity fields,
+  event ordering and fields, axis noise reduction, and a bounded report format.
+- **T16.2 Standalone diagnostic entry point:** add a dedicated
+  `harddaysengine-input-diagnostics` console command that opens pygame/SDL input, prints
+  currently attached devices, then records input events until quit or interrupt. Include
+  device name, GUID where available, SDL instance ID and device capabilities. Report
+  keyboard, mouse, raw joystick and mapped game-controller activity with device identity
+  and stable event names. Preserve original event order. Do not start the game window,
+  load disk images or change the gameplay router. *Accept:* smoke-test the console command
+  with no devices, one virtual controller and clean shutdown. Exercise hotplug while it
+  is running.
+- **T16.3 Optional file report and readable output:** support an explicit output-file
+  option while retaining a concise live terminal view. Emit structured UTF-8 JSON Lines
+  for later comparison, with one record per discovered device or input event. Bound or
+  coalesce high-frequency mouse motion and axis noise while preserving threshold crossings
+  and the first and last sampled values. Flush the file so interrupted runs keep a usable
+  report. *Accept:* validate JSON Lines records, event ordering, bounded output under
+  noisy motion, clean terminal rendering and recoverable partial reports.
+- **T16.4 Cross-platform and virtual-device verification:** test event normalization,
+  identity mapping, connection/removal and report writing using SDL virtual devices where
+  supported. Run the command on Windows and Ubuntu CI without requiring physical input
+  hardware. Document manual comparison steps for the user's Xbox controller over USB and
+  Bluetooth, including sharing the report and SDL/platform details. *Accept:* unit tests
+  cover keyboard, mouse, axes, hats, buttons, mapped controller events, unknown input
+  events, hotplug, output-file errors and axis-noise handling; CLI tests cover help,
+  exit and version behavior; the full quality gate passes.
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:

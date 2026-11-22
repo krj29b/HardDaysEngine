@@ -1184,3 +1184,37 @@ decorators, and unused ignores. Keep the missing import exceptions for `moderngl
 and `amitools`.
 The checkers differ in inference and diagnostics. Pyrefly has no direct equivalent
 to mypy's prohibition on calls to untyped functions.
+
+## ADR-065: Standalone SDL input diagnostics and bounded JSON Lines report format
+
+**Status:** ACCEPTED (2026-11-22, T16.1)
+
+**Context:** Reports of inconsistent Bluetooth gamepad behavior require reproducible raw
+joystick and mapped SDL game-controller evidence across OSes and transports (e.g. Xbox USB vs
+Bluetooth), without modifying gameplay mappings (`app/input.py`) or replay inputs. Probing
+`pygame-ce 2.5.8` (SDL `2.32.10`) also showed that `Joystick.get_id()` is deprecated, that
+`Controller.id` stores the creation-time device index rather than the SDL instance ID, and that
+`Controller.as_joystick()` fails once an earlier device detaches and shifts device indices.
+
+**Decision:**
+1. Keep diagnostics completely isolated from `sim/`, `render/`, `assets/`, `GameSession`,
+   `InputRouter`, OpenGL, audio, and `.adf` disk loading via a dedicated
+   `harddaysengine-input-diagnostics` console entry point (`cli/input_diagnostics.py` and
+   `app/input_diagnostics.py`, §13.12).
+2. Retain both `Joystick` and optional `pygame._sdl2.controller.Controller` handles keyed
+   exclusively by `Joystick.get_instance_id()` for the lifetime of each connection. Set
+   `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1` (via `setdefault`) so gamepads report without window
+   focus, and open a minimal plain-SDL software surface by default for OS keyboard/mouse events
+   with `--no-window` and automatic non-fatal headless fallback when display init is unavailable.
+3. Treat every optional SDL metadata field (`guid`, `power_level`, `controller_mapping`,
+   capabilities, touch devices) as absent on error rather than fatal.
+4. Emit versioned (`schema_version: 1`) UTF-8 JSON Lines reports flushed per line so interrupted
+   runs preserve usable partial output, alongside a concise single-line terminal view. Bound
+   reports with a hard `--max-records` cap (default `10000`) and coalesce high-frequency
+   continuous motion/axis noise while preserving threshold crossings (`±0.5` / `±16384`),
+   first/last/min/max values, and strict causal ordering before discrete events.
+
+**Consequences:** T16.2–T16.4 implement the console tool, report writer, and cross-platform
+virtual-device tests against §13.12 without adding dependencies or changing any game behavior
+or replay hash. Because `pygame._sdl2.controller` and `pygame._sdl2.touch` are underscored
+modules (as in ADR-051), they are imported defensively and tested directly in CI.

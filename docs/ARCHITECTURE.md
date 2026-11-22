@@ -5629,3 +5629,219 @@ from the current disks, and verifies the checkpoint before switching sessions.
 Map dragon rendering is restored from draw commands referencing the user's assets.
 Recorded input after loading starts a replay with the saved checkpoint as its
 initial state. The original seed-based replay format remains readable.
+
+### 13.12 SDL input diagnostics (not original; Phase 16, T16.1)
+
+Phase 16 adds a standalone, opt-in diagnostic tool (`harddaysengine-input-diagnostics`) for
+investigating hardware- and connection-specific input issues (such as Xbox controllers behaving
+differently over USB vs Bluetooth). It collects raw SDL device metadata and input event streams
+without altering gameplay mappings (`app/input.py`) or replay serialization.
+
+#### 13.12.1 Scope, isolation and capture mode
+
+- **Layer isolation:** Lives only in `cli/` (`cli/input_diagnostics.py`) and `app/`
+  (`app/input_diagnostics.py`). It must never import or invoke `sim/`, `render/`, `assets/`,
+  `GameSession`, `InputRouter`, OpenGL/ModernGL, audio, or `.adf` disk loaders.
+- **Supported runtime:** `pygame-ce >= 2.5.2` on SDL 2.x (verified on `pygame-ce 2.5.8` with
+  SDL `2.32.10` and Python 3.12). Uses `pygame.event`, `pygame.key`, `pygame.joystick`, optional
+  `pygame._sdl2.controller` (guarded underscored module, as in ADR-051), and optional
+  `pygame._sdl2.touch`.
+- **Background gamepad capture:** Before initializing SDL, the tool sets
+  `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1` via `os.environ.setdefault` so joystick and
+  game-controller events are delivered even while the terminal holds focus or no window is open.
+- **Lightweight capture window vs headless mode:** SDL2 delivers OS keyboard and mouse events
+  only to a focused SDL window, whereas joystick/controller and queued events arrive without one.
+  The tool never starts the game window (no OpenGL context, no renderer, no disk assets). By
+  default it opens a minimal plain-SDL software surface (e.g., `320×120`) to accept OS keyboard,
+  mouse, wheel, text, touch, and window-close (`QUIT`) events. Passing `--no-window` disables the
+  surface explicitly. If display initialization fails (for example on headless Linux CI without
+  `DISPLAY`) or `SDL_VIDEODRIVER` is `dummy`/`offscreen`, the tool falls back to console-only
+  capture without failing and records `capture_window: false` (plus a non-fatal
+  `capture_window_note` when init failed) in `session_start`.
+- **Clean shutdown:** Stops on SDL `QUIT`, `SIGINT` (`Ctrl+C`), `SIGTERM`, `--duration` expiry,
+  or hitting `--max-records`. Shutdown always flushes pending coalesced bursts, emits
+  `session_end`, flushes/closes any open report file, and releases open SDL device handles.
+
+#### 13.12.2 Available SDL metadata and device identity
+
+Unavailable metadata is **always treated as absent** (omitted from the JSON object, rendered as
+`n/a` in terminal summaries when a fixed column is shown, optionally noted in a non-fatal
+`warnings` list) and must never terminate discovery or event capture. Every optional SDL query
+guards against `pygame.error`, `AttributeError`, and `NotImplementedError`.
+
+**Session environment (`session_start`):**
+- `schema_version`: `1` (integer).
+- `engine_version`: `harddaysengine.__version__`.
+- `pygame_version`: `pygame.version.ver`.
+- `sdl_version`: `[major, minor, patch]` from `pygame.get_sdl_version()`.
+- `python_version`: `platform.python_version()`.
+- `platform`: `platform.platform()`, plus `sys_platform` (`sys.platform`).
+- `video_driver`: `pygame.display.get_driver()` when display is initialized; omitted otherwise.
+- `capture_window`: boolean; optional `capture_window_note` string if fallback occurred.
+- `controller_api_available`: boolean (`pygame._sdl2.controller` imported and initialized).
+- `touch_api_available`: boolean (`pygame._sdl2.touch` imported).
+- `sdl_env`: sorted mapping of relevant `SDL_*` environment variables currently set
+  (`SDL_VIDEODRIVER`, `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS`, `SDL_GAMECONTROLLERCONFIG`,
+  `SDL_HINT_JOYSTICK_HIDAPI`, `SDL_HINT_JOYSTICK_RAWINPUT`, `SDL_HINT_XINPUT_ENABLED`,
+  `SDL_HINT_DIRECTINPUT_ENABLED`, `SDL_JOYSTICK_HIDAPI`, `SDL_JOYSTICK_RAWINPUT`), omitting unset
+  keys.
+- `config`: active capture settings (`coalesce_ms`, `axis_epsilon`, `controller_axis_epsilon`,
+  `max_records`, `raw`).
+
+**Joystick and SDL game-controller identity (`device_discovered` / `device_removed`):**
+
+| Field | Source on `pygame-ce >= 2.5.2` / SDL 2.x | Notes / absence rule |
+|---|---|---|
+| `device_kind` | `"gamepad"` (or `"touch"` for touch devices) | Always present. |
+| `instance_id` | `Joystick.get_instance_id()` (`int`) | Authoritative monotonic key for the lifetime of a connection. Matches `event.instance_id` on all `JOY*` and `CONTROLLER*` events. **Never** call deprecated `Joystick.get_id()`. **Never** treat `Controller.id` as an instance ID (in `pygame-ce`, `Controller.id` stores the creation-time `device_index`, and `Controller.as_joystick()` raises `pygame.error` once an earlier device detaches and shifts indices). |
+| `device_index` | Startup loop index or `*DEVICEADDED.device_index` (`int`) | Recorded on discovery only; never used to route later events. |
+| `name` | `Joystick.get_name()` (`str`) | Omitted if unavailable. |
+| `guid` | `Joystick.get_guid()` or `*DEVICEADDED.guid` (`str`) | Omitted if empty or unavailable. |
+| `is_controller` | `pygame._sdl2.controller.is_controller(device_index)` (`bool`) | `false` when controller API is unavailable. |
+| `controller_name` | `Controller.name` (`str`) | Present only when `Controller` handle opened successfully. |
+| `capabilities` | `{axes, buttons, hats, balls}` from `get_numaxes/buttons/hats/balls()` | Each sub-key omitted if its query fails. |
+| `power_level` | `Joystick.get_power_level()` (`str`: e.g. `"unknown"`, `"low"`, `"medium"`, `"full"`, `"wired"`) | Omitted if unavailable. |
+| `controller_mapping` | Sorted `dict[str, str]` from `Controller.get_mapping()` | Present only when opened as an SDL controller; exposes exact bindings (`a`, `leftx`, `dpleft`, `crc`, `platform`, etc.) for USB vs Bluetooth comparison. |
+| `initial_state` | `{axes, hats, buttons}` snapshot at open time | Axes rounded to 6 decimals, hats as `[hx, hy]`, buttons as list of currently pressed indices. Reveals resting trigger values (e.g. `-1.0`) or stuck inputs at connect. |
+| `origin` | `"startup"` or `"hotplug"` | Always present on `device_discovered`. |
+
+**Touch, keyboard, and mouse identity:**
+- When `pygame._sdl2.touch` is available and reports `get_num_devices() > 0`, startup discovery
+  emits `device_discovered` (`device_kind: "touch"`, `touch_id: int`, `origin: "startup"`).
+- SDL2 / `pygame-ce` does not expose per-device enumeration for physical keyboards or mice;
+  events use logical device identities `{"kind": "keyboard"}` and `{"kind": "mouse"}` (plus
+  `which` on mouse events when supplied by SDL, e.g. touch-emulated mouse IDs).
+
+#### 13.12.3 Startup discovery, hotplug lifecycle and event ordering
+
+1. **Startup:** Initialize SDL event/joystick (and optional controller) subsystems, emit
+   `session_start`, enumerate `0 .. pygame.joystick.get_count() - 1`, open `Joystick(idx)`, read
+   `instance_id = j.get_instance_id()`, open `Controller.from_joystick(j)` when
+   `is_controller(idx)` is true, retain **both** handles in an active table keyed by
+   `instance_id`, and emit `device_discovered` (`origin: "startup"`). Then enumerate touch
+   devices if available.
+2. **Paired `*DEVICEADDED` events:** SDL2 typically queues `CONTROLLERDEVICEADDED` immediately
+   before `JOYDEVICEADDED` for a controller (both on startup and on hotplug). When either arrives:
+   - Open `Joystick(device_index)` only if its `instance_id` is not already in the active table.
+   - If new: also open `Controller.from_joystick(j)` when `is_controller(device_index)` is true,
+     retain both handles under `instance_id`, and emit `device_discovered` (`origin: "hotplug"`)
+     once before recording the SDL event.
+   - If already open (startup device or the second event of a `Controller`/`Joy` add pair): do
+     not duplicate handles or re-emit `device_discovered`; record the SDL event in original order
+     with `already_open: true` and the resolved `instance_id`.
+3. **Paired `*DEVICEREMOVED` events:** SDL2 typically queues `CONTROLLERDEVICEREMOVED` followed
+   by `JOYDEVICEREMOVED` for a disconnected controller. Resolve and attach cached identity
+   (`name`, `guid`, `is_controller`) **before** releasing handles so both removal events identify
+   the device. Release the controller handle on `CONTROLLERDEVICEREMOVED` and the joystick handle
+   on `JOYDEVICEREMOVED`; emit `device_removed` once when the final handle for `instance_id` is
+   closed, retaining a lightweight identity cache for any trailing events referencing that ID.
+4. **Remapping (`CONTROLLERDEVICEREMAPPED`):** Re-query `Controller.get_mapping()` if the
+   controller handle is still open, update the cached metadata, and emit the event with the new
+   mapping.
+5. **FIFO ordering:** Events are drained via `pygame.event.get()` in exact SDL queue order.
+   Every emitted JSONL record receives a strictly increasing 1-based `seq` and non-decreasing
+   monotonic `elapsed_ms`. Non-input audio/display housekeeping events (`AUDIODEVICEADDED`,
+   `AUDIODEVICEREMOVED`, `WINDOWEXPOSED`, `VIDEOEXPOSE`, etc.) are ignored; input-relevant window
+   lifecycle events (`QUIT`, `WINDOWCLOSE`, `WINDOWFOCUSGAINED`, `WINDOWFOCUSLOST`, `WINDOWENTER`,
+   `WINDOWLEAVE`) are emitted under `category: "lifecycle"`.
+
+#### 13.12.4 Normalized event categories, names and fields
+
+Every `"event"` record contains:
+`record_type: "event"`, `seq`, `elapsed_ms`, `category`, `event` (stable snake_case name),
+`sdl_type` (`int`), `sdl_name` (`pygame.event.event_name(e.type)`), `device` (compact identity
+object), and `fields` (normalized JSON-safe mapping; absent SDL attributes are omitted).
+
+| Category | Stable `event` names (SDL constants) | Normalized `fields` |
+|---|---|---|
+| `keyboard` | `key_down` (`KEYDOWN`), `key_up` (`KEYUP`) | `key` (`int`), `key_name` (`pygame.key.name(key)`), `scancode` (`int`, if present), `mod` (`int`), `mod_names` (sorted active modifier names), `unicode` (if non-empty), `repeat` (`bool`, if present). |
+| `keyboard` | `text_input` (`TEXTINPUT`), `text_editing` (`TEXTEDITING`), `keymap_changed` (`KEYMAPCHANGED`) | `text`; for editing also `start`, `length`. |
+| `mouse` | `mouse_motion` (`MOUSEMOTION`) | `pos` (`[x, y]`), `rel` (`[dx, dy]`), `buttons` (`[b1, b2, b3]`), optional `touch`, `which`. |
+| `mouse` | `mouse_button_down` (`MOUSEBUTTONDOWN`), `mouse_button_up` (`MOUSEBUTTONUP`) | `button` (`int`), `button_name` (`left`, `middle`, `right`, `x1`, `x2`, or `button_<n>`), `pos` (`[x, y]`), optional `clicks`, `touch`, `which`. |
+| `mouse` | `mouse_wheel` (`MOUSEWHEEL`) | `x`, `y`, `flipped` (`bool`), optional `precise_x`, `precise_y`, `touch`, `which`. |
+| `joystick` | `joy_device_added`, `joy_device_removed` | `device_index`, optional `guid`, `already_open` (add); `instance_id` (remove). |
+| `joystick` | `joy_axis_motion` (`JOYAXISMOTION`) | `axis` (`int`), `value` (`float` in `[-1.0, 1.0]`, rounded to 6 decimals), `band` (`neg`/`center`/`pos`), optional `threshold_crossed` (`true`). |
+| `joystick` | `joy_hat_motion` (`JOYHATMOTION`) | `hat` (`int`), `value` (`[hx, hy]` raw SDL tuple where `+1` is up), `direction` (`center`, `up`, `down`, `left`, `right`, `up_left`, `up_right`, `down_left`, `down_right`). |
+| `joystick` | `joy_ball_motion` (`JOYBALLMOTION`) | `ball` (`int`), `rel` (`[dx, dy]`). |
+| `joystick` | `joy_button_down`, `joy_button_up` | `button` (`int`). |
+| `controller` | `controller_device_added`, `controller_device_removed`, `controller_device_remapped` | `device_index`, optional `guid`, `already_open` (add); `instance_id` (remove/remap); optional `mapping` (remap). |
+| `controller` | `controller_axis_motion` (`CONTROLLERAXISMOTION`) | `axis` (`int`), `axis_name` (`leftx`, `lefty`, `rightx`, `righty`, `triggerleft`, `triggerright`, or `axis_<n>`), `value` (`int`, raw signed 16-bit `-32768..32767`), `normalized` (`float`, `max(-1.0, value / 32767.0)` rounded to 6 decimals), `band` (`neg`/`center`/`pos`), optional `threshold_crossed` (`true`). |
+| `controller` | `controller_button_down`, `controller_button_up` | `button` (`int`), `button_name` (`a`, `b`, `x`, `y`, `back`, `guide`, `start`, `leftstick`, `rightstick`, `leftshoulder`, `rightshoulder`, `dpad_up`, `dpad_down`, `dpad_left`, `dpad_right`, `misc1`, `paddle1`..`paddle4`, `touchpad`, or `button_<n>`). |
+| `controller` | `controller_touchpad_down/motion/up`, `controller_sensor_update` | `touchpad`, `finger`, `x`, `y`, `pressure`; or `sensor`, `data` (JSON-safe list). |
+| `other_input` | `finger_down/motion/up`, `multi_gesture`, `dollar_gesture`, `dollar_record`, or `sdl_event_<type>` for any other unrecognized SDL input event | Sanitized JSON-safe copy of `event.dict` (`None`/`bool`/`int`/`float`/`str`, sequences as lists, mappings with string keys; other values via `repr`). Never fails on unknown event types. |
+| `lifecycle` | `quit`, `window_close`, `window_focus_gained`, `window_focus_lost`, `window_enter`, `window_leave` | Optional `window` ID if present. |
+
+#### 13.12.5 High-frequency motion and axis noise reduction
+
+Analog sticks, resting triggers, sensors, and high-DPI mice can produce hundreds of events per
+second. The diagnostic pipeline coalesces only high-frequency continuous streams while keeping
+every discrete transition intact and preserving causal ordering:
+
+- **Coalescable streams (keyed by stream tuple):**
+  `("joy_axis", instance_id, axis)`, `("controller_axis", instance_id, axis)`,
+  `("mouse_motion", which)`, `("finger_motion", touch_id, finger_id)`,
+  `("controller_touchpad", instance_id, touchpad, finger)`, and
+  `("controller_sensor", instance_id, sensor)`.
+- **Discrete events (never coalesced):** all device add/remove/remap, key, text, mouse button,
+  mouse wheel, joystick button/hat/ball, controller button/touchpad down/up, finger down/up,
+  unknown input, and lifecycle events.
+- **Causal flush invariant:** Before emitting any discrete event, every currently buffered
+  coalesced stream is flushed in `(first_elapsed_ms, stream_key)` order. An axis or mouse move
+  that occurred before a button press therefore always precedes that button press in both the
+  terminal log and the JSONL file.
+- **Axis threshold bands (matching `InputRouter.AXIS_DEADZONE = 0.5`):**
+  - Raw `joy_axis_motion`: `neg` (`v <= -0.5`), `center` (`-0.5 < v < 0.5`), `pos` (`v >= 0.5`).
+    Default deadband delta `axis_epsilon = 0.02`.
+  - Mapped `controller_axis_motion`: `neg` (`v <= -16384`), `center` (`-16384 < v < 16384`),
+    `pos` (`v >= 16384`). Default deadband delta `controller_axis_epsilon = 656`
+    (`round(axis_epsilon * 32768)`).
+- **Coalescing rule:**
+  1. **Threshold crossing:** Whenever an axis sample changes band (enters or leaves
+     `neg`/`center`/`pos`), flush any prior pending burst on that stream and emit the crossing
+     sample immediately with `threshold_crossed: true`.
+  2. **Within-window accumulation:** Otherwise, while a stream accumulates samples within
+     `coalesce_ms` (default `50` ms) — or while an axis stays within `axis_epsilon` of its
+     burst's `first_value` without crossing a threshold — fold subsequent samples into the
+     stream's pending burst, updating `last_value` (or `last_pos` and summed `rel` for mouse
+     motion), `min_value`, `max_value`, `last_elapsed_ms`, and `sample_count`.
+  3. **Burst emission:** Flush a pending burst when its age reaches `coalesce_ms` (and for axes,
+     either `|last_value - first_value| >= epsilon`, or a discrete event/shutdown triggers a flush),
+     when a discrete event arrives, or on shutdown. If `sample_count == 1`, emit an ordinary
+     uncoalesced `"event"` record. If `sample_count > 1`, emit an `"event"` record with
+     `coalesced: true`, `sample_count`, `first_elapsed_ms`, `last_elapsed_ms`, and stream
+     extrema (`first_value`, `last_value`, `min_value`, `max_value` for axes; `first_pos`,
+     `last_pos`, `rel` sum for mouse motion).
+  4. **Raw mode (`--raw`):** Sets `coalesce_ms = 0` and `axis_epsilon = 0.0`, emitting every
+     sample individually while still respecting `--max-records`.
+
+#### 13.12.6 Bounded JSON Lines report and live terminal view
+
+- **JSON Lines file (`--output <path>` / `-o <path>`):**
+  - UTF-8, LF (`\n`) line endings, one JSON object per line (`sort_keys=True`, `ensure_ascii=False`).
+  - Flushed after every line (`file.flush()`) so interrupted runs (`Ctrl+C`, disconnect, crash)
+    leave a valid, parseable partial report up to the last emitted record.
+  - Record types: `"session_start"` (line 1, `seq = 1`), `"device_discovered"`, `"event"`,
+    `"device_removed"`, and `"session_end"` (final line with `reason`, `total_raw_events`,
+    `total_emitted_records`, `coalesced_raw_events`, `truncated`, `elapsed_ms`).
+  - **Hard bound (`--max-records <N>`, default `10000`):** Must be a positive integer (`>= 1`;
+    minimum `2` when emitting `session_start` + `session_end`, or `1` emits `session_end`
+    immediately). Once `emitted_records == max_records - 1`, stop recording new input, emit
+    `session_end` with `reason: "max_records_reached"` and `truncated: true`, and exit cleanly.
+  - File-open or write errors (`OSError`) report a clear message on stderr and exit with non-zero
+    status without masking the error.
+- **Concise live terminal view (stdout):**
+  - Printed in parallel even when `--output` is specified.
+  - Stable, grep-friendly single-line summaries:
+    - Header: `HardDaysEngine <ver> input diagnostics | pygame-ce <ver> | SDL <x.y.z> | <platform> | window=<on|off>`
+    - Discovery: `[+<ms>ms] DEVICE+ (<origin>) id=<instance_id> "<name>" guid=<guid|n/a> ctrl=<yes|no> axes=<n> btns=<n> hats=<n> power=<level|n/a>`
+    - Removal: `[+<ms>ms] DEVICE- id=<instance_id> "<name>" guid=<guid|n/a>`
+    - Event: `[+<ms>ms] #<seq> <CATEGORY> <device_tag> <event> <summary>` (appending `[threshold]`
+      on threshold crossings and `(x<sample_count> coalesced)` on coalesced bursts).
+    - Footer: `[+<ms>ms] SESSION END reason=<reason> raw=<n> emitted=<n> truncated=<yes|no>`
+
+#### 13.12.7 CLI options (for T16.2–T16.4)
+
+`harddaysengine-input-diagnostics`:
+`--version`, `--output` / `-o <path>`, `--no-window`, `--duration <seconds>`,
+`--max-records <N>` (default `10000`), `--coalesce-ms <ms>` (default `50`),
+`--axis-epsilon <float>` (default `0.02`), `--raw`.
