@@ -1,5 +1,12 @@
 # HardDaysEngine
 
+[![CI](https://github.com/krj29b/HardDaysEngine/actions/workflows/ci.yml/badge.svg)](https://github.com/
+    krj29b/HardDaysEngine/actions/workflows/ci.yml)                                                         
+    [![Release](https://img.shields.io/github/v/release/krj29b/HardDaysEngine)](https://github.com/krj29b/Ha
+    rdDaysEngine/releases)                                                                                  
+    [![PyPI](https://img.shields.io/pypi/v/harddaysengine)](https://pypi.org/project/harddaysengine/)       
+    [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)     
+
 Play *Moonstone: A Hard Days Knight* on modern systems with your original Amiga disks.
 Choose a knight, explore the overworld, and enter lairs for real-time sword fights. Play solo or
 take turns on the map with up to four local players.
