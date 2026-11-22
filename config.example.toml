@@ -8,3 +8,21 @@ adf_dir = ""
 
 [gameplay]
 save_load = false           # true enables the F8 campaign save/load panel
+
+# Optional display settings (CLI flags override these; unknown keys are an error).
+# [display]
+# scale = 3                   # 1..8
+# filter = "faithful"         # faithful, scanlines, crt, smooth
+# scale_mode = "integer"      # integer, sharp-bilinear, fit
+# aspect = "square"           # square, pal
+# crop = "full"               # full, playfield
+# fullscreen = "off"          # off, desktop, exclusive
+# vsync = true
+# crt_mask = "aperture"       # aperture, shadow, none
+# crt_mask_strength = 0.25    # 0.0..1.0
+# crt_scanlines = 0.65        # 0.0..1.0
+# crt_curvature = 0.08        # 0.0..0.3
+# crt_bloom = 0.22            # 0.0..1.0
+# surround = "off"            # off, blur, solid
+# surround_brightness = 0.28  # 0.0..1.0
+# surround_color = "#101014"  # #RRGGBB

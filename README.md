@@ -1,10 +1,10 @@
 # HardDaysEngine
 
-Play *Moonstone: A Hard Days Knight* on Windows with your original Amiga disks.
+Play *Moonstone: A Hard Days Knight* on modern systems with your original Amiga disks.
 Choose a knight, explore the overworld, and enter lairs for real-time sword fights. Play solo or
 take turns on the map with up to four local players.
 
-**[Download for Windows (x64)](https://github.com/krj29b/HardDaysEngine/releases)** | [Screenshots](#screenshots) | [Controls](#controls) | [Run from source](#run-from-source)
+**[Download for Windows (x64 / x86)](https://github.com/krj29b/HardDaysEngine/releases)** | [Screenshots](#screenshots) | [Controls](#controls) | [Run from source](#run-from-source)
 
 ## Screenshots
 
@@ -88,7 +88,7 @@ and confirm each with Enter. Keyboard slots follow portrait selection order.
 Player 2 uses WASD/F, player 3 IJKL/U, and player 4 the numeric keypad/Keypad 0 for
 movement/fire. Gamepads use the directional pad or left stick and button 0 for fire.
 Practice uses two human knights. All nine creature handlers, loot, shops, services,
-place callers and the original ending are implemented; combat requires the original disks.
+place callers and the original ending are implemented; playing the campaign requires the original disks.
 See [docs/PROGRESS.md](docs/PROGRESS.md) for acceptance evidence and documented deviations.
 
 ## Run from Source
@@ -156,7 +156,7 @@ HardDaysEngine is a clean-room reimplementation of the 1991 Amiga game. It runs 
 
 - **Simulation (`src/harddaysengine/sim/`)**: deterministic 50 Hz integer/fixed-point kernel (persistent combat jobs and handlers, pixel map, turn scheduler, sheets and places, palette FX, PRNG). No floats, no wall clock, no `random`, no I/O.
 - **Assets (`src/harddaysengine/assets/`)**: reads original Amiga `.adf` disk images (OFS) at runtime, unpacks RNC1/LZSS streams, and decodes pictures, cels, `collide.hit` attack sets, `.t` arena layouts, `program`/`mog` hunk tables, and audio banks.
-- **Render (`src/harddaysengine/render/`)**: ModernGL (OpenGL 3.3 core) `320x256` virtual canvas, indexed palette textures, optional CRT post-process, and debug hitbox overlay.
+- **Render (`src/harddaysengine/render/`)**: ModernGL (OpenGL 3.3 core) `320x256` virtual canvas, indexed palette textures, presentation presets (`faithful`, `scanlines`, `crt`, `smooth`) with optional widescreen surround, and debug hitbox overlay.
 - **App & CLI (`src/harddaysengine/app/`, `src/harddaysengine/cli/`)**: `pygame-ce` window host, 50 Hz fixed-timestep loop, keyboard/gamepad input, audio mixer, and CLI entry points.
 
 ## Development & Verification

@@ -407,15 +407,6 @@ wheels = [
 ]
 
 [[package]]
-name = "esper"
-version = "3.9"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1c/9a/0061c4f8e0834cf57dc569a75b3e49a8fe1df51becfc09d7fd0f78988dda/esper-3.9.tar.gz", hash = "sha256:7487762686be55e6a49eb761f4ff724761080d3bcf446c033e2d91d8b6f2545e", size = 37389, upload-time = "2026-09-20T07:17:31.239Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/df/b4/102de58d50b862bda4a82f652efbc8f4c00f10ba3ae64fa1aefcab1e6f38/esper-3.9-py3-none-any.whl", hash = "sha256:5477d7bf27fe622baa2b9c2a0bf536c70336b2e8590105ef85200f1dbc67eea9", size = 14055, upload-time = "2026-09-20T07:17:29.389Z" },
-]
-
-[[package]]
 name = "filelock"
 version = "4.2.10"
 source = { registry = "https://pypi.org/simple" }
@@ -552,7 +543,6 @@ version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "amitools" },
-    { name = "esper" },
     { name = "moderngl" },
     { name = "numpy" },
     { name = "pillow" },
@@ -575,7 +565,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "amitools", specifier = ">=0.7.0" },
-    { name = "esper", specifier = ">=3.2" },
     { name = "moderngl", specifier = ">=5.10.0" },
     { name = "numpy", specifier = ">=2.1.0" },
     { name = "pillow", specifier = ">=10.4.0" },
