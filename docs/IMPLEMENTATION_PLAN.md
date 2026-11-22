@@ -454,6 +454,14 @@ Order: T13.1 → T13.2 → (T13.3, T13.4 in either order) → T13.5 → (T13.6, 
 **M5** is reached after 13A (a correct, crisp, fullscreen-capable picture); 13B is optional
 polish.
 
+#### 13D: Display preview
+
+- **T13.10 Live display preview and CRT tuning:** let players compare the existing filter presets
+  and adjust CRT scanline strength, mask, curvature, and bloom with immediate visual feedback.
+  Reuse the current scene rendering and assets. *Accept:* preview changes in windowed and
+  fullscreen modes, apply or discard them, and review menu text, a dark arena, and the
+  palette-cycling map for legibility. Display adjustments preserve replay hashes.
+
 ### Phase 14: Distribution
 
 - **T14.1 Portable Windows release.** Package the engine and its runtime for Windows x64.
