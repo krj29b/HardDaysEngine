@@ -5591,3 +5591,12 @@ a device index for opening the joystick. Motion, button and removal events ident
 opened joystick by its instance ID. Keep each connected joystick in its assigned player slot.
 On removal, clear that slot's held and pending input. Assign a newly opened joystick to the
 first free slot. The router samples normalized player inputs for the existing 50 Hz tick.
+
+### 13.9 Main menu entry
+
+The host opens the main menu when the intro finishes or the player skips it. On entry,
+the menu records the current movement and fire state. A held direction or fire button
+therefore requires a new edge before it moves the cursor or confirms a selection.
+Practice uses two knights and retains the configured campaign player count. Either
+Practice outcome finishes the fight's fade and opens the main menu with its palette and
+title music. The intro plays on the title scene.

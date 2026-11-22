@@ -166,6 +166,10 @@ Status lives in `PROGRESS.md`. Every task ends with a green `scripts/quality_gat
   - Keep connected pygame joystick handles alive and route input by joystick instance ID.
   - *Accept:* An attached pad controls its player slot, and a disconnected pad clears its input so a newly attached pad can take the slot.
 
+- **T8.3b Main menu transitions (`app/game.py`):**
+  - Keep the main menu open after skipping the intro with held fire.
+  - *Accept:* Either Practice result returns to the main menu with the selected campaign player count. Held fire on entry requires a release and a fresh press to confirm.
+
 ### Phase 11: Original-model rebuild of fights, overworld and places
 Source: `PLAYABILITY_AUDIT.md` §6 (Audit v3). Depends on ADR-009. Phases 9 and 10 are superseded
 where they conflict. Reference reading for every task is `reference/moonstone-ace` (clone of
@@ -249,7 +253,7 @@ Rules for the whole phase:
   waves, defeat settlement and lives, the practice fight (knight against knight), the low-health
   palette pulse (the original has no bars or score).
   *Accept:* win and loss both return to the caller with the right record changes; practice returns
-  to the title; the hit flash leaves the HUD colours alone.
+  to the main menu (T8.3b); the hit flash leaves the HUD colours alone.
 
 #### 11C: Overworld
 - **T11.12 Map movement and proximity (`sim/overworld.py` rewritten, `app/`):** pixel position,

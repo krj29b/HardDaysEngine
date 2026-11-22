@@ -394,6 +394,24 @@ def test_intro_skip_input() -> None:
     assert session.scene == GameScene.KNIGHT_SELECT
 
 
+def test_held_gamepad_fire_skips_only_the_intro() -> None:
+    session = GameSession(start_scene=GameScene.TITLE)
+    router = InputRouter()
+    fire_down = pygame.event.Event(pygame.JOYBUTTONDOWN, joy=0, button=0)
+
+    router.process_pygame_event(fire_down)
+    session.step_tick(router.sample_frame())
+    for _ in range(3):
+        session.step_tick(router.sample_frame())
+    assert session.scene == GameScene.KNIGHT_SELECT
+
+    router.process_pygame_event(pygame.event.Event(pygame.JOYBUTTONUP, joy=0, button=0))
+    session.step_tick(router.sample_frame())
+    router.process_pygame_event(fire_down)
+    session.step_tick(router.sample_frame())
+    assert session.scene == GameScene.OVERWORLD
+
+
 def test_map_key_translation_and_replay_roundtrip() -> None:
     router = InputRouter(init_joysticks=False)
     for raw, translated in (

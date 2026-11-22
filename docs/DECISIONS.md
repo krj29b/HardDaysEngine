@@ -1120,3 +1120,12 @@ so SDL continues to deliver input events. The router uses SDL instance IDs for e
 routing and keeps a player's slot stable while the device is connected. Removing a
 device clears its slot. Newly connected devices take the first free slot. The same
 normalized inputs drive the simulation and replay recording.
+
+## ADR-060: Treat Practice as a main-menu caller
+
+Accepted 2026-11-22 for T8.3b. This supersedes the Practice return-to-title behavior
+recorded in ADR-015. Either duel outcome returns to the main menu after the fight fade,
+with the configured campaign player count. On any transition into the menu, initialize
+its edge detection from the current input. This consumes held fire from an intro skip
+or a Practice fight until the button is released. Existing recordings retain their format.
+Recordings that rely on the former transitions can produce different checkpoints.

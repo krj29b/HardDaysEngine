@@ -154,7 +154,9 @@ def test_practice_menu_starts_two_real_knights_on_distinct_ports(adf_dir: Path) 
 
 
 @pytest.mark.parametrize("loser_first", [False, True])
-def test_practice_death_of_either_knight_returns_to_title(adf_dir: Path, loser_first: bool) -> None:
+def test_practice_death_of_either_knight_returns_to_main_menu(
+    adf_dir: Path, loser_first: bool
+) -> None:
     session = GameSession(
         disk_set=DiskSet.from_directory(adf_dir), start_scene=GameScene.KNIGHT_SELECT
     )
@@ -167,13 +169,22 @@ def test_practice_death_of_either_knight_returns_to_title(adf_dir: Path, loser_f
     actor.hp = 0
     script = active.runtime.fight.table_long(actor.hurt_scripts, 8)
     active.runtime.fight.restart_job(handle, script)
+    held_fire = InputFrame(players={KnightId.RED: PlayerInput(fire=True)})
     for _ in range(1200):
-        session.step_tick(InputFrame())
+        session.step_tick(held_fire if session.blocking_fade else InputFrame())
         if session.scene != GameScene.COMBAT:
             break
-    assert session.scene == GameScene.TITLE
+    assert session.scene == GameScene.KNIGHT_SELECT
+    assert not session.knight_pick_active
     assert session.active_encounter is None
     assert not session.practice_mode
+    assert session.selected_player_count == 1
+    assert session.palette_fx.is_fading
+    session.step_tick(held_fire)
+    assert session.scene == GameScene.KNIGHT_SELECT
+    session.step_tick(InputFrame())
+    session.step_tick(held_fire)
+    assert session.scene == GameScene.COMBAT
 
 
 def test_disk_backed_menu_to_practice_replay_preserves_the_initial_roster(

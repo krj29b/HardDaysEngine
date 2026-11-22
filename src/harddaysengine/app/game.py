@@ -358,7 +358,10 @@ class GameSession:
             return
 
         self._advance_sound_fade()
+        was_in_menu = self.scene == GameScene.KNIGHT_SELECT
         self._step_active_scene(frame, primary)
+        if self.scene == GameScene.KNIGHT_SELECT and not was_in_menu:
+            self._remember_menu_input(self._player_input(frame, self.players[0]))
         self.palette_fx.step_vbl()
         if self.scene == GameScene.LOCATION:
             self._advance_town_entry()
@@ -582,7 +585,9 @@ class GameSession:
             self.gore_enabled = not self.gore_enabled
             return
         if self.menu_cursor == 2:
+            campaign_count = self.selected_player_count
             self._reset_campaign(2, (KnightId.BLUE, KnightId.YELLOW))
+            self.selected_player_count = campaign_count
             self.practice_mode = True
             self._start_combat(
                 EncounterTrigger(
@@ -627,9 +632,7 @@ class GameSession:
         dx_edge = primary.dx if primary.dx != self._menu_prev_dx else 0
         dy_edge = primary.dy if primary.dy != self._menu_prev_dy else 0
         fire_edge = primary.fire and not self._menu_prev_fire
-        self._menu_prev_dx = primary.dx
-        self._menu_prev_dy = primary.dy
-        self._menu_prev_fire = primary.fire
+        self._remember_menu_input(primary)
         confirm = primary.confirm or fire_edge
 
         if self.knight_pick_active:
@@ -639,6 +642,12 @@ class GameSession:
         self._adjust_main_menu(dx_edge, dy_edge)
         if confirm:
             self._confirm_main_menu()
+
+    def _remember_menu_input(self, primary: PlayerInput) -> None:
+        """Store the state used to detect new edges in the menu (ARCHITECTURE.md §13.9)."""
+        self._menu_prev_dx = primary.dx
+        self._menu_prev_dy = primary.dy
+        self._menu_prev_fire = primary.fire
 
     def _ensure_map(self) -> bool:
         if self.overworld.rules is not None:
@@ -1871,10 +1880,13 @@ class GameSession:
         return _REGION_ARENAS.get(self.overworld.region_code, "fo1.t")
 
     def _finish_practice_combat(self) -> None:
+        """Return from either Practice outcome to the main menu (ARCHITECTURE.md §13.9)."""
         self.practice_mode = False
         self.active_encounter = None
-        self.scene = GameScene.TITLE
+        self.scene = GameScene.KNIGHT_SELECT
         self.last_status = "PRACTICE COMPLETE"
+        self._begin_fade_in(self._menu_target_palette())
+        self._play_title_music()
 
     def _fight_runtime(self, trigger: EncounterTrigger, knight_id: KnightId) -> ActiveEncounter:
         if self.asset_bundle is None:
