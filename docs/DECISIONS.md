@@ -25,7 +25,7 @@ movement semantics. Where they disagree, moonstone-ace wins, and the conflict is
 `render` gets a `moderngl.Context` from `app` and never touches pygame. Audio mixing sits in `app`.
 
 ## ADR-004: Quality gate = pyhexen's ruff + pytest, plus mypy, import-linter, radon, vulture
-**Status:** ACCEPTED (2026-11-14)
+**Status:** ACCEPTED (2026-11-14). ADR-064 supersedes the choice of type checker.
 **Context:** pyhexen gates only on ruff and pytest, and checks layering with an AST test.
 **Decision:** Keep pyhexen's AST layering test, extended with a float ban for `sim`. Add the
 user-specified tools in `scripts/quality_gate.py`. Because `radon cc` never fails on its own,
@@ -1168,3 +1168,19 @@ Loading during a recording starts the new input timeline at the loaded checkpoin
 
 Verify the format with checkpoint and continuation hashes, restoration from a fresh
 process, and recovery from invalid files without changing an active campaign.
+
+## ADR-064: Use Pyrefly in the shared quality gate
+
+**Status:** ACCEPTED (2026-11-22, T1.7)
+
+Pyrefly took 1.08 seconds on Windows with Python 3.12, compared with 12.23 seconds
+for mypy with an empty cache (medians of five local runs). Use Pyrefly for local
+checks, CI and release validation through `scripts/quality_gate.py`.
+
+Check `src` using the `legacy` preset with explicit errors for incomplete annotations,
+missing generic arguments, implicit re-exports, incompatible comparisons, returning
+`Any`, redundant casts, unbound names, unknown bases, unreachable code, untyped
+decorators, and unused ignores. Keep the missing import exceptions for `moderngl`
+and `amitools`.
+The checkers differ in inference and diagnostics. Pyrefly has no direct equivalent
+to mypy's prohibition on calls to untyped functions.

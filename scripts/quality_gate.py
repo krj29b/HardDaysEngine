@@ -71,7 +71,9 @@ STEPS: tuple[GateStep, ...] = (
         "Ruff Lint & McCabe Complexity (<=10)",
         _command(["uv", "run", "ruff", "check", "src", "tests", "scripts"]),
     ),
-    GateStep("Mypy Strict Type Check", _command(["uv", "run", "mypy", "src"])),
+    GateStep(
+        "Pyrefly Type Check", _command(["uv", "run", "pyrefly", "check", "--progress-bar", "no"])
+    ),
     GateStep("Import-Linter Architectural Boundaries", _command(["uv", "run", "lint-imports"])),
     GateStep("Radon Cyclomatic Complexity Gate (Grade A/B only)", _radon_gate),
     GateStep("Vulture Dead Code Check", _command(["uv", "run", "vulture", "src/harddaysengine"])),

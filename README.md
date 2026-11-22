@@ -167,7 +167,7 @@ HardDaysEngine is a clean-room reimplementation of the 1991 Amiga game. It runs 
 ## Development & Verification
 
 ```powershell
-uv run python scripts/quality_gate.py    # ruff format/lint, mypy --strict, import-linter, radon, vulture, pytest
+uv run python scripts/quality_gate.py    # ruff format/lint, Pyrefly, import-linter, radon, vulture, pytest
 uv run pytest -m "not adf and not gl"    # unit tests needing neither disks nor OpenGL
 uv run pytest -m adf                     # integration tests against your local ./disks/*.adf
 uv run pytest -m gl                      # ModernGL rendering tests

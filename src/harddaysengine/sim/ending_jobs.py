@@ -97,7 +97,7 @@ class JobPool:
                     swapped = True
 
     def snapshot(self) -> tuple[dict[str, object], ...]:
-        return tuple(asdict(job) for job in self.jobs)
+        return tuple(asdict(job, dict_factory=dict[str, object]) for job in self.jobs)
 
 
 @dataclass(slots=True)

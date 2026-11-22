@@ -34,7 +34,7 @@ class ValleyScreen:
         )
 
     def snapshot(self) -> dict[str, object]:
-        return asdict(self.state)
+        return asdict(self.state, dict_factory=dict[str, object])
 
     def palette(self) -> tuple[RGBColor, ...]:
         colors = list(self.picture.palette)

@@ -19,7 +19,7 @@ A faithful, clean-room Python reimplementation of *Moonstone: A Hard Days Knight
 | Manifest schema | `pydantic` v2 |
 | ECS (simulation entities) | `esper` (pure Python, deterministic iteration order) |
 | Image export | `pillow` (PNG output of the extractor) |
-| Gates | ruff (lint, format, McCabe ≤ 10), mypy strict, import-linter, radon (≤ B), vulture (≥ 80 %), pytest + coverage |
+| Gates | ruff (lint, format, McCabe ≤ 10), Pyrefly, import-linter, radon (≤ B), vulture (≥ 80 %), pytest + coverage |
 
 ## 3. Layers
 
@@ -64,6 +64,9 @@ Status lives in `PROGRESS.md`. Every task ends with a green `scripts/quality_gat
   `DIVS.W`/`DIVU.W` with overflow → `None`, and `MULS.W`/`MULU.W`.
 - **T1.6 CI:** GitHub Actions on Windows and Ubuntu, Python 3.12, running the full gate.
   `adf` tests skip on CI because no disks are present.
+- **T1.7 Pyrefly quality gate:** Replace mypy in the shared gate.
+  *Accept:* The locked development environment runs Pyrefly on all of `src` in the full gate
+  used by local development, CI and release validation.
 
 ### Phase 2: Format and behaviour specification (`docs/ARCHITECTURE.md`)
 - **T2.1 Disks:** OFS layout, the per-disk file catalogue, marker files, duplicate resolution (`kn1.ob`).

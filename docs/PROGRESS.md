@@ -13,6 +13,7 @@ and the Remediation Plan in `docs/PLAYABILITY_AUDIT.md`.
 | T1.4 | Config & ADF discovery | T1.1 | DONE | `app/config.py`, `--list-disks`, `adf_dir` fixture. The real disk-set test (`-m adf`) passes locally. |
 | T1.5 | 68000 arithmetic | T1.1 | DONE | `sim/m68k.py`; `DIVS.W`/`DIVU.W` return `None` on overflow (V set, destination unchanged). |
 | T1.6 | CI | T1.3 | DONE | `.github/workflows/ci.yml` runs `scripts/quality_gate.py` on Windows and Ubuntu. |
+| T1.7 | Pyrefly quality gate | T1.6 | DONE | ADR-064. The locked shared gate checks all 178 source files. The local CI-style run passed with 1510 tests and 366 ADF-dependent skips. A synthetic probe confirmed type errors fail the checker. |
 | T2.1 | Spec: disks | T1.* | DONE | Documented in `docs/ARCHITECTURE.md` §1. |
 | T2.2 | Spec: codecs | T2.1 | DONE | Documented in `docs/ARCHITECTURE.md` §2. |
 | T2.3 | Spec: graphics | T2.2 | DONE | Documented in `docs/ARCHITECTURE.md` §3. |

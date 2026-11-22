@@ -26,7 +26,7 @@ Read it fully before touching code. (`GEMINI.md` only points here.)
    ambiguous, extend the spec first (from `reference/`, see §5), then implement.
 4. **Implement with tests.** Satisfy every acceptance criterion in the plan.
 5. **Verify.** Run `uv run python scripts/quality_gate.py`. Every gate must pass: ruff format,
-   ruff lint (McCabe ≤ 10), mypy `--strict`, import-linter, radon (no function graded C or
+   ruff lint (McCabe ≤ 10), Pyrefly, import-linter, radon (no function graded C or
    worse), vulture, pytest.
 6. **Record.** Set the task to `DONE` in `docs/PROGRESS.md` with short notes (deviations, gotchas,
    follow-ups). Add an ADR to `docs/DECISIONS.md` for every design choice.
@@ -76,7 +76,7 @@ If a task is too large for one session, split it into `T<id>a`, `T<id>b` and so 
   loop when the data is small, but prefer numpy for bitplane conversion.
 
 ### Code quality
-- Python 3.12+, fully typed (mypy strict), ruff clean, `dataclass(slots=True, frozen=True)` for
+- Python 3.12+, fully typed (checked by Pyrefly), ruff clean, `dataclass(slots=True, frozen=True)` for
   decoded records.
 - When implementing behaviour described in the spec, cite the spec section in the docstring,
   for example `"""Picture loader (ARCHITECTURE.md §4.2)."""`.

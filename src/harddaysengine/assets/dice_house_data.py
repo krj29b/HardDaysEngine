@@ -276,7 +276,8 @@ def _dice_at(code: _Code) -> tuple[tuple[int, int], ...]:
 
 
 def _suffix(code: _Code) -> str:
-    pos, chars = _SUFFIX, []
+    pos = _SUFFIX
+    chars: list[str] = []
     while code.word(pos) == _OP_PUSH_B_A2:
         chars.append(chr(code.word(pos + 2) & 0xFF))
         pos += 4
