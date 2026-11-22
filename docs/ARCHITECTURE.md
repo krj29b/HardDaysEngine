@@ -5582,3 +5582,12 @@ silently falls back to a default. Each key is added by the task that implements 
 | `surround` | `off`, `blur`, `solid` | `off` | `--surround` | T13.8 |
 | `surround_brightness` | float 0.0..1.0 | 0.28 | — | T13.8 |
 | `surround_color` | `#RRGGBB` hex string | `"#101014"` | — | T13.8 |
+
+### 13.8 Gamepad input
+
+The window host opens up to four pygame joysticks in device order at startup. The input
+router owns each open joystick for the duration of its connection. Device-added events supply
+a device index for opening the joystick. Motion, button and removal events identify the
+opened joystick by its instance ID. Keep each connected joystick in its assigned player slot.
+On removal, clear that slot's held and pending input. Assign a newly opened joystick to the
+first free slot. The router samples normalized player inputs for the existing 50 Hz tick.

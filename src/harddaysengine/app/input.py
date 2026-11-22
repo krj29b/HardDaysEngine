@@ -266,6 +266,7 @@ class InputRouter:
         self._held_keys: set[int] = set()
         self._edge_keys: set[int] = set()
         self._pads: dict[int, _PadState] = {}
+        self._joysticks: dict[int, tuple[int, pygame.joystick.JoystickType]] = {}
         self._injected: dict[KnightId, PlayerInput] = {}
         self._quit_requested = False
 
@@ -273,19 +274,30 @@ class InputRouter:
             self.init_joysticks()
 
     def init_joysticks(self) -> int:
-        """Initialize ``pygame.joystick`` if available; return detected count."""
+        """Open startup gamepads and return the detected count (ARCHITECTURE.md §13.8)."""
         try:
             if not pygame.joystick.get_init():
                 pygame.joystick.init()
             count = pygame.joystick.get_count()
-            for idx in range(min(4, count)):
-                joy = pygame.joystick.Joystick(idx)
-                if not joy.get_init():
-                    joy.init()
-                self._pads.setdefault(idx, _PadState())
-            return count
         except pygame.error:
             return 0
+        for idx in range(min(4, count)):
+            self._open_gamepad(idx)
+        return count
+
+    def _open_gamepad(self, device_index: int) -> None:
+        occupied_slots = {slot for slot, _ in self._joysticks.values()}
+        slot = next((slot for slot in range(4) if slot not in occupied_slots), None)
+        if slot is None:
+            return
+        try:
+            joystick = pygame.joystick.Joystick(device_index)
+            instance_id = joystick.get_instance_id()
+        except pygame.error:
+            return
+        if instance_id not in self._joysticks:
+            self._joysticks[instance_id] = (slot, joystick)
+            self._pads[slot] = _PadState()
 
     def set_player_input(self, knight_id: KnightId, player_input: PlayerInput) -> None:
         """Inject a deterministic :class:`PlayerInput` override for ``knight_id``."""
@@ -330,6 +342,13 @@ class InputRouter:
             self._edge_keys.add(key)
         elif etype == pygame.KEYUP:
             self._held_keys.discard(int(event.key))
+        elif etype == pygame.JOYDEVICEADDED:
+            self._open_gamepad(int(event.device_index))
+        elif etype == pygame.JOYDEVICEREMOVED:
+            disconnected = self._joysticks.pop(int(event.instance_id), None)
+            if disconnected is not None:
+                slot, _ = disconnected
+                self._pads.pop(slot, None)
         elif etype in (
             pygame.JOYAXISMOTION,
             pygame.JOYHATMOTION,
@@ -338,11 +357,17 @@ class InputRouter:
         ):
             self._process_joystick_event(event)
 
+    def _gamepad_slot(self, event: pygame.event.Event) -> int:
+        if not hasattr(event, "instance_id"):
+            return int(getattr(event, "joy", -1))
+        connected = self._joysticks.get(int(event.instance_id))
+        return connected[0] if connected is not None else -1
+
     def _process_joystick_event(self, event: pygame.event.Event) -> None:
-        joy_id = int(getattr(event, "joy", getattr(event, "instance_id", 0)))
-        if not 0 <= joy_id < 4:
+        slot = self._gamepad_slot(event)
+        if not 0 <= slot < 4:
             return
-        pad = self._pads.setdefault(joy_id, _PadState())
+        pad = self._pads.setdefault(slot, _PadState())
         if event.type == pygame.JOYAXISMOTION:
             if event.axis == 0:
                 pad.axis_x = float(event.value)

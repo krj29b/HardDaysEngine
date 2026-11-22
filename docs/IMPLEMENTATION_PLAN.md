@@ -162,6 +162,10 @@ Status lives in `PROGRESS.md`. Every task ends with a green `scripts/quality_gat
     and `uv run harddaysengine` playable entry point with deterministic replay recording/verification (`--record` / `--replay`).
   - *Accept:* End-to-end headless session test running a scripted overworld + combat encounter with 100% deterministic state hash.
 
+- **T8.3a Gamepad device lifecycle (`app/input.py`, `tests/unit/test_game_session.py`):**
+  - Keep connected pygame joystick handles alive and route input by joystick instance ID.
+  - *Accept:* An attached pad controls its player slot, and a disconnected pad clears its input so a newly attached pad can take the slot.
+
 ### Phase 11: Original-model rebuild of fights, overworld and places
 Source: `PLAYABILITY_AUDIT.md` §6 (Audit v3). Depends on ADR-009. Phases 9 and 10 are superseded
 where they conflict. Reference reading for every task is `reference/moonstone-ace` (clone of

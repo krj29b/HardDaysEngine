@@ -1112,3 +1112,11 @@ passes neutral input while fading. Wait/done processing still advances, so close
 continuations are unchanged. Town callers copy their pointer into the new sheet. Recorded
 inputs that clicked a sheet during its fade now replay differently. Other callers keep the
 (160,100) start until their cursor carry-over is specified.
+
+## ADR-059: Keep open joysticks in stable player slots
+
+Accepted 2026-11-22 for T8.3a. The host input router retains each pygame joystick handle
+so SDL continues to deliver input events. The router uses SDL instance IDs for event
+routing and keeps a player's slot stable while the device is connected. Removing a
+device clears its slot. Newly connected devices take the first free slot. The same
+normalized inputs drive the simulation and replay recording.

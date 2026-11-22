@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 from unittest.mock import patch
+from weakref import ReferenceType, ref
 
 import numpy as np
 import pygame
@@ -111,6 +112,48 @@ def test_input_router_joystick_events_and_deadzone() -> None:
     frame2 = router.sample_frame()
     assert frame2.for_player(KnightId.BLUE).dx == 1
     assert frame2.for_player(KnightId.BLUE).fire is False
+
+
+def test_input_router_keeps_joystick_open_and_reuses_slot_after_disconnect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Joystick:
+        def __init__(self, instance_id: int) -> None:
+            self.instance_id = instance_id
+
+        def get_instance_id(self) -> int:
+            return self.instance_id
+
+    opened: list[ReferenceType[Joystick]] = []
+    instance_ids = iter((42, 71))
+
+    def open_joystick(device_index: int) -> Joystick:
+        assert device_index == 0
+        joystick = Joystick(next(instance_ids))
+        opened.append(ref(joystick))
+        return joystick
+
+    monkeypatch.setattr(pygame.joystick, "get_init", lambda: True)
+    monkeypatch.setattr(pygame.joystick, "get_count", lambda: 1)
+    monkeypatch.setattr(pygame.joystick, "Joystick", open_joystick)
+    router = InputRouter(init_joysticks=True)
+    assert opened[0]() is not None
+
+    router.process_pygame_event(
+        pygame.event.Event(pygame.JOYBUTTONDOWN, instance_id=42, joy=3, button=0)
+    )
+    assert router.sample_frame().for_player(KnightId.RED).fire
+
+    router.process_pygame_event(pygame.event.Event(pygame.JOYDEVICEREMOVED, instance_id=42))
+    assert opened[0]() is None
+    assert router.sample_frame().for_player(KnightId.RED) == PlayerInput()
+
+    router.process_pygame_event(pygame.event.Event(pygame.JOYDEVICEADDED, device_index=0))
+    assert opened[1]() is not None
+    router.process_pygame_event(
+        pygame.event.Event(pygame.JOYHATMOTION, instance_id=71, value=(1, 0))
+    )
+    assert router.sample_frame().for_player(KnightId.RED) == PlayerInput(dx=1)
 
 
 def test_replay_serialization_roundtrip(tmp_path: Path) -> None:
