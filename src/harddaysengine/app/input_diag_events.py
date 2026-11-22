@@ -612,15 +612,21 @@ def _format_event_tag(category: str, device: Mapping[str, object]) -> str:
     return prefix
 
 
-def _format_fields_summary(fields: Mapping[str, object]) -> str:
+def _format_fields_summary(fields: Mapping[str, object], *, coalesced: bool = False) -> str:
     parts: list[str] = []
     for key, value in fields.items():
+        if key == "threshold_crossed":
+            continue
+        if coalesced and key in ("value", "pos"):
+            continue
         if key == "mapping" and isinstance(value, Mapping):
             parts.append(f"mapping_keys={len(value)}")
         elif isinstance(value, list):
             parts.append(f"{key}=[{','.join(str(x) for x in value)}]")
         else:
             parts.append(f"{key}={value}")
+    if fields.get("threshold_crossed"):
+        parts.append("[threshold]")
     return " ".join(parts)
 
 
@@ -632,11 +638,13 @@ def _format_event(record: Mapping[str, object]) -> list[str]:
     device = raw_dev if isinstance(raw_dev, Mapping) else {}
     raw_fields = record.get("fields")
     fields = raw_fields if isinstance(raw_fields, Mapping) else {}
+    coalesced = bool(record.get("coalesced"))
     tag = _format_event_tag(category, device)
     ev_name = record.get("event", "unknown")
-    summary = _format_fields_summary(fields)
+    summary = _format_fields_summary(fields, coalesced=coalesced)
+    suffix = f" (x{record.get('sample_count', 1)} coalesced)" if coalesced else ""
     tail = f" {summary}" if summary else ""
-    return [f"[+{elapsed}ms] #{seq} {tag} {ev_name}{tail}"]
+    return [f"[+{elapsed}ms] #{seq} {tag} {ev_name}{tail}{suffix}"]
 
 
 def _format_session_end(record: Mapping[str, object]) -> list[str]:

@@ -142,6 +142,7 @@ def test_diagnostics_modules_do_not_import_game_or_disk_layers() -> None:
     )
     files = (
         SRC_ROOT / "app" / "input_diag_events.py",
+        SRC_ROOT / "app" / "input_diag_report.py",
         SRC_ROOT / "app" / "input_diagnostics.py",
         SRC_ROOT / "cli" / "input_diagnostics.py",
     )
@@ -338,6 +339,9 @@ def test_unavailable_joystick_metadata_is_omitted_not_fatal(
 ) -> None:
     monkeypatch.setattr(pygame.joystick, "get_count", lambda: 1)
     monkeypatch.setattr(pygame.joystick, "Joystick", lambda _idx: _BrokenMetaJoystick())
+    monkeypatch.setattr(
+        "harddaysengine.app.input_diagnostics._load_controller_module", lambda: None
+    )
     session = InputDiagnosticsSession(DiagnosticsOptions(no_window=True, duration_s=0.0))
     records = session.start()
     try:

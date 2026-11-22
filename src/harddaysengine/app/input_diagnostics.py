@@ -20,9 +20,18 @@ from harddaysengine.app.input_diag_events import (
     format_terminal_record,
     normalize_pygame_event,
 )
+from harddaysengine.app.input_diag_report import (
+    DEFAULT_AXIS_EPSILON,
+    DEFAULT_COALESCE_MS,
+    DEFAULT_MAX_RECORDS,
+    CoalesceConfig,
+    JsonlReportWriter,
+    MotionCoalescer,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
     from typing import TextIO
 
 CAPTURE_WINDOW_SIZE = (320, 120)
@@ -52,11 +61,16 @@ class _TouchModule(Protocol):
 
 @dataclass(slots=True, frozen=True)
 class DiagnosticsOptions:
-    """Configuration for a standalone SDL input diagnostic run (§13.12.1)."""
+    """Configuration for a standalone SDL input diagnostic run (§13.12.1, §13.12.5-7)."""
 
     no_window: bool = False
     duration_s: float | None = None
     poll_sleep_s: float = 0.005
+    output_path: Path | None = None
+    max_records: int = DEFAULT_MAX_RECORDS
+    coalesce_ms: int = DEFAULT_COALESCE_MS
+    axis_epsilon: float = DEFAULT_AXIS_EPSILON
+    raw: bool = False
 
 
 @dataclass(slots=True, frozen=True)
@@ -66,6 +80,8 @@ class DiagnosticsSummary:
     reason: str
     total_raw_events: int
     total_emitted_records: int
+    coalesced_raw_events: int
+    truncated: bool
     elapsed_ms: int
     records: tuple[dict[str, object], ...]
 
@@ -236,6 +252,14 @@ class InputDiagnosticsSession:
 
     def __init__(self, options: DiagnosticsOptions | None = None) -> None:
         self._options = options if options is not None else DiagnosticsOptions()
+        if self._options.max_records < 1:
+            raise ValueError("max_records must be a positive integer")
+        self._coalesce_cfg = CoalesceConfig(
+            coalesce_ms=self._options.coalesce_ms,
+            axis_epsilon=self._options.axis_epsilon,
+            raw=self._options.raw,
+        )
+        self._coalescer = MotionCoalescer(self._coalesce_cfg)
         self._ctrl_mod: _ControllerModule | None = None
         self._touch_mod: _TouchModule | None = None
         self._controller_api_available = False
@@ -248,6 +272,7 @@ class InputDiagnosticsSession:
         self._start_ns = 0
         self._seq = 0
         self._raw_events = 0
+        self._truncated = False
         self._stop_reason: str | None = None
         self._active: dict[int, _OpenGamepad] = {}
         self._known: dict[int, DeviceIdentity] = {}
@@ -269,11 +294,31 @@ class InputDiagnosticsSession:
             return 0
         return max(0, (time.monotonic_ns() - self._start_ns) // 1_000_000)
 
-    def _emit(self, payload: dict[str, object]) -> dict[str, object]:
+    def _emit_raw(self, payload: dict[str, object]) -> dict[str, object]:
         self._seq += 1
         record: dict[str, object] = {"seq": self._seq, "elapsed_ms": self.elapsed_ms(), **payload}
         self._records.append(record)
         return record
+
+    def _emit(self, payload: dict[str, object]) -> dict[str, object] | None:
+        if self._seq >= self._options.max_records - 1:
+            self._truncated = True
+            self._stop_reason = "max_records_reached"
+            return None
+        record = self._emit_raw(payload)
+        if self._seq >= self._options.max_records - 1:
+            self._truncated = True
+            self._stop_reason = "max_records_reached"
+        return record
+
+    def _emit_many(self, payloads: list[dict[str, object]]) -> list[dict[str, object]]:
+        emitted: list[dict[str, object]] = []
+        for payload in payloads:
+            rec = self._emit(payload)
+            if rec is None:
+                break
+            emitted.append(rec)
+        return emitted
 
     def start(self) -> list[dict[str, object]]:
         """Initialize SDL input subsystems, emit ``session_start``, and discover devices."""
@@ -282,9 +327,15 @@ class InputDiagnosticsSession:
         self._start_ns = time.monotonic_ns()
         self._init_sdl()
         self._started = True
-        emitted: list[dict[str, object]] = [self._emit(self._build_session_start())]
-        emitted.extend(self._discover_startup_gamepads())
-        emitted.extend(self._discover_startup_touch())
+        emitted: list[dict[str, object]] = []
+        first = self._emit(self._build_session_start())
+        if first is None:
+            return emitted
+        emitted.append(first)
+        if self._stop_reason is None:
+            emitted.extend(self._discover_startup_gamepads())
+        if self._stop_reason is None:
+            emitted.extend(self._discover_startup_touch())
         return emitted
 
     def _init_sdl(self) -> None:
@@ -324,6 +375,8 @@ class InputDiagnosticsSession:
             self._capture_window_note = str(exc)
 
     def _build_session_start(self) -> dict[str, object]:
+        config = self._coalesce_cfg.to_dict()
+        config["max_records"] = self._options.max_records
         payload: dict[str, object] = {
             "record_type": "session_start",
             "schema_version": DIAGNOSTICS_SCHEMA_VERSION,
@@ -337,6 +390,7 @@ class InputDiagnosticsSession:
             "controller_api_available": self._controller_api_available,
             "touch_api_available": self._touch_api_available,
             "sdl_env": _collect_sdl_env(),
+            "config": config,
         }
         if self._video_driver is not None:
             payload["video_driver"] = self._video_driver
@@ -369,16 +423,17 @@ class InputDiagnosticsSession:
                 touch_id = self._touch_mod.get_device(idx)
             except (pygame.error, AttributeError, NotImplementedError):
                 continue
-            emitted.append(
-                self._emit(
-                    {
-                        "record_type": "device_discovered",
-                        "device_kind": "touch",
-                        "origin": "startup",
-                        "touch_id": touch_id,
-                    }
-                )
+            rec = self._emit(
+                {
+                    "record_type": "device_discovered",
+                    "device_kind": "touch",
+                    "origin": "startup",
+                    "touch_id": touch_id,
+                }
             )
+            if rec is None:
+                break
+            emitted.append(rec)
         return emitted
 
     def _open_gamepad(
@@ -468,14 +523,20 @@ class InputDiagnosticsSession:
         return record
 
     def poll_once(self) -> list[dict[str, object]]:
-        """Drain all queued SDL events in FIFO order and return emitted records."""
+        """Drain all queued SDL events in FIFO order and flush expired motion bursts."""
         emitted: list[dict[str, object]] = []
         for event in pygame.event.get():
+            if self._stop_reason is not None:
+                break
             emitted.extend(self.process_event(event))
+        if self._stop_reason is None:
+            emitted.extend(self._emit_many(self._coalescer.flush_expired(self.elapsed_ms())))
         return emitted
 
     def process_event(self, event: pygame.event.Event) -> list[dict[str, object]]:
         """Process one SDL event, updating hotplug state and emitting ordered records."""
+        if self._stop_reason is not None:
+            return []
         etype = event.type
         if etype in (_JOY_ADDED, _CTRL_ADDED):
             return self._handle_device_added(event)
@@ -498,7 +559,7 @@ class InputDiagnosticsSession:
         return None
 
     def _handle_device_added(self, event: pygame.event.Event) -> list[dict[str, object]]:
-        emitted: list[dict[str, object]] = []
+        emitted = self._emit_many(self._coalescer.flush_all())
         dev_idx = event.dict.get("device_index")
         raw_guid = event.dict.get("guid")
         fallback_guid = raw_guid if isinstance(raw_guid, str) and raw_guid else None
@@ -550,7 +611,7 @@ class InputDiagnosticsSession:
                 mapping = _safe_mapping_query(entry.controller)
         return self._emit_normalized(event, device=identity, mapping=mapping)
 
-    def _emit_device_removed(self, identity: DeviceIdentity) -> dict[str, object]:
+    def _emit_device_removed(self, identity: DeviceIdentity) -> dict[str, object] | None:
         payload: dict[str, object] = {
             "record_type": "device_removed",
             "device_kind": identity.kind,
@@ -577,18 +638,8 @@ class InputDiagnosticsSession:
         if norm is None:
             return []
         self._raw_events += 1
-        rec = self._emit(
-            {
-                "record_type": "event",
-                "category": norm.category,
-                "event": norm.event,
-                "sdl_type": norm.sdl_type,
-                "sdl_name": norm.sdl_name,
-                "device": norm.device,
-                "fields": norm.fields,
-            }
-        )
-        return [rec]
+        payloads = self._coalescer.push(norm, self.elapsed_ms())
+        return self._emit_many(payloads)
 
     def _close_controller(self, entry: _OpenGamepad) -> None:
         if entry.controller is not None:
@@ -602,17 +653,25 @@ class InputDiagnosticsSession:
                 entry.joystick.quit()
             entry.joystick = None
 
+    def flush_pending(self) -> list[dict[str, object]]:
+        """Flush any buffered motion/axis bursts before shutdown."""
+        if self._stop_reason == "max_records_reached":
+            return []
+        return self._emit_many(self._coalescer.flush_all())
+
     def finish(self, reason: str) -> dict[str, object]:
         """Emit ``session_end`` and release all open SDL device handles and subsystems."""
         if self._closed:
             return self._records[-1]
-        end_rec = self._emit(
+        final_reason = "max_records_reached" if self._truncated else reason
+        end_rec = self._emit_raw(
             {
                 "record_type": "session_end",
-                "reason": reason,
+                "reason": final_reason,
                 "total_raw_events": self._raw_events,
                 "total_emitted_records": self._seq + 1,
-                "truncated": False,
+                "coalesced_raw_events": self._coalescer.coalesced_raw_events,
+                "truncated": self._truncated,
             }
         )
         self._cleanup_sdl()
@@ -639,15 +698,18 @@ class InputDiagnosticsSession:
         on_record: Callable[[dict[str, object]], None] | None = None,
         on_poll: Callable[[int], None] | None = None,
     ) -> DiagnosticsSummary:
-        """Run the diagnostic loop until ``QUIT``, ``KeyboardInterrupt``, or duration expiry."""
+        """Run the diagnostic loop until ``QUIT``, ``KeyboardInterrupt``, cap, or duration."""
         _dispatch_records(self.start(), on_record)
         reason = self._loop_until_stop(on_record=on_record, on_poll=on_poll)
+        _dispatch_records(self.flush_pending(), on_record)
         end_rec = self.finish(reason)
         _dispatch_records((end_rec,), on_record)
         return DiagnosticsSummary(
-            reason=reason,
+            reason=str(end_rec["reason"]),
             total_raw_events=self._raw_events,
             total_emitted_records=self._seq,
+            coalesced_raw_events=self._coalescer.coalesced_raw_events,
+            truncated=self._truncated,
             elapsed_ms=self.elapsed_ms(),
             records=self.records,
         )
@@ -692,13 +754,21 @@ def run_input_diagnostics(
     stream: TextIO | None = None,
     on_poll: Callable[[int], None] | None = None,
 ) -> DiagnosticsSummary:
-    """Run the diagnostic session and write formatted lines to ``stream``."""
+    """Run the diagnostic session, streaming to ``stream`` and optional flushed JSONL."""
+    opts = options if options is not None else DiagnosticsOptions()
     out = stream if stream is not None else sys.stdout
+    writer = JsonlReportWriter(opts.output_path) if opts.output_path is not None else None
 
     def _write_record(record: dict[str, object]) -> None:
+        if writer is not None:
+            writer.write_record(record)
         for line in format_terminal_record(record):
             out.write(line + "\n")
         out.flush()
 
-    session = InputDiagnosticsSession(options)
-    return session.run(on_record=_write_record, on_poll=on_poll)
+    session = InputDiagnosticsSession(opts)
+    try:
+        return session.run(on_record=_write_record, on_poll=on_poll)
+    finally:
+        if writer is not None:
+            writer.close()
