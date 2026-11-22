@@ -1276,7 +1276,11 @@ frame 45 they get 7 hit points and stronger entries, at frame 49 they get 12.
 
 - **Spawn lists** are records of four words `{x, height, y, facing}` in `mog` data. Spawning one
   creature takes the next free fight-pool actor, copies the four words, runs the initialiser and
-  starts a job with the actor's idle script. `alive_now` goes up by one.
+  starts a job with the actor's idle script. `alive_now` goes up by one. Neither the pool
+  allocator, the creature spawner, nor the job-kill opcode zeroes a recycled pool record's
+  remaining fields (`behaviour_flags`, `behaviour_flags2`, `cooldown`, etc.) or releases keyed
+  trajectory slots; only initialisers that explicitly write them (such as Mudmen clearing
+  `+104/+105`) reset them.
 - **Entry lane.** Starting a job overrides the actor's `y` with one of three depth lanes. A
   counter steps 1, 2, 3, 1, ... (increment, mask with 3, skip zero). With `E` the arena's low
   edge and `g = 200 - E` (16-bit):
@@ -1284,7 +1288,9 @@ frame 45 they get 7 hit points and stronger entries, at frame 49 they get 12.
   - counter 2: `E + (g >> 2) - 47`
   - counter 1: `E + (g >> 1) + (g >> 2) - 47`
 - **First wave.** "Whole list" spawns `max_alive` consecutive entries. "One entry" uses the
-  alternating routine once.
+  alternating routine once. In the Ratmen arena, when wave scaling raises `max_alive` to 4
+  (`strength > 3` and `hp_max >= 60`, §10.6), the fourth entry of the original spawn list places
+  that initial Ratman on-screen near the left edge rather than off-screen.
 - **Alternating** flips a toggle and spawns the first or the second entry of its list, so
   creatures enter from alternate sides.
 - The Ratmen arena additionally spawns one object of type `$28` at the first lane before the
@@ -2293,6 +2299,26 @@ They select from a two-sound and four-sound group respectively using the origina
 Their checked entry identities are registered now; their draws and playback remain deferred
 with the other sound pickers to T11.23. Thus the handler itself makes no PRNG draws, but a
 fully wired original script's sound selection will do so when that task is implemented.
+
+**Preserved original spawning quirks (mid-scene appearances).** Intentionally kept for fidelity
+with the original Amiga behaviour:
+
+1. **Stale close-hop flag and trajectory slot on pool-record reuse.** Starting a close-range hop
+   sets bit 7 of `+104` (`behaviour_flags`) while leaving bit 0 clear, and claims one of the
+   shared trajectory slots keyed by the actor record. Because the hurt branch tests only bit 0
+   and not bit 7, killing a Ratman mid-close-hop takes the grounded hurt path, which neither
+   clears `+104` nor releases the trajectory slot. When the death script ends with the kill
+   opcode, only the record's `active` field is cleared; neither the pool allocator, the spawner,
+   nor the Ratmen initialiser zeroes `+104`, `+105`, or active trajectory slots. When a later
+   replacement reuses that pool record, it spawns off-screen, plays one invisible idle frame,
+   and on the next handler call bit 7 of `+104` is still set, so it resumes stepping the dead
+   Ratman's leftover trajectory slot and jumps straight into the arena at the previous Ratman's
+   mid-hop position. (The same record-reuse behaviour also preserves dirty `+105` release/slam
+   bits when a Ratman dies after escaping a grab or ceiling hold.)
+2. **On-screen fourth initial Ratman.** When wave scaling raises `max_alive` from 2 to 4
+   (`strength > 3` and `hp_max >= 60`, §10.6), the fourth entry read from the original spawn list
+   places that initial Ratman on-screen near the left edge as soon as the knight finishes
+   entering.
 
 ### 10.24 Host setup, warnings and settlement (`T11.11`)
 
