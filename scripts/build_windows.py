@@ -1,10 +1,10 @@
-"""Build and smoke-test the Windows x64 release ZIP in an isolated staging folder."""
+"""Build and smoke-test a Windows release ZIP for the running interpreter's architecture."""
 
 import os
-import platform
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tempfile
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -13,7 +13,7 @@ from harddaysengine import __version__
 
 ROOT = Path(__file__).resolve().parents[1]
 SHADERS = Path("harddaysengine/render/shaders")
-ARCHIVE = "HardDaysEngine-Windows-x64.zip"
+WINDOWS_ARCHITECTURES = {"win32": "x86", "win-amd64": "x64"}
 
 
 def freeze(stage: Path) -> Path:
@@ -84,20 +84,22 @@ def verify_archive(archive: Path, extracted: Path) -> None:
 
 
 def main() -> None:
-    if sys.platform != "win32" or platform.machine().upper() != "AMD64" or sys.maxsize < 2**32:
-        raise SystemExit("Build with x64 Python on x64 Windows")
+    architecture = WINDOWS_ARCHITECTURES.get(sysconfig.get_platform())
+    if architecture is None:
+        raise SystemExit("Build with x86 or x64 Python on Windows")
+    archive_name = f"HardDaysEngine-Windows-{architecture}.zip"
     output = ROOT / "build"
     output.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output) as temporary:
         stage = Path(temporary)
         bundle = freeze(stage)
-        archive = stage / ARCHIVE
+        archive = stage / archive_name
         with ZipFile(archive, "w", ZIP_DEFLATED) as zipped:
             for path in sorted(bundle.rglob("*")):
                 zipped.write(path, path.relative_to(bundle))
         verify_archive(archive, stage / "Extracted game")
-        archive.replace(output / ARCHIVE)
-    print(f"Verified {output / ARCHIVE}")
+        archive.replace(output / archive_name)
+    print(f"Verified {output / archive_name}")
 
 
 if __name__ == "__main__":

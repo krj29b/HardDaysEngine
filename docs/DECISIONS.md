@@ -1129,3 +1129,11 @@ with the configured campaign player count. On any transition into the menu, init
 its edge detection from the current input. This consumes held fire from an intro skip
 or a Practice fight until the button is released. Existing recordings retain their format.
 Recordings that rely on the former transitions can produce different checkpoints.
+
+## ADR-061: Freeze Windows release bundles with matching Python architectures
+
+Accepted 2026-11-22 for T14.6. Build x64 and x86 ZIPs in separate Windows matrix jobs.
+Each job selects the matching Python 3.12 interpreter, installs the locked runtime
+dependencies and freezes the application with PyInstaller. Use the interpreter's
+platform for the ZIP name. Each job checks its extracted ZIP before uploading it.
+Manual runs retain both build artifacts. Tagged GitHub releases attach both ZIPs.

@@ -72,6 +72,13 @@ jobs:
   build-windows:
     needs: validate
     runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            python: cpython-3.12-windows-x86_64
+          - arch: x86
+            python: cpython-3.12-windows-x86
     permissions:
       contents: read
     steps:
@@ -79,14 +86,15 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@v4
-      - run: uv python install
-      - run: uv sync --frozen --no-dev
+      - run: uv python install ${{ matrix.python }}
+      - run: uv sync --frozen --no-dev --managed-python --python ${{ matrix.python }}
+      - run: uv pip install --python .venv/Scripts/python.exe pyinstaller==6.22.3
       - name: Build and test the extracted ZIP
-        run: uv run --no-sync --with pyinstaller==6.22.3 python scripts/build_windows.py
+        run: .venv/Scripts/python.exe scripts/build_windows.py
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-portable
-          path: build/HardDaysEngine-Windows-x64.zip
+          name: windows-portable-${{ matrix.arch }}
+          path: build/HardDaysEngine-Windows-${{ matrix.arch }}.zip
           if-no-files-found: error
 
   publish-pypi:
@@ -119,7 +127,8 @@ jobs:
           path: dist/
       - uses: actions/download-artifact@v4
         with:
-          name: windows-portable
+          pattern: windows-portable-*
+          merge-multiple: true
           path: dist/
       - name: Attach archives to the tagged release
         env:

@@ -34,7 +34,8 @@ take turns on the map with up to four local players.
 You need the three original Amiga `.adf` disk images and an OpenGL 3.3 graphics driver.
 The Windows build includes Python and the engine's libraries.
 
-1. Open a release with a Windows build and download `HardDaysEngine-Windows-x64.zip` from **Assets**.
+1. Open a release with a Windows build. Under **Assets**, download `HardDaysEngine-Windows-x64.zip`
+   for 64-bit Windows or `HardDaysEngine-Windows-x86.zip` for 32-bit Windows if available.
 2. Extract the whole ZIP and copy your three disk images into its `disks` folder.
 3. Double-click `HardDaysEngine.exe` and press Enter at the title screen.
 
