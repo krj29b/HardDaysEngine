@@ -51,6 +51,7 @@ dependencies = [
 harddaysengine = "harddaysengine.cli.main:main"
 harddaysengine-extract = "harddaysengine.cli.extract:main"
 harddaysengine-inspect = "harddaysengine.cli.inspect_assets:main"
+harddaysengine-input-diagnostics = "harddaysengine.cli.input_diagnostics:main"
 
 [dependency-groups]
 dev = [
