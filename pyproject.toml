@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "harddaysengine"
-version = "0.4.0"
+version = "0.4.1"
 description = "An unofficial Python engine for playing Moonstone: A Hard Days Knight (1991) from your original Amiga disk images."
 readme = { content-type = "text/markdown", text = """
 # HardDaysEngine
