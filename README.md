@@ -22,12 +22,12 @@ take turns on the map with up to four local players.
 
 *Captured at 3× integer scale from original Amiga disks in HardDaysEngine (`faithful` preset). Screenshots are shown solely to illustrate the engine; no game data is included in this repository.*
 
-[shot-intro]: https://github.com/krj29b/HardDaysEngine/releases/download/media/intro-moonstone-vortex.png
-[shot-map]: https://github.com/krj29b/HardDaysEngine/releases/download/media/overworld-map.png
-[shot-forest]: https://github.com/krj29b/HardDaysEngine/releases/download/media/fight-trogg-axe-forest.png
-[shot-wasteland]: https://github.com/krj29b/HardDaysEngine/releases/download/media/fight-balok-wasteland-leap.png
-[shot-swamp]: https://github.com/krj29b/HardDaysEngine/releases/download/media/fight-mudmen-swamp.png
-[shot-dragon]: https://github.com/krj29b/HardDaysEngine/releases/download/media/fight-dragon-breath.png
+[shot-intro]: https://github.com/user-attachments/assets/1c32b0ca-9f4d-4f67-88a6-170cf8e3a2c2
+[shot-map]: https://github.com/user-attachments/assets/5bdbc9e2-ec8b-47e5-9604-b14a40ccaae9
+[shot-forest]: https://github.com/user-attachments/assets/0c8cf402-aad2-47af-bbac-c460d488aa91
+[shot-wasteland]: https://github.com/user-attachments/assets/bf55813b-5b9d-45be-a728-b7b7dde61048
+[shot-swamp]: https://github.com/user-attachments/assets/ab54d166-6e59-49e2-bfdd-6f4d670e2790
+[shot-dragon]: https://github.com/user-attachments/assets/dec771a9-5c02-4596-a686-5ef0544fe2b8
 
 ## Play on Windows
 
