@@ -154,6 +154,7 @@ Presentation presets (`--filter` or `F9` / `Shift+F9` at runtime; all presets ru
 - `--extract-assets`: unpack ADF assets into `--output-dir` (default `./build/assets`) with `manifest.json`
 - `--inspect-assets --headless-frames <N>` renders `N` inspector frames offscreen using OpenGL 3.3. Add `--screenshot <file.png>` to save the final frame.
 - `--headless-ticks <N>` runs `N` gameplay simulation ticks without opening a window and prints the final scene and state hash.
+- `uv run harddaysengine-input-diagnostics --output build/input.jsonl`: standalone SDL input diagnostics for inspecting connected keyboards, mice, raw joysticks, and mapped game controllers (no game window or disks required). See [docs/INPUT_AND_DIAGNOSTICS.md](docs/INPUT_AND_DIAGNOSTICS.md) for current router details and USB vs Bluetooth controller comparison steps.
 
 ## Architecture
 

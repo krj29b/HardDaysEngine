@@ -30,3 +30,12 @@ jobs:
       # `adf` tests skip automatically: CI has no disk images (BYOA).
       - name: Quality gate
         run: uv run python scripts/quality_gate.py
+
+      - name: Input diagnostics CLI smoke check
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          uv run harddaysengine-input-diagnostics --version
+          uv run harddaysengine-input-diagnostics --help
+          uv run harddaysengine-input-diagnostics --no-window --duration 0.05 --output ci_input_diag.jsonl
+          uv run python -c "import json, pathlib; p = pathlib.Path('ci_input_diag.jsonl'); lines = [json.loads(x) for x in p.read_text(encoding='utf-8').splitlines()]; assert lines[0]['record_type'] == 'session_start' and lines[-1]['record_type'] == 'session_end'; p.unlink()"

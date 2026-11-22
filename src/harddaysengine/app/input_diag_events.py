@@ -27,6 +27,15 @@ SDL_ENV_KEYS: tuple[str, ...] = (
     "SDL_JOYSTICK_RAWINPUT",
 )
 
+SDL_ENV_PREFIXES: tuple[str, ...] = (
+    "SDL_JOYSTICK_",
+    "SDL_GAMECONTROLLER",
+    "SDL_HINT_JOYSTICK_",
+    "SDL_HINT_GAMECONTROLLER",
+    "SDL_XINPUT_",
+    "SDL_DIRECTINPUT_",
+)
+
 MODIFIER_FLAGS: tuple[tuple[int, str], ...] = (
     (pygame.KMOD_LSHIFT, "lshift"),
     (pygame.KMOD_RSHIFT, "rshift"),

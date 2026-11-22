@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import ctypes
 import io
 import os
@@ -107,18 +108,33 @@ class _VirtualSdl2:
         self._attached.clear()
 
 
-def _load_virtual_sdl2() -> _VirtualSdl2 | None:
+def _sdl2_library_candidates() -> list[Path]:
     pdir = Path(pygame.__file__).parent
+    search_roots = [pdir]
+    for sibling in ("pygame_ce.libs", "pygame.libs"):
+        lib_dir = pdir.parent / sibling
+        if lib_dir.is_dir():
+            search_roots.append(lib_dir)
     candidates: list[Path] = []
-    for pattern in ("*SDL2*.dll", "*SDL2*.so*", "*SDL2*.dylib"):
-        candidates.extend(sorted(pdir.rglob(pattern)))
-    for candidate in candidates:
+    for root in search_roots:
+        for pattern in ("*SDL2*.dll", "*SDL2*.so*", "*SDL2*.dylib"):
+            candidates.extend(sorted(root.rglob(pattern)))
+    return candidates
+
+
+def _load_virtual_sdl2() -> _VirtualSdl2 | None:
+    for candidate in _sdl2_library_candidates():
         try:
             lib = ctypes.CDLL(str(candidate))
             if hasattr(lib, "SDL_JoystickAttachVirtual"):
                 return _VirtualSdl2(lib)
         except OSError:
             continue
+    if sys.platform != "win32":
+        with contextlib.suppress(OSError):
+            proc_lib = ctypes.CDLL(None)
+            if hasattr(proc_lib, "SDL_JoystickAttachVirtual"):
+                return _VirtualSdl2(proc_lib)
     return None
 
 
@@ -363,9 +379,98 @@ def test_cli_version_and_invalid_duration(capsys: pytest.CaptureFixture[str]) ->
     assert exc.value.code == 0
     assert capsys.readouterr().out.strip() == f"HardDaysEngine {__version__}"
 
+    with pytest.raises(SystemExit) as help_exc:
+        main(["--help"])
+    assert help_exc.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "harddaysengine-input-diagnostics" in help_text
+    assert "--output" in help_text
+    assert "--no-window" in help_text
+    assert "--max-records" in help_text
+
     with pytest.raises(SystemExit) as bad:
         main(["--duration", "-1"])
     assert bad.value.code == 2
+
+    with pytest.raises(SystemExit) as unknown_flag:
+        main(["--not-a-real-flag"])
+    assert unknown_flag.value.code == 2
+
+
+def test_normalize_extended_event_types() -> None:
+    ident = DeviceIdentity(kind="gamepad", instance_id=3, name="Pad", guid="0500beef")
+    cases = [
+        (pygame.KEYUP, {"key": pygame.K_ESCAPE, "mod": 0}, "keyboard", "key_up"),
+        (pygame.TEXTINPUT, {"text": "ab"}, "keyboard", "text_input"),
+        (pygame.TEXTEDITING, {"text": "a", "start": 0, "length": 1}, "keyboard", "text_editing"),
+        (pygame.KEYMAPCHANGED, {}, "keyboard", "keymap_changed"),
+        (pygame.MOUSEBUTTONUP, {"button": 6, "pos": (1, 2)}, "mouse", "mouse_button_up"),
+        (pygame.JOYBUTTONUP, {"instance_id": 3, "button": 2}, "joystick", "joy_button_up"),
+        (
+            pygame.JOYBALLMOTION,
+            {"instance_id": 3, "ball": 0, "rel": (3, -2)},
+            "joystick",
+            "joy_ball_motion",
+        ),
+        (
+            pygame.CONTROLLERBUTTONUP,
+            {"instance_id": 3, "button": 6},
+            "controller",
+            "controller_button_up",
+        ),
+        (
+            pygame.CONTROLLERDEVICEREMAPPED,
+            {"instance_id": 3},
+            "controller",
+            "controller_device_remapped",
+        ),
+        (
+            pygame.CONTROLLERTOUCHPADDOWN,
+            {"instance_id": 3, "touchpad": 0, "finger": 0, "x": 0.5, "y": 0.5, "pressure": 1.0},
+            "controller",
+            "controller_touchpad_down",
+        ),
+        (
+            pygame.CONTROLLERSENSORUPDATE,
+            {"instance_id": 3, "sensor": 1, "data": [0.1, 0.2, 0.3]},
+            "controller",
+            "controller_sensor_update",
+        ),
+        (
+            pygame.FINGERDOWN,
+            {"touch_id": 9, "finger_id": 1, "x": 0.25, "y": 0.75},
+            "other_input",
+            "finger_down",
+        ),
+    ]
+    for etype, payload, exp_cat, exp_name in cases:
+        norm = normalize_pygame_event(
+            pygame.event.Event(etype, payload),
+            device=ident if exp_cat in ("joystick", "controller") else None,
+            mapping={"a": "b0"} if etype == pygame.CONTROLLERDEVICEREMAPPED else None,
+        )
+        assert norm is not None
+        assert norm.category == exp_cat
+        assert norm.event == exp_name
+    up_mouse = normalize_pygame_event(pygame.event.Event(pygame.MOUSEBUTTONUP, {"button": 6}))
+    assert up_mouse is not None
+    assert up_mouse.fields["button_name"] == "button_6"
+
+
+def test_dynamic_sdl_env_hints_recorded(
+    dummy_sdl_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SDL_JOYSTICK_WGI", "0")
+    monkeypatch.setenv("SDL_JOYSTICK_HIDAPI_XBOX", "1")
+    buf = io.StringIO()
+    summary = run_input_diagnostics(
+        DiagnosticsOptions(no_window=True, duration_s=0.01, poll_sleep_s=0.0),
+        stream=buf,
+    )
+    sdl_env = summary.records[0]["sdl_env"]
+    assert isinstance(sdl_env, dict)
+    assert sdl_env["SDL_JOYSTICK_WGI"] == "0"
+    assert sdl_env["SDL_JOYSTICK_HIDAPI_XBOX"] == "1"
 
 
 def test_smoke_no_devices_and_clean_shutdown(dummy_sdl_env: None) -> None:
@@ -571,3 +676,44 @@ def test_virtual_controller_hotplug_while_running(dummy_sdl_env: None) -> None:
     assert removed_recs[0]["name"] == name
     assert "DEVICE+ (hotplug)" in buf.getvalue()
     assert "DEVICE-" in buf.getvalue()
+
+
+def test_virtual_controller_index_shift_preserves_second_device_identity(
+    dummy_sdl_env: None,
+) -> None:
+    sdl = _load_virtual_sdl2()
+    if sdl is None:
+        pytest.skip("SDL2 virtual joystick API unavailable on this platform")
+
+    pygame.display.init()
+    pygame.joystick.init()
+    try:
+        idx0 = sdl.attach()
+        idx1 = sdl.attach()
+        session = InputDiagnosticsSession(DiagnosticsOptions(no_window=True, poll_sleep_s=0.0))
+        start_recs = session.start()
+        discovered = [r for r in start_recs if r["record_type"] == "device_discovered"]
+        d0 = next(r for r in discovered if r.get("device_index") == idx0)
+        d1 = next(r for r in discovered if r.get("device_index") == idx1)
+        inst1 = d1["instance_id"]
+        assert isinstance(inst1, int)
+        assert d0["instance_id"] != inst1
+
+        # Detach the first device, shifting SDL device indices while second remains open
+        sdl.detach(idx0)
+        session.poll_once()
+        sdl.set_button(inst1, 0, 1)
+        session.poll_once()
+        session.finish("quit")
+
+        btn_events = _events_for_device(
+            session.records, ("controller_button_down", "joy_button_down"), inst1
+        )
+        assert len(btn_events) >= 2
+        for ev in btn_events:
+            dev = ev["device"]
+            assert isinstance(dev, dict)
+            assert dev["instance_id"] == inst1
+            assert dev["name"] == d1["name"]
+    finally:
+        sdl.detach_all()

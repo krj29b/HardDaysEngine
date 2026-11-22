@@ -350,3 +350,64 @@ def test_cli_output_option_validation_and_file_error(
         with pytest.raises(SystemExit) as exc:
             main(bad_args)
         assert exc.value.code == 2
+
+
+def test_virtual_controller_end_to_end_jsonl_report(dummy_sdl_env: None, tmp_path: Path) -> None:
+    from tests.unit.test_input_diagnostics import _find_virtual_instance_id, _load_virtual_sdl2
+
+    sdl = _load_virtual_sdl2()
+    if sdl is None:
+        pytest.skip("SDL2 virtual joystick API unavailable on this platform")
+
+    report_path = tmp_path / "virtual_report.jsonl"
+    state: dict[str, int | None] = {"dev_idx": None}
+    buf = io.StringIO()
+
+    def _drive(iteration: int) -> None:
+        if iteration == 1:
+            state["dev_idx"] = sdl.attach()
+        elif iteration == 3:
+            inst = _find_virtual_instance_id()
+            if inst is not None:
+                sdl.set_axis(inst, 0, 500)
+                sdl.set_axis(inst, 0, 24000)
+                sdl.set_button(inst, 0, 1)
+                sdl.set_hat(inst, 0, 1)
+        elif iteration == 5 and state["dev_idx"] is not None:
+            sdl.detach(state["dev_idx"])
+            state["dev_idx"] = None
+        elif iteration >= 7:
+            pygame.event.post(pygame.event.Event(pygame.QUIT, {}))
+
+    try:
+        summary = run_input_diagnostics(
+            DiagnosticsOptions(
+                no_window=True,
+                poll_sleep_s=0.0,
+                output_path=report_path,
+            ),
+            stream=buf,
+            on_poll=_drive,
+        )
+    finally:
+        sdl.detach_all()
+
+    assert summary.reason == "quit"
+    parsed = [json.loads(line) for line in report_path.read_text(encoding="utf-8").splitlines()]
+    assert parsed[0]["record_type"] == "session_start"
+    assert parsed[-1]["record_type"] == "session_end"
+    assert any(r["record_type"] == "device_discovered" and r["origin"] == "hotplug" for r in parsed)
+    assert any(r["record_type"] == "device_removed" for r in parsed)
+    ev_names = {r["event"] for r in parsed if r["record_type"] == "event"}
+    assert {
+        "controller_axis_motion",
+        "joy_axis_motion",
+        "controller_button_down",
+        "joy_hat_motion",
+    } <= ev_names
+    assert any(
+        r["record_type"] == "event"
+        and isinstance(r.get("fields"), dict)
+        and r["fields"].get("threshold_crossed") is True
+        for r in parsed
+    )

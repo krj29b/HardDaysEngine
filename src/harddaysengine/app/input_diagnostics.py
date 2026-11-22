@@ -16,6 +16,7 @@ from harddaysengine import __version__
 from harddaysengine.app.input_diag_events import (
     DIAGNOSTICS_SCHEMA_VERSION,
     SDL_ENV_KEYS,
+    SDL_ENV_PREFIXES,
     DeviceIdentity,
     format_terminal_record,
     normalize_pygame_event,
@@ -213,8 +214,12 @@ def _safe_mapping_query(ctrl: _ControllerHandle) -> dict[str, str] | None:
     return dict(sorted(raw.items()))
 
 
+def _is_relevant_sdl_env(key: str) -> bool:
+    return key in SDL_ENV_KEYS or key.startswith(SDL_ENV_PREFIXES)
+
+
 def _collect_sdl_env() -> dict[str, str]:
-    return {key: os.environ[key] for key in sorted(SDL_ENV_KEYS) if key in os.environ}
+    return {key: os.environ[key] for key in sorted(os.environ) if _is_relevant_sdl_env(key)}
 
 
 def _event_instance_id(event: pygame.event.Event) -> int | None:
