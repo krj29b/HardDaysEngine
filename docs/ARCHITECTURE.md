@@ -5600,3 +5600,17 @@ therefore requires a new edge before it moves the cursor or confirms a selection
 Practice uses two knights and retains the configured campaign player count. Either
 Practice outcome finishes the fight's fade and opens the main menu with its palette and
 title music. The intro plays on the title scene.
+
+### 13.10 Live display preview
+
+F10 opens a game-window panel over the current scene. Up and Down select a row,
+and Left and Right edit the selected value in a draft. The CRT preset exposes mask
+type and strength, scanline strength, curvature and bloom. F9 cycles the draft
+preset while the panel is open. Enter applies the draft for the running session,
+and Escape or F10 discards it. The usual fullscreen shortcuts work in the panel.
+
+The game continues to advance and present the current scene. The host consumes
+the panel's keyboard events before input sampling. Draw the panel after the
+presentation pass using the existing bitmap font and a separate texture so the
+panel stays legible under all filters. The preview has no indexed canvas, replay,
+simulation or configuration-file state.

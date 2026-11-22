@@ -54,6 +54,7 @@ from harddaysengine.assets.service_data import parse_service_rules
 from harddaysengine.assets.service_screen_data import parse_service_screens
 from harddaysengine.assets.sound_rules import parse_sound_rules
 from harddaysengine.assets.village_data import parse_village_rules
+from harddaysengine.render.display_panel import DisplayPanel
 from harddaysengine.render.presentation import DisplaySettings
 from harddaysengine.render.renderer import (
     CANVAS_WIDTH,
@@ -2542,11 +2543,18 @@ def _present_game_frame(
     base_renderer: HardDaysRenderer,
     font: BitmapFont,
     settings: DisplaySettings,
+    window: WindowController,
+    panel: DisplayPanel,
 ) -> None:
     cur_w, cur_h = pygame.display.get_window_size()
     session.render_to_scene(scene_renderer, font)
     if cur_w > 0 and cur_h > 0:
-        base_renderer.present_to_screen((0, 0, cur_w, cur_h), settings=settings)
+        base_renderer.present_to_screen(
+            (0, 0, cur_w, cur_h), settings=window.apply_display_settings(settings)
+        )
+        preview = window.display_preview
+        if preview is not None:
+            panel.draw(base_renderer.ctx.screen, (cur_w, cur_h), preview.rows(), preview.selected)
     pygame.display.set_caption(f"HardDaysEngine | {session.scene.name} | {session.last_status}")
     pygame.display.flip()
 
@@ -2592,6 +2600,7 @@ def run_game_window(
         initial_window_size(settings),
         settings.fullscreen,
         initial_filter=settings.filter,
+        initial_crt=settings.crt,
         vsync=settings.vsync,
     )
     window.open()
@@ -2601,6 +2610,7 @@ def run_game_window(
     scene_renderer = SceneRenderer(base_renderer)
     scene_renderer.set_palette(default_combat_palette())
     font = default_bitmap_font()
+    panel = DisplayPanel(base_renderer, font)
     router = InputRouter(init_joysticks=True)
     pacer = RefreshPacer(refresh_hz=window.get_refresh_rate(), vsync=settings.vsync)
     recorded: list[InputFrame] = []
@@ -2623,7 +2633,9 @@ def run_game_window(
                     scene_renderer,
                     base_renderer,
                     font,
-                    window.apply_display_settings(settings),
+                    settings,
+                    window,
+                    panel,
                 )
             elif not settings.vsync:
                 pygame.time.wait(1)
@@ -2633,6 +2645,7 @@ def run_game_window(
                 record_path,
                 ReplayRecording(seed=active_seed, players=active_players, frames=tuple(recorded)),
             )
+        panel.release()
         scene_renderer.release()
         base_renderer.release()
         audio.close()

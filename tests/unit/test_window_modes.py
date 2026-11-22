@@ -9,7 +9,13 @@ from harddaysengine.app.audio import AudioEngine
 from harddaysengine.app.game import GameScene, GameSession
 from harddaysengine.app.input import InputFrame, InputRouter, ReplayRecording
 from harddaysengine.app.window import WindowController
-from harddaysengine.render.presentation import FullscreenMode
+from harddaysengine.render.presentation import (
+    CrtMaskMode,
+    CrtSettings,
+    DisplaySettings,
+    FilterPreset,
+    FullscreenMode,
+)
 from harddaysengine.sim.types import KnightId
 
 
@@ -214,3 +220,54 @@ def test_replay_with_fullscreen_toggles_produces_identical_hashes() -> None:
     finally:
         audio_live.close()
         audio_replay.close()
+
+
+def test_display_preview_applies_or_discards_without_recording_controls() -> None:
+    settings = DisplaySettings(crt=CrtSettings(curvature=0.29))
+    window = WindowController((960, 768), initial_crt=settings.crt, backend=_FakeWindowBackend())
+    router = InputRouter()
+    baseline = GameSession()
+    preview_session = GameSession()
+
+    def press(key: int) -> None:
+        for event_type in (pygame.KEYDOWN, pygame.KEYUP):
+            _dispatch(window, router, [pygame.event.Event(event_type, key=key)])
+            frame = router.sample_frame()
+            assert frame == InputRouter().sample_frame()
+            preview_session.step_tick(frame)
+            baseline.step_tick(InputFrame())
+            assert preview_session.state_hash() == baseline.state_hash()
+
+    def edit_crt() -> DisplaySettings:
+        press(pygame.K_F10)
+        press(pygame.K_F9)
+        press(pygame.K_RIGHT)
+        for _ in range(5):
+            press(pygame.K_DOWN)
+            press(pygame.K_RIGHT)
+        return window.apply_display_settings(settings)
+
+    draft = edit_crt()
+    assert draft.filter is FilterPreset.CRT
+    assert draft.crt == CrtSettings(
+        mask=CrtMaskMode.SHADOW, mask_strength=0.30, scanlines=0.70, curvature=0.30, bloom=0.27
+    )
+    assert window.filter_preset is FilterPreset.FAITHFUL
+    press(pygame.K_ESCAPE)
+    assert window.display_preview is None
+    assert window.apply_display_settings(settings) == settings
+
+    assert edit_crt() == draft
+    press(pygame.K_F11)
+    assert window.mode is FullscreenMode.DESKTOP
+    press(pygame.K_RETURN)
+    assert window.display_preview is None
+    assert window.filter_preset is FilterPreset.CRT
+    assert window.apply_display_settings(settings).crt == draft.crt
+
+    press(pygame.K_F10)
+    press(pygame.K_LEFT)
+    press(pygame.K_F10)
+    assert window.display_preview is None
+    assert window.apply_display_settings(settings).crt == draft.crt
+    assert window.filter_preset is FilterPreset.CRT

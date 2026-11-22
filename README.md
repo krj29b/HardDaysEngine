@@ -68,6 +68,7 @@ and confirm each with Enter. Keyboard slots follow portrait selection order.
 | Leave a sheet or town | Move the pointer to its close/Exit region and confirm |
 | Quit the campaign to farewell on the map | Q |
 | Cycle filter preset (not recorded in replays) | F9 (Shift+F9 backwards) |
+| Open live display preview | F10 |
 | Toggle fullscreen (not recorded in replays) | F11 or Alt+Enter |
 
 Player 2 uses WASD/F, player 3 IJKL/U, and player 4 the numeric keypad/Keypad 0 for
@@ -115,6 +116,11 @@ surround = "off"            # off, blur, solid
 surround_brightness = 0.28  # 0.0..1.0 (blur mode)
 surround_color = "#101014"  # #RRGGBB (solid mode)
 ```
+
+Press **F10** while playing to open the live display preview. Use **Up/Down** to choose a setting
+and **Left/Right** to change it. Select `crt` to adjust scanlines, mask pattern and strength,
+curvature, and bloom. **Enter** applies the settings for the current session. **Esc** or **F10**
+discards the preview. **F11** still toggles fullscreen.
 
 Presentation presets (`--filter` or `F9` / `Shift+F9` at runtime; all presets run strictly after the palette lookup and never affect simulation or replay hashes):
 

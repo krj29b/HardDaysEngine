@@ -509,6 +509,29 @@ class HardDaysRenderer:
             passes=passes,
         )
 
+    def blit_screen_texture(
+        self,
+        target: moderngl.Framebuffer,
+        window_size: tuple[int, int],
+        texture: moderngl.Texture,
+        rect: tuple[int, int, int, int],
+    ) -> None:
+        """Draw an RGB texture on the presentation target after filtering (§13.10)."""
+        width, height = texture.size
+        source = SourceRect(0, 0, width, height)
+        viewport = PresentationViewport(
+            *window_size,
+            source,
+            *rect,
+            rect[2] / width,
+            rect[3] / height,
+            1,
+            1,
+            AxisSampling.NEAREST,
+            AxisSampling.NEAREST,
+        )
+        self._present_standard(target, viewport, texture, source, texture.size, use_scanlines=False)
+
     def read_canvas_rgba(self) -> npt.NDArray[np.uint8]:
         """Read back the 320x256 virtual canvas FBO as a top-down (256, 320, 4) uint8 RGBA array."""
         raw = self.canvas_fbo.read(components=4)

@@ -1137,3 +1137,13 @@ Each job selects the matching Python 3.12 interpreter, installs the locked runti
 dependencies and freezes the application with PyInstaller. Use the interpreter's
 platform for the ZIP name. Each job checks its extracted ZIP before uploading it.
 Manual runs retain both build artifacts. Tagged GitHub releases attach both ZIPs.
+
+## ADR-062: Preview display settings over the live scene
+
+Accepted 2026-11-22 for T13.10. Keep draft and applied settings in the window
+controller. Preview the draft through the normal presentation pass, then draw
+the controls over the resulting RGB image with the existing bitmap font. The
+scene continues to advance so the preview shows movement and palette cycling.
+Apply keeps the changes for the running session. The existing configuration
+file remains the source of startup defaults. Preview controls are handled
+before input sampling, in keeping with ADR-053.

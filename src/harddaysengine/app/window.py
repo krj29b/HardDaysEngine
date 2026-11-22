@@ -17,8 +17,14 @@ from typing import TYPE_CHECKING, Protocol
 
 import pygame
 
+from harddaysengine.app.display_preview import DisplayPreview, cycle_filter
 from harddaysengine.app.loop import PAL_HZ
-from harddaysengine.render.presentation import DisplaySettings, FilterPreset, FullscreenMode
+from harddaysengine.render.presentation import (
+    CrtSettings,
+    DisplaySettings,
+    FilterPreset,
+    FullscreenMode,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -27,6 +33,14 @@ _BASE_GL_FLAGS = pygame.OPENGL | pygame.DOUBLEBUF
 _WINDOWED_FLAGS = _BASE_GL_FLAGS | pygame.RESIZABLE
 _FULLSCREEN_FLAGS = _BASE_GL_FLAGS | pygame.FULLSCREEN
 _ENTER_KEYS = frozenset({pygame.K_RETURN, pygame.K_KP_ENTER})
+_PREVIEW_KEYS = _ENTER_KEYS | {
+    pygame.K_ESCAPE,
+    pygame.K_F9,
+    pygame.K_UP,
+    pygame.K_DOWN,
+    pygame.K_LEFT,
+    pygame.K_RIGHT,
+}
 
 
 class _SdlDisplayMode(ctypes.Structure):
@@ -178,12 +192,15 @@ class WindowController:
         initial_mode: FullscreenMode = FullscreenMode.OFF,
         *,
         initial_filter: FilterPreset = FilterPreset.FAITHFUL,
+        initial_crt: CrtSettings | None = None,
         vsync: bool = True,
         backend: WindowModeBackend | None = None,
     ) -> None:
         self._windowed_size = (max(1, initial_size[0]), max(1, initial_size[1]))
         self._mode = initial_mode
         self._filter_preset = initial_filter
+        self._crt = initial_crt
+        self.display_preview: DisplayPreview | None = None
         self._fullscreen_target = (
             initial_mode if initial_mode is not FullscreenMode.OFF else FullscreenMode.DESKTOP
         )
@@ -216,17 +233,19 @@ class WindowController:
         return self._backend.get_refresh_rate()
 
     def apply_display_settings(self, settings: DisplaySettings) -> DisplaySettings:
-        """Return ``settings`` updated with the live fullscreen mode and filter preset."""
-        if settings.filter is self._filter_preset and settings.fullscreen is self._mode:
+        """Return the settings used for the current frame, including a draft when open."""
+        preset = self._filter_preset
+        crt = self._crt if self._crt is not None else settings.crt
+        if self.display_preview is not None:
+            preset, crt = self.display_preview.preset, self.display_preview.crt
+        if (settings.filter, settings.crt, settings.fullscreen) == (preset, crt, self._mode):
             return settings
-        return replace(settings, filter=self._filter_preset, fullscreen=self._mode)
+        return replace(settings, filter=preset, crt=crt, fullscreen=self._mode)
 
     def cycle_filter_preset(self, *, reverse: bool = False) -> FilterPreset:
         """Cycle the active :class:`FilterPreset` forward (or backward when ``reverse``)."""
-        presets = tuple(FilterPreset)
-        idx = presets.index(self._filter_preset)
         step = -1 if reverse else 1
-        self._filter_preset = presets[(idx + step) % len(presets)]
+        self._filter_preset = cycle_filter(self._filter_preset, step)
         return self._filter_preset
 
     def toggle_fullscreen(self) -> FullscreenMode:
@@ -243,18 +262,57 @@ class WindowController:
 
     def _consume_keydown(self, event: pygame.event.Event) -> bool:
         key = int(event.key)
+        repeat = bool(getattr(event, "repeat", 0))
+        if repeat and key in self._suppressed_keyups:
+            return True
         if _is_fullscreen_toggle_keydown(event):
             self._suppressed_keyups.add(key)
-            if not getattr(event, "repeat", 0):
+            if not repeat:
                 self.toggle_fullscreen()
+            return True
+        if self._consume_preview_keydown(event, key, repeat=repeat):
             return True
         if key == pygame.K_F9:
             self._suppressed_keyups.add(key)
-            if not getattr(event, "repeat", 0):
+            if not repeat:
                 mod = int(getattr(event, "mod", 0))
                 self.cycle_filter_preset(reverse=(mod & pygame.KMOD_SHIFT) != 0)
             return True
         return False
+
+    def _consume_preview_keydown(
+        self, event: pygame.event.Event, key: int, *, repeat: bool
+    ) -> bool:
+        preview = self.display_preview
+        if key == pygame.K_F10 and self._crt is not None:
+            if not repeat:
+                self._suppressed_keyups.add(key)
+                self.display_preview = (
+                    DisplayPreview(self._filter_preset, self._crt) if preview is None else None
+                )
+            return True
+        if preview is None or key not in _PREVIEW_KEYS:
+            return False
+        if not repeat:
+            self._suppressed_keyups.add(key)
+            self._update_display_preview(preview, event, key)
+        return True
+
+    def _update_display_preview(
+        self, preview: DisplayPreview, event: pygame.event.Event, key: int
+    ) -> None:
+        if key in _ENTER_KEYS:
+            self._filter_preset, self._crt = preview.preset, preview.crt
+            self.display_preview = None
+        elif key == pygame.K_ESCAPE:
+            self.display_preview = None
+        elif key == pygame.K_F9:
+            mod = int(getattr(event, "mod", 0))
+            preview.cycle(-1 if mod & pygame.KMOD_SHIFT else 1)
+        elif key in (pygame.K_UP, pygame.K_DOWN):
+            preview.move(-1 if key == pygame.K_UP else 1)
+        else:
+            preview.adjust(-1 if key == pygame.K_LEFT else 1)
 
     def consume_event(self, event: pygame.event.Event) -> bool:
         """Handle resize and presentation hotkeys; return ``True`` if consumed before the router."""

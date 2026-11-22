@@ -7,10 +7,12 @@ import numpy as np
 import pygame
 import pytest
 
+from harddaysengine.app.display_preview import DisplayPreview
 from harddaysengine.app.window import WindowController
-from harddaysengine.render.presentation import DisplaySettings, FullscreenMode
+from harddaysengine.render.display_panel import DisplayPanel
+from harddaysengine.render.presentation import DisplaySettings, FilterPreset, FullscreenMode
 from harddaysengine.render.renderer import CANVAS_HEIGHT, CANVAS_WIDTH, HardDaysRenderer
-from harddaysengine.render.scene import SceneRenderer
+from harddaysengine.render.scene import SceneRenderer, default_bitmap_font
 
 pytestmark = pytest.mark.gl
 
@@ -67,3 +69,38 @@ def test_fullscreen_toggle_round_trip_preserves_gl_context_and_textures(
             renderer.release()
     finally:
         pygame.quit()
+
+
+@pytest.mark.parametrize("size", [(640, 512), (1920, 1080)])
+def test_display_panel_draws_after_crt_without_changing_the_canvas(size: tuple[int, int]) -> None:
+    ctx = moderngl.create_standalone_context(require=330)
+    renderer = HardDaysRenderer(ctx)
+    scene = SceneRenderer(renderer)
+    panel = DisplayPanel(renderer, default_bitmap_font())
+    output = ctx.simple_framebuffer(size)
+    try:
+        scene.clear_canvas(7)
+        scene.flush_to_fbo()
+        original_canvas = renderer.read_canvas_rgba()
+        settings = DisplaySettings(filter=FilterPreset.CRT)
+        preview = DisplayPreview(settings.filter, settings.crt)
+        renderer.present_to_framebuffer(output, size, settings=settings)
+        without_panel = np.frombuffer(output.read(components=3), dtype=np.uint8).reshape(
+            size[1], size[0], 3
+        )
+
+        panel.draw(output, size, preview.rows(), preview.selected)
+        with_panel = np.frombuffer(output.read(components=3), dtype=np.uint8).reshape(
+            size[1], size[0], 3
+        )
+        np.testing.assert_array_equal(
+            without_panel[:, : size[0] // 2], with_panel[:, : size[0] // 2]
+        )
+        assert np.any(np.all(with_panel == (255, 214, 131), axis=2))
+        np.testing.assert_array_equal(renderer.read_canvas_rgba(), original_canvas)
+    finally:
+        output.release()
+        panel.release()
+        scene.release()
+        renderer.release()
+        ctx.release()
