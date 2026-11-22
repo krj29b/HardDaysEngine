@@ -13,6 +13,7 @@ from harddaysengine.app.config import (
     find_adf_images,
     resolve_adf_dir,
     resolve_display_settings,
+    resolve_save_path,
 )
 from harddaysengine.app.game import run_game_window, run_headless_session
 from harddaysengine.cli.extract import run_extraction
@@ -219,6 +220,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             vsync=args.vsync,
             surround=args.surround,
         )
+        save_path = resolve_save_path(Path(args.config))
     except ConfigError as exc:
         parser.error(str(exc))
     if args.list_disks:
@@ -259,4 +261,5 @@ def main(argv: Sequence[str] | None = None) -> int:
         seed=seed,
         record_path=record_path,
         replay_path=replay_path,
+        save_path=save_path,
     )

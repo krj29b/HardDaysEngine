@@ -131,29 +131,37 @@ class ReplayRecording:
     seed: int
     players: tuple[KnightId, ...]
     frames: tuple[InputFrame, ...]
+    start_checkpoint: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the recording to a JSON-safe dictionary."""
-        return {
+        data: dict[str, Any] = {
             "version": REPLAY_FORMAT_VERSION,
             "seed": self.seed,
             "players": [int(kid) for kid in self.players],
             "frames": [frame.to_dict() for frame in self.frames],
         }
+        if self.start_checkpoint is not None:
+            data["version"] = 2
+            data["start_checkpoint"] = self.start_checkpoint
+        return data
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> ReplayRecording:
         """Deserialize a :class:`ReplayRecording` from a mapping."""
         version = int(data.get("version", REPLAY_FORMAT_VERSION))
-        if version != REPLAY_FORMAT_VERSION:
+        if version not in (REPLAY_FORMAT_VERSION, 2):
             msg = f"Unsupported replay version: {version}"
             raise ValueError(msg)
+        start = data.get("start_checkpoint") if version == 2 else None
+        if version == 2 and not isinstance(start, str):
+            raise ValueError("Replay checkpoint must be an encoded campaign save")
         seed = int(data["seed"])
         raw_players = data.get("players", [int(KnightId.RED)])
         players = tuple(KnightId(int(k)) for k in raw_players)
         raw_frames = data.get("frames", [])
         frames = tuple(InputFrame.from_dict(f) for f in raw_frames)
-        return cls(seed=seed, players=players, frames=frames)
+        return cls(seed=seed, players=players, frames=frames, start_checkpoint=start)
 
 
 def save_replay(path: Path, recording: ReplayRecording) -> None:

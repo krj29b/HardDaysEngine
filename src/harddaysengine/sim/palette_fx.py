@@ -177,6 +177,25 @@ class PaletteFxState:
             "vbl": self._vbl_count,
         }
 
+    @classmethod
+    def from_checkpoint(
+        cls,
+        base: Sequence[int],
+        target: Sequence[int],
+        *,
+        fade: tuple[int, int, bool],
+        cycles: Sequence[tuple[CycleRange, int]],
+        flash: FlashOverride | None,
+        vbl: int,
+    ) -> PaletteFxState:
+        """Restore palette cells at a completed host tick (§13.11)."""
+        state = cls(base)
+        state._fade_target = list(validate_palette(target))
+        state._fade_divisor, state._fade_tick, state._fading = fade
+        state._cycles = [_ActiveCycle(spec, counter) for spec, counter in cycles]
+        state._flash, state._vbl_count = flash, vbl
+        return state
+
     @property
     def vbl_count(self) -> int:
         """Total 50 Hz VBL ticks elapsed."""

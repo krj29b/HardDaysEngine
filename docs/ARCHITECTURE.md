@@ -5614,3 +5614,18 @@ the panel's keyboard events before input sampling. Draw the panel after the
 presentation pass using the existing bitmap font and a separate texture so the
 panel stays legible under all filters. The preview has no indexed canvas, replay,
 simulation or configuration-file state.
+
+### 13.11 Campaign save and load
+
+The optional `[gameplay] save_load` setting enables F8 in the main menu and the
+overworld. The host suspends ticks in the panel and consumes its keys. The main
+menu offers Load. The overworld offers Save and Load. A single `campaign-save.json`
+file beside the config holds the checkpoint. Save replaces it atomically.
+
+Version 1 stores typed campaign cells and a deterministic checkpoint hash. The
+save identifies the original program and gameplay executables by digest. Loading
+reconstructs shared actor, inventory and PRNG references, decodes static tables
+from the current disks, and verifies the checkpoint before switching sessions.
+Map dragon rendering is restored from draw commands referencing the user's assets.
+Recorded input after loading starts a replay with the saved checkpoint as its
+initial state. The original seed-based replay format remains readable.

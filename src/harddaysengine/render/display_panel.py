@@ -28,23 +28,25 @@ class DisplayPanel:
         self._renderer = renderer
         self._font = font
         self._texture: moderngl.Texture | None = None
-        self._content: tuple[tuple[tuple[str, str], ...], int] | None = None
+        self._content: tuple[tuple[tuple[str, str], ...], int, str, str, str] | None = None
 
-    def _draw(self, rows: tuple[tuple[str, str], ...], selected: int) -> moderngl.Texture:
+    def _draw(
+        self, rows: tuple[tuple[str, str], ...], selected: int, title: str, hint: str, footer: str
+    ) -> moderngl.Texture:
         height = _ROWS_TOP + len(rows) * _ROW_HEIGHT + 31
         texture = self._texture
         if texture is None or texture.size != (_WIDTH, height):
             self.release()
             texture = self._renderer.ctx.texture((_WIDTH, height), 3)
             self._texture = texture
-        if self._content == (rows, selected):
+        if self._content == (rows, selected, title, hint, footer):
             return texture
 
         pixels = np.zeros((height, _WIDTH), dtype=np.uint8)
         pixels[[0, -1], :] = 1
         pixels[:, [0, -1]] = 1
         font = self._font
-        font.draw_text(pixels, "Display preview", 10, 10, color_index=4)
+        font.draw_text(pixels, title, 10, 10, color_index=4)
         for index, (label, value) in enumerate(rows):
             top = _ROWS_TOP + index * _ROW_HEIGHT
             color = 4 if index == selected else 2
@@ -53,10 +55,10 @@ class DisplayPanel:
             font.draw_text(pixels, label, 10, top + 3, color_index=color)
             right = _WIDTH - 10 - len(value) * font.char_width
             font.draw_text(pixels, value, right, top + 3, color_index=color)
-        font.draw_text(pixels, "UP/DOWN  LEFT/RIGHT", 10, height - 25, color_index=1)
-        font.draw_text(pixels, "ENTER APPLY  ESC CANCEL", 10, height - 13, color_index=2)
+        font.draw_text(pixels, hint, 10, height - 25, color_index=1)
+        font.draw_text(pixels, footer, 10, height - 13, color_index=2)
         texture.write(_COLORS[pixels[::-1]].tobytes(), alignment=1)
-        self._content = (rows, selected)
+        self._content = (rows, selected, title, hint, footer)
         return texture
 
     def draw(
@@ -65,9 +67,13 @@ class DisplayPanel:
         size: tuple[int, int],
         rows: tuple[tuple[str, str], ...],
         selected: int,
+        *,
+        title: str = "Display preview",
+        hint: str = "UP/DOWN  LEFT/RIGHT",
+        footer: str = "ENTER APPLY  ESC CANCEL",
     ) -> None:
         """Draw the panel in the top-right of a window or test framebuffer."""
-        texture = self._draw(rows, selected)
+        texture = self._draw(rows, selected, title, hint, footer)
         width, height = size
         integer_scale = max(1, min(width // 420, height // 300))
         margin = min(8 * integer_scale, min(width, height) // 16)

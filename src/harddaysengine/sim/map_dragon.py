@@ -62,6 +62,11 @@ def _handler(world: OverworldState, rules: MapDragonRules, fight: Fight, owner: 
     return restart_from(actor, script)
 
 
+def bind_flight(world: OverworldState, fight: Fight, rules: MapDragonRules) -> None:
+    """Link the dragon job handler to this map's mutable flight cells (§11.19, §13.11)."""
+    fight.handlers[40] = partial(_handler, world, rules)
+
+
 def spawn(world: OverworldState, fight: Fight, rules: MapDragonRules) -> bool:
     """Spawn after the map-entry job pass, then sample living targets (§11.10/19)."""
     actor = world.dragon
@@ -72,7 +77,7 @@ def spawn(world: OverworldState, fight: Fight, rules: MapDragonRules) -> bool:
     for offset, size, value in rules.stores:
         actor.write(offset, size, value)
     actor.frame_list = 3
-    fight.handlers[40] = partial(_handler, world, rules)
+    bind_flight(world, fight, rules)
     if fight.start_job(rules.scripts[0], DRAGON, 3, rules.initial_job, actor.facing, 40) is None:
         raise FightError("no free map-dragon job")
     world.flight.timer, world.flight.speed_x, world.flight.speed_y = (

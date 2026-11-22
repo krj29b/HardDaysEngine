@@ -49,6 +49,20 @@ This repository contains **no game data**. Place your three original Amiga disk 
 
 Never commit `.adf` images or anything extracted from them.
 
+## Optional Campaign Saves
+
+Add the following to `config.toml` to enable saving and loading:
+
+```toml
+[gameplay]
+save_load = true
+```
+
+Press **F8** in the main menu to load, or on the overworld to save or load. Use **Up/Down**
+to choose, **Enter** to select and **Esc** to close the panel. Saves use one slot,
+`campaign-save.json`, beside the selected config file. Saving again replaces that slot.
+Loading resumes the saved turn. The option defaults to `false`.
+
 ## Controls
 
 At the title, press Enter to open the menu. Up/Down selects a row; Left/Right on the

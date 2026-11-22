@@ -1147,3 +1147,24 @@ scene continues to advance so the preview shows movement and palette cycling.
 Apply keeps the changes for the running session. The existing configuration
 file remains the source of startup defaults. Preview controls are handled
 before input sampling, in keeping with ADR-053.
+
+## ADR-063: Restore campaigns from versioned save files
+
+**Status:** ACCEPTED (2026-11-22, T15.1)
+
+The existing checkpoint hash verifies replay state. Campaign saves need a versioned
+schema that can restore it. Keep the codec and file operations in the app layer.
+Persist the ordered player roster, actor and inventory state, map and turn state,
+calendar, encounter progress, PRNG and any host state needed to resume the overworld
+at the saved tick. Rebuild runtime asset references from the player's disks. Validate
+the file in a fresh session before replacing the current one. Replace save files
+atomically so a failed write preserves the previous save.
+
+Reuse the display preview's panel styling and keyboard navigation. F8 opens the panel
+when players set `[gameplay] save_load = true`. The main menu offers Load, and the
+overworld offers Save and Load. The panel is available in those two scenes during
+interactive play. The host handles panel events before gameplay input sampling.
+Loading during a recording starts the new input timeline at the loaded checkpoint.
+
+Verify the format with checkpoint and continuation hashes, restoration from a fresh
+process, and recovery from invalid files without changing an active campaign.

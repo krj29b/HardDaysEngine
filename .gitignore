@@ -6,6 +6,7 @@ build/
 reference/
 out/
 config.toml
+campaign-save.json
 crash.log
 *.log
 

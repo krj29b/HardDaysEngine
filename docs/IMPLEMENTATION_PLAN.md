@@ -487,6 +487,18 @@ polish.
   Python interpreters. Manual workflow runs retain both artifacts. Attach both ZIPs to tagged
   GitHub releases.
 
+### Phase 15: Optional campaign saves
+
+- **T15.1 Campaign save and load (ADR-063):** add an in-game panel modeled on the
+  live CRT preview, opened with F8 when `[gameplay] save_load = true` in `config.toml`.
+  Offer Load from the main menu and Save and Load from the overworld. Keep the panel
+  unavailable in combat and in other scenes. Restore a versioned campaign checkpoint
+  from a local file.
+  *Accept:* verify the config toggle and scene restrictions, and confirm that a fresh
+  session loaded from an overworld save matches the checkpoint and subsequent state
+  hashes under the same inputs. Check malformed and incompatible files with an active
+  campaign, and verify the panel in both windowed and fullscreen modes.
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:

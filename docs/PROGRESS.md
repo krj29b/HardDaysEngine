@@ -170,6 +170,7 @@ hashes. ADR-053 was accepted by the user on 2026-11-19.
 | T14.4 | Prepare 0.2.1 patch release | T14.3 | DONE | Claude/2026-11-21. Package/runtime/lock versions set to 0.2.1; CLI reports 0.2.1. Carries T11.16c. No tag created; the user publishes the GitHub release. |
 | T14.5 | Prepare 0.3.0 release | T14.4 | DONE | Antigravity/2026-11-22. Package/runtime/lock versions set to 0.3.0; CLI reports 0.3.0. Carries T8.3a, T8.3b, SECURITY.md, and README screenshots. No tag created; the user publishes the GitHub release. |
 | T14.6 | Build portable Windows x86 releases | T14.2 | DONE | Codex/2026-11-22. Release jobs build x86 and x64 ZIPs with matching Python interpreters (ADR-061). Both builds passed extracted-archive smoke checks, and all bundled binaries matched their target architecture. The x86 ZIP rendered an offscreen inspector frame on the x64 Windows test host. Full quality gate: 1870 passed, 100 GL deselected. Hosted publication and native 32-bit Windows remain unverified. |
+| T15.1 | Opt-in campaign save and load | T11.24, T13.10 | DONE | Codex/2026-11-22. F8 opens the campaign panel when `[gameplay] save_load` is enabled. One versioned, atomically replaced save slot. Verified main-menu load and map save in the game window across fullscreen and windowed modes. Tested failed loads, active map dragon restoration, and deterministic continuation. A fresh CLI replay matched the final campaign hash after 1924 resumed ticks. Spec §13.11 / ADR-063. Full quality gate: 1876 passed, 102 GL deselected. |
 
 ## Replay verification follow-up
 

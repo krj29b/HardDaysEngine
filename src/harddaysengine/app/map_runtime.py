@@ -12,10 +12,11 @@ from harddaysengine.assets.fight_program import cel_shape, fight_constants, scri
 from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.mog_code import MogCode
 from harddaysengine.sim.fight import Fight
-from harddaysengine.sim.map_dragon import spawn
+from harddaysengine.sim.map_dragon import bind_flight, spawn
 
 if TYPE_CHECKING:
     from harddaysengine.app.scene_assets import GameAssetBundle
+    from harddaysengine.sim.fight_script import Draw
     from harddaysengine.sim.overworld import OverworldState
     from harddaysengine.sim.turn_rules import TurnRules
 
@@ -41,18 +42,32 @@ class MapRuntime:
         self.scene = FightScene(
             fight, np.zeros((200, 320), dtype=np.uint8), {"mi.c": cel}, picture.palette
         )
+        bind_flight(world, fight, rules.dragon)
         self.rules = rules
+        self.stamps: list[Draw] = []
+        self.draws: list[Draw] = []
 
     def enter(self, world: OverworldState, vbl: int) -> None:
         """Existing jobs run before the spawn attempt (§11.4)."""
         self.advance(world, vbl)
         if spawn(world, self.scene.fight, self.rules.dragon):
-            self.scene.canvas.accept([])
+            self._accept_draws([])
 
     def advance(self, world: OverworldState, vbl: int) -> None:
         """One map job pass, with no separate animation counter (§11.19)."""
         if world.dragon_active:
-            self.scene.advance(vbl)
+            self._accept_draws(self.scene.fight.step(vbl).tick.draws)
+
+    def _accept_draws(self, draws: list[Draw]) -> None:
+        self.stamps.extend(draw for draw in self.draws if draw.stamp)
+        self.draws = draws
+        self.scene.canvas.accept(draws)
+
+    def restore_draws(self, stamps: list[Draw], draws: list[Draw]) -> None:
+        """Recompose the retained map frame from original cels (§13.11)."""
+        self.stamps, self.draws = stamps, draws
+        self.scene.canvas.accept(stamps)
+        self.scene.canvas.accept(draws)
 
     def clear(self, world: OverworldState) -> None:
         """Arena/place reset frees map jobs and deactivates flight (§11.10)."""

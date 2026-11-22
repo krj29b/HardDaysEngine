@@ -14,6 +14,17 @@ import numpy as np
 import pygame
 
 from harddaysengine.app.audio import AudioEngine
+from harddaysengine.app.campaign_menu import CampaignMenu, SaveAction
+from harddaysengine.app.campaign_save import (
+    CampaignCheckpoint,
+    FightCheckpoint,
+    MapCheckpoint,
+    PaletteCheckpoint,
+    WorldCheckpoint,
+    disk_signature,
+    read_checkpoint,
+    write_checkpoint,
+)
 from harddaysengine.app.config import find_adf_images
 from harddaysengine.app.dice_screen import DiceScreen
 from harddaysengine.app.ending_screen import EndingScreen
@@ -338,6 +349,128 @@ class GameSession:
         if slot_inp != PlayerInput():
             return slot_inp
         return direct
+
+    @property
+    def has_save_menu(self) -> bool:
+        """Whether this is the main menu or a campaign map (§13.11)."""
+        return self.disk_set is not None and (
+            self.scene == GameScene.OVERWORLD
+            or (self.scene == GameScene.KNIGHT_SELECT and not self.knight_pick_active)
+        )
+
+    def campaign_checkpoint(self) -> CampaignCheckpoint:
+        """Capture a playable overworld tick (§13.11)."""
+        if self.scene != GameScene.OVERWORLD or self.disk_set is None:
+            raise ValueError("Saving requires an overworld campaign")
+        return CampaignCheckpoint(
+            version=1,
+            data_hash=disk_signature(self.disk_set),
+            state_hash=self.state_hash(),
+            seed=self.seed,
+            tick=self.tick_count,
+            players=self.players,
+            actors=self.actors,
+            dragon=self.dragon_actor,
+            inventories=self.inventories,
+            rng=self.fight_rng.state,
+            world=WorldCheckpoint.capture(self.overworld),
+            palette=PaletteCheckpoint.model_validate(self.palette_fx.snapshot()),
+            map_jobs=MapCheckpoint.capture(self.map_runtime) if self.map_runtime else None,
+            fights=FightCheckpoint.capture(self.fight_loader) if self.fight_loader else None,
+            legacy=self.knight_combat,
+            paused=self.paused,
+            selected_players=self.selected_player_count,
+            menu_cursor=self.menu_cursor,
+            gore=self.gore_enabled,
+            pick_slot=self.knight_pick_slot,
+            picked_mask=self.knight_taken_mask,
+            picked=self.picked_knights,
+            menu_latches=(
+                self._menu_prev_dx,
+                self._menu_prev_dy,
+                self._menu_prev_fire,
+                self._end_prev_fire,
+            ),
+            map_key=self._map_key,
+            calendar_phase=self._calendar_phase,
+            loading_cycle=self.loading_cycle,
+            last_sheet_item=self.last_sheet_item,
+            last_status=self.last_status,
+            lanes=self.spawn_lanes.counter,
+            lair_counts=self.lair_counts,
+            bad_luck=self.bad_luck,
+            defeats=self.last_defeat_mask,
+        )
+
+    @classmethod
+    def from_campaign_checkpoint(
+        cls, checkpoint: CampaignCheckpoint, disk_set: DiskSet
+    ) -> GameSession:
+        """Build and verify a game before it replaces the active session (§13.11)."""
+        if checkpoint.data_hash != disk_signature(disk_set):
+            raise ValueError("Save requires a different disk version")
+        if len(set(checkpoint.players)) != len(checkpoint.players):
+            raise ValueError("Save contains duplicate players")
+        session = cls(
+            seed=checkpoint.seed,
+            players=checkpoint.players,
+            start_scene=GameScene.OVERWORLD,
+            disk_set=disk_set,
+        )
+        session._restore_campaign(checkpoint)
+        if checkpoint.state_hash != session.state_hash():
+            raise ValueError("Save checkpoint does not match the restored campaign")
+        return session
+
+    def _restore_campaign(self, saved: CampaignCheckpoint) -> None:
+        world = self.overworld
+        self.actors = list(saved.actors)
+        self.dragon_actor = saved.dragon
+        self.inventories = saved.inventories
+        self.fight_rng.state = saved.rng
+        self.overworld = OverworldState(
+            self.actors,
+            self.dragon_actor,
+            self.inventories,
+            self.fight_rng,
+            self.players,
+            rules=world.rules,
+            turn_rules=world.turn_rules,
+            ai_rules=world.ai_rules,
+        )
+        saved.world.restore(self.overworld)
+        self.palette_fx = saved.palette.restore()
+        self.knight_combat = saved.legacy
+        self._restore_campaign_host_cells(saved)
+        if saved.map_jobs is not None and self.asset_bundle is not None and world.turn_rules:
+            self.map_runtime = MapRuntime(self.asset_bundle, self.overworld, world.turn_rules)
+            saved.map_jobs.restore(self.map_runtime)
+        if saved.fights is not None and self.asset_bundle is not None:
+            self.fight_loader = FightLoader(self.asset_bundle)
+            saved.fights.restore(self.fight_loader)
+
+    def _restore_campaign_host_cells(self, saved: CampaignCheckpoint) -> None:
+        self.tick_count, self.paused = saved.tick, saved.paused
+        self.selected_player_count, self.menu_cursor = saved.selected_players, saved.menu_cursor
+        self.gore_enabled = saved.gore
+        self.knight_pick_slot, self.knight_taken_mask = saved.pick_slot, saved.picked_mask
+        self.picked_knights = saved.picked
+        self._menu_prev_dx, self._menu_prev_dy, self._menu_prev_fire, self._end_prev_fire = (
+            saved.menu_latches
+        )
+        self._map_key, self._calendar_phase = saved.map_key, saved.calendar_phase
+        self.loading_cycle, self.last_sheet_item = saved.loading_cycle, saved.last_sheet_item
+        self.last_status = saved.last_status
+        self.spawn_lanes.counter, self.lair_counts = saved.lanes, saved.lair_counts
+        self.bad_luck, self.last_defeat_mask = saved.bad_luck, saved.defeats
+
+    def resume_campaign_audio(self, audio: AudioEngine) -> None:
+        """Reconnect host audio after a validated campaign is selected."""
+        audio.stop_all()
+        self.audio = audio
+        if self.asset_bundle is not None:
+            self.asset_bundle.attach_synth(audio)
+        self._map_music()
 
     @property
     def blocking_fade(self) -> bool:
@@ -2466,18 +2599,18 @@ def run_headless_session(
     active_seed = seed
     active_players = tuple(players)
     scripted_frames: tuple[InputFrame, ...] = tuple(frames)
+    checkpoint: str | None = None
 
     if replay_path is not None:
         loaded = load_replay(replay_path)
         active_seed = loaded.seed
         active_players = loaded.players
         scripted_frames = loaded.frames
+        checkpoint = loaded.start_checkpoint
 
     total_ticks = len(scripted_frames) if replay_path is not None else max(0, ticks)
     disk_set = _open_optional_disk_set(adf_dir) if adf_dir is not None else None
-    session = GameSession(
-        seed=active_seed, players=active_players, start_scene=start_scene, disk_set=disk_set
-    )
+    session = _new_session(active_seed, active_players, disk_set, checkpoint, start_scene)
     recorded: list[InputFrame] = []
 
     for idx in range(total_ticks):
@@ -2491,6 +2624,7 @@ def run_headless_session(
         seed=active_seed,
         players=active_players,
         frames=tuple(recorded),
+        start_checkpoint=checkpoint,
     )
     if record_path is not None:
         save_replay(record_path, recording)
@@ -2511,6 +2645,57 @@ def _open_optional_disk_set(adf_dir: Path) -> DiskSet | None:
     return DiskSet.from_directory(adf_dir)
 
 
+def _new_session(
+    seed: int,
+    players: Sequence[KnightId],
+    disks: DiskSet | None,
+    checkpoint: str | None,
+    start_scene: GameScene = GameScene.TITLE,
+    *,
+    audio: AudioEngine | None = None,
+) -> GameSession:
+    if checkpoint is None:
+        return GameSession(
+            seed=seed, players=players, disk_set=disks, start_scene=start_scene, audio=audio
+        )
+    if disks is None:
+        raise ValueError("Checkpoint replay requires the original disks")
+    saved = CampaignCheckpoint.model_validate_json(checkpoint, strict=True)
+    session = GameSession.from_campaign_checkpoint(saved, disks)
+    if audio is not None:
+        session.resume_campaign_audio(audio)
+    return session
+
+
+def _apply_campaign_request(
+    menu: CampaignMenu, session: GameSession, audio: AudioEngine
+) -> tuple[GameSession, str | None]:
+    request, menu.request = menu.request, None
+    path, disks = menu.path, session.disk_set
+    if request is None or path is None or disks is None or not session.has_save_menu:
+        return session, None
+    if request is SaveAction.SAVE:
+        try:
+            write_checkpoint(path, session.campaign_checkpoint())
+            menu.status = "Game saved"
+        except (OSError, ValueError):
+            menu.status = "Could not save game"
+        return session, None
+    try:
+        saved = read_checkpoint(path)
+        encoded = saved.model_dump_json()
+        restored = GameSession.from_campaign_checkpoint(saved, disks)
+    except FileNotFoundError:
+        menu.status = "No saved game"
+    except (OSError, ValueError, KeyError, IndexError):
+        menu.status = "Cannot load save"
+    else:
+        restored.resume_campaign_audio(audio)
+        menu.close()
+        return restored, encoded
+    return session, None
+
+
 def _step_window_ticks(
     ticks: int,
     session: GameSession,
@@ -2519,7 +2704,11 @@ def _step_window_ticks(
     replay_idx: int,
     recorded: list[InputFrame],
     max_ticks: int | None,
+    *,
+    menu_open: bool = False,
 ) -> tuple[bool, int]:
+    if menu_open:
+        return not router.sample_frame().quit_requested, replay_idx
     for _ in range(ticks):
         if replay_rec is not None:
             if replay_idx >= len(replay_rec.frames):
@@ -2545,6 +2734,7 @@ def _present_game_frame(
     settings: DisplaySettings,
     window: WindowController,
     panel: DisplayPanel,
+    campaign_menu: CampaignMenu,
 ) -> None:
     cur_w, cur_h = pygame.display.get_window_size()
     session.render_to_scene(scene_renderer, font)
@@ -2553,15 +2743,37 @@ def _present_game_frame(
             (0, 0, cur_w, cur_h), settings=window.apply_display_settings(settings)
         )
         preview = window.display_preview
-        if preview is not None:
+        if campaign_menu.is_open:
+            panel.draw(
+                base_renderer.ctx.screen,
+                (cur_w, cur_h),
+                campaign_menu.rows(),
+                campaign_menu.selected,
+                title="Campaign saves",
+                hint=campaign_menu.status,
+                footer="ENTER SELECT  ESC CLOSE",
+            )
+        elif preview is not None:
             panel.draw(base_renderer.ctx.screen, (cur_w, cur_h), preview.rows(), preview.selected)
     pygame.display.set_caption(f"HardDaysEngine | {session.scene.name} | {session.last_status}")
     pygame.display.flip()
 
 
-def _pump_game_events(window: WindowController, router: InputRouter, pacer: RefreshPacer) -> None:
+def _pump_game_events(
+    window: WindowController,
+    router: InputRouter,
+    pacer: RefreshPacer,
+    campaign_menu: CampaignMenu,
+    session: GameSession,
+) -> None:
     prev_mode = window.mode
     for event in pygame.event.get():
+        if campaign_menu.consume_event(
+            event,
+            available=session.has_save_menu and window.display_preview is None,
+            can_save=session.scene == GameScene.OVERWORLD,
+        ):
+            continue
         if not window.consume_event(event):
             router.process_pygame_event(event)
     if window.mode is not prev_mode:
@@ -2576,21 +2788,18 @@ def run_game_window(
     record_path: Path | None = None,
     replay_path: Path | None = None,
     max_ticks: int | None = None,
+    save_path: Path | None = None,
 ) -> int:
     """Open the interactive ``pygame-ce`` + ModernGL 3.3 Moonstone game window (§13)."""
     settings = display if display is not None else DisplaySettings()
     replay_rec = load_replay(replay_path) if replay_path is not None else None
-    active_seed = replay_rec.seed if replay_rec is not None else seed
-    active_players = replay_rec.players if replay_rec is not None else (KnightId.RED,)
+    origin = replay_rec or ReplayRecording(seed, (KnightId.RED,), ())
+    active_seed, active_players, checkpoint = origin.seed, origin.players, origin.start_checkpoint
+    campaign_menu = CampaignMenu(save_path if replay_rec is None else None)
 
     disk_set = _open_optional_disk_set(adf_dir)
     audio = AudioEngine(headless=False)
-    session = GameSession(
-        seed=active_seed,
-        players=active_players,
-        audio=audio,
-        disk_set=disk_set,
-    )
+    session = _new_session(active_seed, active_players, disk_set, checkpoint, audio=audio)
 
     pygame.init()
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
@@ -2620,12 +2829,24 @@ def run_game_window(
     try:
         running = True
         while running:
-            _pump_game_events(window, router, pacer)
+            _pump_game_events(window, router, pacer, campaign_menu, session)
+            session, loaded = _apply_campaign_request(campaign_menu, session, audio)
+            if loaded is not None:
+                checkpoint = loaded
+                active_seed, active_players = session.seed, session.players
+                recorded.clear()
             now_ns = time.perf_counter_ns()
             step = pacer.step(now_ns - prev_ns)
             prev_ns = now_ns
             running, replay_idx = _step_window_ticks(
-                step.ticks, session, router, replay_rec, replay_idx, recorded, max_ticks
+                step.ticks,
+                session,
+                router,
+                replay_rec,
+                replay_idx,
+                recorded,
+                max_ticks,
+                menu_open=campaign_menu.is_open,
             )
             if step.should_present:
                 _present_game_frame(
@@ -2636,6 +2857,7 @@ def run_game_window(
                     settings,
                     window,
                     panel,
+                    campaign_menu,
                 )
             elif not settings.vsync:
                 pygame.time.wait(1)
@@ -2643,7 +2865,12 @@ def run_game_window(
         if record_path is not None:
             save_replay(
                 record_path,
-                ReplayRecording(seed=active_seed, players=active_players, frames=tuple(recorded)),
+                ReplayRecording(
+                    seed=active_seed,
+                    players=active_players,
+                    frames=tuple(recorded),
+                    start_checkpoint=checkpoint,
+                ),
             )
         panel.release()
         scene_renderer.release()

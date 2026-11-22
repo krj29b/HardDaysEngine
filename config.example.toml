@@ -5,3 +5,6 @@
 # Can also be set with --adf-dir or the HARDDAYSENGINE_ADF_DIR environment variable.
 # Default when unset: ./disks
 adf_dir = ""
+
+[gameplay]
+save_load = false           # true enables the F8 campaign save/load panel

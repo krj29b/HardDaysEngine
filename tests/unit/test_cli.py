@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from harddaysengine import __version__
-from harddaysengine.app.config import ADF_IMAGE_SIZE
+from harddaysengine.app.config import ADF_IMAGE_SIZE, ConfigError, resolve_save_path
 from harddaysengine.cli.main import main
 
 if TYPE_CHECKING:
@@ -61,3 +61,15 @@ def test_bad_config_is_a_usage_error(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as exc:
         main(["--config", str(cfg), "--list-disks"])
     assert exc.value.code == 2
+
+
+def test_campaign_saves_are_opt_in(tmp_path: Path) -> None:
+    config = tmp_path / "custom.toml"
+    assert resolve_save_path(config) is None
+    config.write_text("[gameplay]\nsave_load = false\n", encoding="utf-8")
+    assert resolve_save_path(config) is None
+    config.write_text("[gameplay]\nsave_load = true\n", encoding="utf-8")
+    assert resolve_save_path(config) == tmp_path / "campaign-save.json"
+    config.write_text('[gameplay]\nsave_load = "true"\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="save_load must be a boolean"):
+        resolve_save_path(config)

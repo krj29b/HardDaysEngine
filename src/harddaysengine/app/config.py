@@ -176,6 +176,15 @@ def _bool_setting(value: object, key: str, source: str) -> bool:
     return value
 
 
+def resolve_save_path(config_path: Path) -> Path | None:
+    """Return the optional campaign save beside the selected config (§13.11)."""
+    gameplay = load_config_file(config_path).get("gameplay", {})
+    if not isinstance(gameplay, dict):
+        raise ConfigError(f"{config_path}: gameplay must be a table")
+    enabled = _bool_setting(gameplay.get("save_load", False), "save_load", str(config_path))
+    return config_path.with_name("campaign-save.json") if enabled else None
+
+
 def _float_setting(
     value: object,
     key: str,
