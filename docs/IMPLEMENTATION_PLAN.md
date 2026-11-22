@@ -471,6 +471,14 @@ polish.
 - **T14.4 Prepare 0.2.1.** Patch release for the town sheet fix (T11.16c): update package,
   runtime and lock versions; the user creates the tag/release on GitHub.
 
+- **T14.5 Prepare 0.3.0.** Minor release carrying gamepad device handling (T8.3a), intro/Practice
+  menu transition fixes (T8.3b), security policy, and README screenshots: update package, runtime
+  and lock versions; the user creates the tag/release on GitHub.
+
+- **T14.6 Portable Windows x86 package.** Build and smoke-test the x86 and x64 ZIPs with matching
+  Python interpreters. Manual workflow runs retain both artifacts. Attach both ZIPs to tagged
+  GitHub releases.
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:

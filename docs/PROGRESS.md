@@ -167,6 +167,9 @@ hashes. ADR-053 was accepted by the user on 2026-11-19.
 | T14.2 | Unified tag release (Windows ZIP and PyPI) | T14.1 | DONE | Codex/2026-11-20. One publish.yml validates exact tag/package versions, runs the full gate, builds both formats before either publication, and preserves branch previews and the pypi Trusted Publisher identity; ADR-055. Full gate: 1863 passed, 100 GL deselected. YAML parsed, five version-validation scenarios passed, wheel/sdist built and passed twine strict checks. First hosted tag publication remains to be verified. |
 | T14.3 | Prepare local 0.2.0 release and tag | T14.2 | DONE | Codex/2026-11-20. Package/runtime/lock versions and current README examples updated to 0.2.0. Full gate: 1863 passed, 100 GL deselected; CLI/version consistency and wheel/sdist twine strict checks pass. Local release commit and annotated v0.2.0 tag only; no push or publication. |
 | T14.4 | Prepare 0.2.1 patch release | T14.3 | DONE | Claude/2026-11-21. Package/runtime/lock versions set to 0.2.1; CLI reports 0.2.1. Carries T11.16c. No tag created; the user publishes the GitHub release. |
+| T14.5 | Prepare 0.3.0 release | T14.4 | DONE | Antigravity/2026-11-22. Package/runtime/lock versions set to 0.3.0; CLI reports 0.3.0. Carries T8.3a, T8.3b, SECURITY.md, and README screenshots. No tag created; the user publishes the GitHub release. |
+
+| T14.6 | Build portable Windows x86 releases | T14.2 | IN PROGRESS (Codex/2026-11-22) | Add a second architecture to the Windows build job. |
 
 ## Replay verification follow-up
 
