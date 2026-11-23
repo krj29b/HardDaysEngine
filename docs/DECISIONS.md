@@ -1218,3 +1218,68 @@ Bluetooth), without modifying gameplay mappings (`app/input.py`) or replay input
 virtual-device tests against §13.12 without adding dependencies or changing any game behavior
 or replay hash. Because `pygame._sdl2.controller` and `pygame._sdl2.touch` are underscored
 modules (as in ADR-051), they are imported defensively and tested directly in CI.
+
+## ADR-066: Host control modes (`standard` and `shared-pad`) live above `InputFrame`
+
+**Status:** ACCEPTED (2026-11-22, T17.1; extends ADR-059)
+
+**Context:** In local 2–4 player campaigns with only one connected gamepad, static per-slot
+gamepad assignment (Mode A) limits the gamepad to Player 1, forcing other players onto
+secondary keyboard layouts. Players want to pass a single gamepad between active turns, and
+when two human knights enter a duel (`PVP_DUEL` or `Practice`), let the initiator use the
+gamepad while the second knight uses `WASD + Space`.
+
+**Decision:**
+1. Add `ControlMode` (`auto`, `standard`, `shared-pad`) configurable in `[input] mode` in
+   `config.toml` and via `--control-mode` on `harddaysengine`.
+2. Resolve `auto` dynamically from the number of currently open gamepads in `InputRouter`:
+   choose `shared-pad` whenever exactly one gamepad is connected, otherwise `standard`, so
+   connecting or disconnecting a pad mid-session switches immediately. Explicit `standard`
+   and `shared-pad` settings stay fixed regardless of hotplug.
+3. Keep control-mode routing strictly in the `app/` host layer before `InputFrame` creation.
+   `GameSession.control_targets()` reports the active slot (`primary`) and optional second
+   human fighter slot (`duel_opponent`, ordered as `(initiator, defender)` from
+   `ActiveEncounter.knight_ids`).
+4. In `shared-pad` mode: outside 2-human duels, route the active gamepad merged with Player 1
+   keyboard backup (`DEFAULT_KEY_BINDINGS[KnightId.RED]`) to `primary` while preserving map
+   shortcut keys (`1`–`9`, `E`, `Q`, `Space`, `P`); during 2-human duels (`PVP_DUEL` and
+   `Practice`), route the gamepad exclusively to `primary` (initiator) and `WASD + Space`
+   exclusively to `duel_opponent`, forwarding `pause` (`P` or gamepad Start) to slot 0 so
+   either player can pause without input bleed.
+5. In `GameSession._player_input()`, prefer `frame.players[slot_kid]` whenever `slot_kid` is
+   explicitly present in `frame.players` (rather than falling back to `direct` on neutral
+   input), preventing cross-player input leakage when portrait order permutes `KnightId`
+   slots while remaining compatible with sparse synthetic `InputFrame` fixtures.
+
+**Consequences:** `sim/`, `ReplayRecording` format, and campaign checkpoints are unchanged;
+recordings captured under either control mode replay identically in headless or window runs.
+
+## ADR-067: Overworld entry ignores input during fades and latches held fire until release
+
+**Status:** ACCEPTED (2026-11-22, T8.3c; follows ADR-058 and ADR-060)
+
+**Context:** On a gamepad, button 0 asserts both `confirm` (edge) and `fire` (level for the full
+hold duration), whereas keyboard `Enter` asserts only `confirm`. When starting a game from
+`KNIGHT_SELECT`, the starting knight spawns overlapping their home village. Because `_step_overworld`
+did not gate human input during the entry palette fade-in (§11.4) or require a release after
+transitioning onto the map, a gamepad press held for even two VBLs (40 ms) immediately opened the
+home village temple and spent the knight's first turn on exit.
+
+**Decision:**
+1. While `palette_fx.is_fading` is active on `GameScene.OVERWORLD`, pass neutral input `(0, 0)` to
+   `OverworldState.frame` and do not latch map keys, matching the blocking entry fade in §11.4 and
+   the sheet/town fade gating of ADR-058 while allowing non-input map state (turn-over, dragon
+   intercept, flight runtime) to advance cleanly.
+2. On any transition into `GameScene.OVERWORLD`, or when `current_knight_id` changes on the
+   overworld, record whether the active knight's `fire` or `confirm` is held in `_map_fire_latch`
+   and mask out `FIRE` until released (`not (inp.fire or inp.confirm)`), checked on every tick
+   (including fade and odd-phase ticks) so normal level-polled map fire works immediately on the
+   next press.
+3. Include `_map_fire_latch` in `GameSession.state_hash()` and persist it in
+   `CampaignCheckpoint.map_fire_latch` (default `False`) so saves taken during map entry restore
+   with identical hashes and behavior.
+
+**Consequences:** Holding gamepad button 0 (or keyboard `Space`) across game start or screen return
+no longer triggers accidental home-village entry or node dispatch. Recordings or test helpers that
+sent overworld movement or keys during a map fade-in must wait for the fade to finish. No `sim/`
+rules or asset decoders are changed.

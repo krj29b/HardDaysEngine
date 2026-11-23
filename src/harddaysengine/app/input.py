@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import pygame
@@ -18,6 +19,29 @@ if TYPE_CHECKING:
 
 REPLAY_FORMAT_VERSION = 1
 AXIS_DEADZONE = 0.5
+
+
+class ControlMode(StrEnum):
+    """Host control routing mode (ARCHITECTURE.md §13.13, ADR-066)."""
+
+    AUTO = "auto"
+    STANDARD = "standard"
+    SHARED_PAD = "shared-pad"
+
+
+@dataclass(slots=True, frozen=True)
+class ControlTargets:
+    """Logical player slot targets for live host routing on the current tick (§13.13)."""
+
+    primary: KnightId = KnightId.RED
+    duel_opponent: KnightId | None = None
+
+
+def resolve_active_control_mode(configured: ControlMode, connected_pads: int) -> ControlMode:
+    """Resolve ``auto`` from current pad count: ``shared-pad`` iff exactly 1 pad is connected."""
+    if configured == ControlMode.AUTO:
+        return ControlMode.SHARED_PAD if connected_pads == 1 else ControlMode.STANDARD
+    return configured
 
 
 @dataclass(slots=True, frozen=True)
@@ -246,6 +270,20 @@ DEFAULT_KEY_BINDINGS: dict[KnightId, KeyBindings] = {
     ),
 }
 
+# Mode B (shared-pad) 2-human duel keyboard bindings for the second knight (§13.13).
+DUEL_SECOND_PLAYER_BINDINGS = KeyBindings(
+    left=pygame.K_a,
+    right=pygame.K_d,
+    up=pygame.K_w,
+    down=pygame.K_s,
+    fire=pygame.K_SPACE,
+    secondary=pygame.K_g,
+    weapon_switch=pygame.K_r,
+    run=pygame.K_q,
+    confirm=pygame.K_SPACE,
+    pause=pygame.K_p,
+)
+
 
 @dataclass(slots=True)
 class _PadState:
@@ -267,6 +305,7 @@ class InputRouter:
         bindings: Mapping[KnightId, KeyBindings] | None = None,
         *,
         init_joysticks: bool = False,
+        control_mode: ControlMode = ControlMode.STANDARD,
     ) -> None:
         self._bindings: dict[KnightId, KeyBindings] = dict(
             bindings if bindings is not None else DEFAULT_KEY_BINDINGS
@@ -277,9 +316,20 @@ class InputRouter:
         self._joysticks: dict[int, tuple[int, pygame.joystick.JoystickType]] = {}
         self._injected: dict[KnightId, PlayerInput] = {}
         self._quit_requested = False
+        self._configured_control_mode: ControlMode = control_mode
 
         if init_joysticks:
             self.init_joysticks()
+
+    @property
+    def active_control_mode(self) -> ControlMode:
+        """Effective control mode (``standard`` or ``shared-pad``), updated on hotplug."""
+        return resolve_active_control_mode(self._configured_control_mode, len(self._joysticks))
+
+    @property
+    def configured_control_mode(self) -> ControlMode:
+        """Configured control mode (``auto``, ``standard``, or ``shared-pad``)."""
+        return self._configured_control_mode
 
     def init_joysticks(self) -> int:
         """Open startup gamepads and return the detected count (ARCHITECTURE.md §13.8)."""
@@ -448,8 +498,13 @@ class InputRouter:
             skip_intro=kb.skip_intro or pad.skip_intro,
         ).normalized()
 
-    def sample_frame(self) -> InputFrame:
-        """Sample all 4 player inputs for the current VBL tick and clear edge triggers."""
+    def _sample_shared_pad(self) -> PlayerInput:
+        if not self._pads:
+            return PlayerInput()
+        first_slot = min(self._pads)
+        return self._sample_pad(self._pads[first_slot])
+
+    def _sample_players_standard(self) -> dict[KnightId, PlayerInput]:
         players: dict[KnightId, PlayerInput] = {}
         for kid in KnightId:
             if kid in self._injected:
@@ -463,6 +518,49 @@ class InputRouter:
             pad_state = self._pads.get(int(kid))
             pad = self._sample_pad(pad_state) if pad_state is not None else PlayerInput()
             players[kid] = self._merge_inputs(kb, pad)
+        return players
+
+    def _sample_players_shared_pad(self, targets: ControlTargets) -> dict[KnightId, PlayerInput]:
+        players: dict[KnightId, PlayerInput] = {kid: PlayerInput() for kid in KnightId}
+        pad_inp = self._sample_shared_pad()
+        if targets.duel_opponent is not None:
+            duel_kb = self._sample_keyboard(DUEL_SECOND_PLAYER_BINDINGS)
+            players[targets.primary] = pad_inp
+            players[targets.duel_opponent] = duel_kb
+            any_pause = pad_inp.pause or duel_kb.pause
+        else:
+            p1_kb = (
+                self._sample_keyboard(self._bindings[KnightId.RED])
+                if KnightId.RED in self._bindings
+                else PlayerInput()
+            )
+            merged = self._merge_inputs(p1_kb, pad_inp)
+            players[targets.primary] = merged
+            any_pause = merged.pause
+        if any_pause and not players[KnightId.RED].pause:
+            slot0 = players[KnightId.RED]
+            players[KnightId.RED] = PlayerInput(
+                dx=slot0.dx,
+                dy=slot0.dy,
+                fire=slot0.fire,
+                secondary=slot0.secondary,
+                weapon_switch=slot0.weapon_switch,
+                run=slot0.run,
+                confirm=slot0.confirm,
+                pause=True,
+                skip_intro=slot0.skip_intro,
+            )
+        for kid, override in self._injected.items():
+            players[kid] = override
+        return players
+
+    def sample_frame(self, *, targets: ControlTargets | None = None) -> InputFrame:
+        """Sample all 4 player inputs for the current VBL tick and clear edge triggers."""
+        if self.active_control_mode == ControlMode.SHARED_PAD:
+            active_targets = targets if targets is not None else ControlTargets()
+            players = self._sample_players_shared_pad(active_targets)
+        else:
+            players = self._sample_players_standard()
 
         key = next(
             (

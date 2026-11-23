@@ -313,6 +313,8 @@ def test_knight_pick_routes_p1_input_and_edge_triggers_fire() -> None:
     assert session2.overworld.current_knight_id == KnightId.BLUE
 
     session2.overworld.install(RULES, KINDS, 7)
+    while session2.palette_fx.is_fading:
+        session2.step_tick(_frame_p1())
     x = session2.overworld.current_actor.map_x
     session2.step_tick(_frame_p1(dx=1))
     session2.step_tick(_frame_p1(dx=1))
@@ -410,6 +412,39 @@ def test_held_gamepad_fire_skips_only_the_intro() -> None:
     router.process_pygame_event(fire_down)
     session.step_tick(router.sample_frame())
     assert session.scene == GameScene.OVERWORLD
+
+
+def test_held_gamepad_fire_starts_campaign_without_triggering_overworld_arrival() -> None:
+    session = GameSession(seed=7, start_scene=GameScene.KNIGHT_SELECT)
+    session.knight_pick_active = True
+    session.knight_pick_slot = 0
+    router = InputRouter(init_joysticks=False)
+    fire_down = pygame.event.Event(pygame.JOYBUTTONDOWN, joy=0, button=0)
+    fire_up = pygame.event.Event(pygame.JOYBUTTONUP, joy=0, button=0)
+
+    router.process_pygame_event(fire_down)
+    session.step_tick(router.sample_frame())
+    assert session.scene == GameScene.OVERWORLD
+    assert session.palette_fx.is_fading
+
+    session.overworld.install(RULES, KINDS, 7)
+    actor = session.overworld.current_actor
+    actor.map_x = actor.map_y = 50
+    scan(session.overworld)
+
+    for _ in range(60):
+        session.step_tick(router.sample_frame())
+    assert not session.palette_fx.is_fading
+    assert session.scene == GameScene.OVERWORLD
+    assert session.last_status != "ORIGINAL DISKS REQUIRED FOR TOWNS"
+    assert session.overworld.spent == 0
+
+    router.process_pygame_event(fire_up)
+    session.step_tick(router.sample_frame())
+    router.process_pygame_event(fire_down)
+    session.step_tick(router.sample_frame())
+    session.step_tick(router.sample_frame())
+    assert session.last_status == "ORIGINAL DISKS REQUIRED FOR TOWNS"
 
 
 def test_map_key_translation_and_replay_roundtrip() -> None:

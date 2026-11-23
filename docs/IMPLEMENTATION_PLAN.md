@@ -541,6 +541,27 @@ It does not change gameplay mappings or replay input.
   events, hotplug, output-file errors and axis-noise handling; CLI tests cover help,
   exit and version behavior; the full quality gate passes.
 
+### Phase 17: Host control modes
+
+Add host-side control modes so players with a single gamepad can pass the pad between
+turns while still supporting two-player local duels, without changing `sim/`, replay
+format, or state hashes (ADR-066).
+
+- **T17.1 Shared-pad and standard control modes (`app/input.py`, `app/config.py`, `app/game.py`,
+  `cli/main.py`):** add `ControlMode` (`auto`, `standard`, `shared-pad`) configurable via
+  `[input] mode` in `config.toml` and `--control-mode`. Under `auto` (default), resolve
+  dynamically from the number of connected gamepads: select `shared-pad` (Mode B) whenever
+  exactly 1 gamepad is connected, else `standard` (Mode A), updating live on connect and
+  disconnect. In Mode B, route the
+  connected gamepad plus Player 1 keyboard backup to the active human knight across menus,
+  overworld, places, sheets, and single-human fights; in 2-human duels (`PVP_DUEL` and
+  `Practice`), route the gamepad exclusively to the duel initiator (`knight_ids[0]`) and
+  keyboard `WASD + Space` exclusively to the second knight (`knight_ids[1]`).
+  *Accept:* unit tests cover `auto` 0/1/2-pad resolution and live hotplug transitions,
+  config/CLI validation, pass-the-pad routing across turns and scenes, 2-human duels with
+  either player initiating (zero cross-input bleed), Practice, pause forwarding, and
+  deterministic replay compatibility; full quality gate passes.
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:

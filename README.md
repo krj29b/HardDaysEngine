@@ -92,6 +92,14 @@ and confirm each with Enter. Keyboard slots follow portrait selection order.
 
 Player 2 uses WASD/F, player 3 IJKL/U, and player 4 the numeric keypad/Keypad 0 for
 movement/fire. Gamepads use the directional pad or left stick and button 0 for fire.
+When **exactly one gamepad** is connected (`--control-mode auto`, the default),
+**shared-pad mode** activates automatically (and switches dynamically if pads are plugged
+in or removed): the active player always uses the gamepad
+(with Player 1 keyboard arrows/Enter/Space and map shortcuts `1`–`9`, `E`, `Q`, `P`
+available as backup), and in a two-human duel (`PVP` or `Practice`) the duel initiator
+uses the gamepad while the second knight uses **WASD + Space** (fire). Use
+`--control-mode standard` (or `[input] mode = "standard"` in `config.toml`) to force
+per-slot controls, or `--control-mode shared-pad` to force shared-pad mode.
 Practice uses two human knights. All nine creature handlers, loot, shops, services,
 place callers and the original ending are implemented; playing the campaign requires the original disks.
 See [docs/PROGRESS.md](docs/PROGRESS.md) for acceptance evidence and documented deviations.

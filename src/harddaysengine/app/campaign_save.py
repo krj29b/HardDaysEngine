@@ -185,6 +185,7 @@ class CampaignCheckpoint(_SaveModel):
     picked_mask: int
     picked: list[KnightId]
     menu_latches: tuple[int, int, bool, bool]
+    map_fire_latch: bool = False
     map_key: int
     calendar_phase: int
     loading_cycle: int

@@ -80,7 +80,30 @@ shortcuts: digits `1`–`9`, `Space`, and uppercase `E` / `Q`.
 - **Keyboard + gamepad merge (`_merge_inputs`):** Non-zero gamepad directions override keyboard
   directions; boolean actions are OR-combined.
 
-### 1.5 Known Controller Compatibility Gaps in the Current Router
+### 1.5 Host Control Modes (ADR-066, §13.13)
+
+`InputRouter` supports configurable host control modes via `[input] mode` in `config.toml` or
+`--control-mode` on `harddaysengine` (`CLI > config.toml > auto`):
+
+- **`auto` (default):** Resolved dynamically from the number of currently connected gamepads.
+  Selects `shared-pad` whenever exactly **1** gamepad is connected, otherwise `standard`,
+  updating automatically if pads are plugged in or removed during a session.
+- **`standard` (Mode A):** Static per-slot keyboard and gamepad routing across slots `0..3`.
+- **`shared-pad` (Mode B):** Pass-the-pad routing driven by `GameSession.control_targets()`:
+  - Outside 2-human duels (menus, overworld, towns, sheets, services, dice, Stonehenge, Wizard,
+    Village, Valley, Next Day, Game Over, single-human fights, and meeting protection/loot
+    sheets), the active human player is controlled by the connected gamepad merged with Player 1
+    keyboard backup (`DEFAULT_KEY_BINDINGS[KnightId.RED]`) plus map shortcuts (`1`–`9`, `E`, `Q`,
+    `Space`, `P`).
+  - During 2-human duels (`PVP_DUEL` and `Practice`), the duel initiator (`knight_ids[0]`) is
+    controlled exclusively by the gamepad and the second player (`knight_ids[1]`) is controlled
+    exclusively by keyboard **`WASD` + `Space` (fire)**, with `P` / gamepad Start forwarding
+    pause cleanly without input bleed.
+
+Control-mode routing runs entirely above `InputFrame` generation; `sim/`, replay files, and
+state hashes are unaffected.
+
+### 1.6 Known Controller Compatibility Gaps in the Current Router
 
 Because `InputRouter` currently reads only raw `pygame.joystick` events and assumes an XInput-style
 USB button layout (`axis 0/1`, `hat 0`, buttons `0/1/2/3/7`), several controller standards on the

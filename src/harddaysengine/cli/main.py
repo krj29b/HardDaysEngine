@@ -12,10 +12,12 @@ from harddaysengine.app.config import (
     ConfigError,
     find_adf_images,
     resolve_adf_dir,
+    resolve_control_mode,
     resolve_display_settings,
     resolve_save_path,
 )
 from harddaysengine.app.game import run_game_window, run_headless_session
+from harddaysengine.app.input import ControlMode
 from harddaysengine.cli.extract import run_extraction
 from harddaysengine.cli.inspect_assets import run_inspector_cli
 from harddaysengine.render.presentation import (
@@ -167,6 +169,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="deterministic 32-bit simulation seed",
     )
+    parser.add_argument(
+        "--control-mode",
+        choices=[mode.value for mode in ControlMode],
+        default=None,
+        help="host control mode: auto, standard, or shared-pad (default: [input] mode or auto)",
+    )
     return parser
 
 
@@ -221,6 +229,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             surround=args.surround,
         )
         save_path = resolve_save_path(Path(args.config))
+        control_mode = resolve_control_mode(Path(args.config), cli_mode=args.control_mode)
     except ConfigError as exc:
         parser.error(str(exc))
     if args.list_disks:
@@ -262,4 +271,5 @@ def main(argv: Sequence[str] | None = None) -> int:
         record_path=record_path,
         replay_path=replay_path,
         save_path=save_path,
+        control_mode=control_mode,
     )

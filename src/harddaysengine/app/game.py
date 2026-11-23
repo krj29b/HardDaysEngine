@@ -30,6 +30,8 @@ from harddaysengine.app.dice_screen import DiceScreen
 from harddaysengine.app.ending_screen import EndingScreen
 from harddaysengine.app.fight_runtime import FightLoader, FightRuntime, FightUnavailableError
 from harddaysengine.app.input import (
+    ControlMode,
+    ControlTargets,
     InputFrame,
     InputRouter,
     PlayerInput,
@@ -245,6 +247,7 @@ class GameSession:
         self._menu_prev_dy: int = 0
         self._menu_prev_fire: bool = False
         self._end_prev_fire: bool = False
+        self._map_fire_latch: bool = False
         self.audio = audio
         self.disk_set = disk_set
         self.asset_bundle: GameAssetBundle | None = (
@@ -332,6 +335,7 @@ class GameSession:
         self.spawn_lanes = SpawnLanes()
         self.lair_counts.clear()
         self.bad_luck = self.last_defeat_mask = 0
+        self._map_fire_latch = False
         self._map_key = 0
         self.map_runtime = None
         self._calendar_phase = 0
@@ -345,10 +349,58 @@ class GameSession:
         slot_kid = KnightId(self.players.index(kid))
         if slot_kid == kid:
             return direct
-        slot_inp = frame.for_player(slot_kid)
-        if slot_inp != PlayerInput():
-            return slot_inp
+        if slot_kid in frame.players:
+            return frame.players[slot_kid]
         return direct
+
+    def _slot_for_knight(self, kid: KnightId) -> KnightId:
+        if kid in self.players:
+            return KnightId(self.players.index(kid))
+        return KnightId.RED
+
+    def _scene_owner_knight(self) -> KnightId | None:
+        if self.scene == GameScene.OVERWORLD:
+            return (
+                None if self.overworld.current_actor.kind == 4 else self.overworld.current_knight_id
+            )
+        handle = self._screen_owner_handle()
+        return KnightId(handle - 1) if handle is not None else None
+
+    def _screen_owner_handle(self) -> int | None:
+        if self.scene == GameScene.MEETING and self.meeting_screen is not None:
+            state = self.meeting_screen.state
+            return state.second if state.phase == MeetingPhase.PROTECT else state.first
+        if self.scene == GameScene.DICE and self.dice_screen is not None:
+            return self.dice_screen.run.state.knight
+        if self.scene == GameScene.VILLAGE and self.village_visit is not None:
+            return self.village_visit.knight
+        screens = {
+            GameScene.LOCATION: self.town_screen,
+            GameScene.STATUS: self.sheet_screen,
+            GameScene.SERVICE: self.service_screen,
+            GameScene.STONEHENGE: self.stone_screen,
+            GameScene.WIZARD: self.wizard_screen,
+            GameScene.VALLEY: self.valley_screen,
+        }
+        screen = screens.get(self.scene)
+        return None if screen is None else screen.state.knight
+
+    def control_targets(self) -> ControlTargets:
+        """Return logical player slots targeted by live host input (ARCHITECTURE.md §13.13)."""
+        if self.scene == GameScene.COMBAT and self.active_encounter is not None:
+            humans = [kid for kid in self.active_encounter.knight_ids if kid in self.players]
+            if len(humans) >= 2:
+                return ControlTargets(
+                    primary=self._slot_for_knight(humans[0]),
+                    duel_opponent=self._slot_for_knight(humans[1]),
+                )
+            if len(humans) == 1:
+                return ControlTargets(primary=self._slot_for_knight(humans[0]))
+            return ControlTargets(primary=KnightId.RED)
+        owner = self._scene_owner_knight()
+        if owner is not None:
+            return ControlTargets(primary=self._slot_for_knight(owner))
+        return ControlTargets(primary=KnightId.RED)
 
     @property
     def has_save_menu(self) -> bool:
@@ -391,6 +443,7 @@ class GameSession:
                 self._menu_prev_fire,
                 self._end_prev_fire,
             ),
+            map_fire_latch=self._map_fire_latch,
             map_key=self._map_key,
             calendar_phase=self._calendar_phase,
             loading_cycle=self.loading_cycle,
@@ -458,6 +511,7 @@ class GameSession:
         self._menu_prev_dx, self._menu_prev_dy, self._menu_prev_fire, self._end_prev_fire = (
             saved.menu_latches
         )
+        self._map_fire_latch = saved.map_fire_latch
         self._map_key, self._calendar_phase = saved.map_key, saved.calendar_phase
         self.loading_cycle, self.last_sheet_item = saved.loading_cycle, saved.last_sheet_item
         self.last_status = saved.last_status
@@ -492,15 +546,25 @@ class GameSession:
             return
 
         self._advance_sound_fade()
-        was_in_menu = self.scene == GameScene.KNIGHT_SELECT
+        prev_scene, prev_knight = self.scene, self.overworld.current_knight_id
         self._step_active_scene(frame, primary)
-        if self.scene == GameScene.KNIGHT_SELECT and not was_in_menu:
-            self._remember_menu_input(self._player_input(frame, self.players[0]))
+        self._sync_scene_entry(frame, prev_scene, prev_knight)
         self.palette_fx.step_vbl()
         if self.scene == GameScene.LOCATION:
             self._advance_town_entry()
         if self.audio is not None:
             self.audio.step_vbl()
+
+    def _sync_scene_entry(
+        self, frame: InputFrame, prev_scene: GameScene, prev_knight: KnightId
+    ) -> None:
+        if self.scene == GameScene.KNIGHT_SELECT and prev_scene != GameScene.KNIGHT_SELECT:
+            self._remember_menu_input(self._player_input(frame, self.players[0]))
+        if self.scene == GameScene.OVERWORLD and (
+            prev_scene != GameScene.OVERWORLD or self.overworld.current_knight_id != prev_knight
+        ):
+            inp = self._player_input(frame, self.overworld.current_knight_id)
+            self._map_fire_latch = inp.fire or inp.confirm
 
     def _step_active_scene(self, frame: InputFrame, primary: PlayerInput) -> None:
         if self._sound_return:
@@ -862,24 +926,40 @@ class GameSession:
         if not self._map_ready():
             return
         world = self.overworld
-        if frame.key:
+        inp = self._player_input(frame, world.current_knight_id)
+        self._update_map_fire_latch(inp)
+        live = not self.palette_fx.is_fading
+        if live and frame.key:
             self._map_key = frame.key
         world.colors.step(world.data())
         world.phase = (world.phase + 1) % 2
         if world.phase:
             return
-        kid = world.current_knight_id
-        inp = self._player_input(frame, kid)
-        key, self._map_key = self._map_key, 0
+        key, self._map_key = (self._map_key, 0) if live else (0, 0)
         if world.current_actor.kind == 4:
             self._step_computer_map(key)
             return
+        word, frame_key, result_key = self._overworld_human_input(inp, key, live=live)
+        row = world.frame(word, frame_key)
+        if self._map_result(row, result_key) and self.map_runtime is not None:
+            self.map_runtime.advance(world, self.tick_count)
+
+    def _update_map_fire_latch(self, inp: PlayerInput) -> None:
+        if self._map_fire_latch and not (inp.fire or inp.confirm):
+            self._map_fire_latch = False
+
+    def _overworld_human_input(
+        self, inp: PlayerInput, key: int, *, live: bool
+    ) -> tuple[int, int, int]:
+        """Convert human map input, masking faded ticks and latched fire (§11.4, §13.9)."""
+        if not live:
+            return 0, 0, 0
         if inp.secondary:
             key = ord(" ")
         word = inp.to_joystick_word() | (FIRE if inp.confirm else 0)
-        row = world.frame(word, ord("E") if inp.weapon_switch else key)
-        if self._map_result(row, key) and self.map_runtime is not None:
-            self.map_runtime.advance(world, self.tick_count)
+        if self._map_fire_latch:
+            word &= ~FIRE
+        return word, ord("E") if inp.weapon_switch else key, key
 
     def _step_computer_map(self, key: int) -> None:
         world = self.overworld
@@ -2326,6 +2406,7 @@ class GameSession:
                 self._menu_prev_dy,
                 self._menu_prev_fire,
                 self._end_prev_fire,
+                self._map_fire_latch,
             ),
             "world": world,
             "map_key": self._map_key,
@@ -2716,7 +2797,7 @@ def _step_window_ticks(
             frame = replay_rec.frames[replay_idx]
             replay_idx += 1
         else:
-            frame = router.sample_frame()
+            frame = router.sample_frame(targets=session.control_targets())
         if frame.quit_requested:
             return False, replay_idx
         session.step_tick(frame)
@@ -2789,6 +2870,7 @@ def run_game_window(
     replay_path: Path | None = None,
     max_ticks: int | None = None,
     save_path: Path | None = None,
+    control_mode: ControlMode = ControlMode.AUTO,
 ) -> int:
     """Open the interactive ``pygame-ce`` + ModernGL 3.3 Moonstone game window (§13)."""
     settings = display if display is not None else DisplaySettings()
@@ -2820,7 +2902,7 @@ def run_game_window(
     scene_renderer.set_palette(default_combat_palette())
     font = default_bitmap_font()
     panel = DisplayPanel(base_renderer, font)
-    router = InputRouter(init_joysticks=True)
+    router = InputRouter(init_joysticks=True, control_mode=control_mode)
     pacer = RefreshPacer(refresh_hz=window.get_refresh_rate(), vsync=settings.vsync)
     recorded: list[InputFrame] = []
     prev_ns = time.perf_counter_ns()

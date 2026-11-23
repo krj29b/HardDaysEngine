@@ -3038,7 +3038,9 @@ sheet or turn change):
 4. Run the move step (§11.5) with whatever the `move` word still holds.
 5. Draw the current knight and run the map jobs (the dragon), flip.
 6. Start the map colours if they are not running: fade to the map palette, one colour ramp and
-   one colour cycle (§11.15). Then, if the dragon is not active, try to spawn it (§11.10).
+   one colour cycle (§11.15). Then, if the dragon is not active, try to spawn it (§11.10). The
+   entry palette fade blocks before human map input is polled, so keys, movement and fire are
+   ignored while the map fades in.
 
 Quirk kept: step 4 uses the stale move word, so a direction held when fire opened the menu
 moves the knight one more pixel on re-entry.
@@ -5627,6 +5629,13 @@ Practice uses two knights and retains the configured campaign player count. Eith
 Practice outcome finishes the fight's fade and opens the main menu with its palette and
 title music. The intro plays on the title scene.
 
+Similarly, on any transition into the overworld (or when the active knight changes on the
+overworld), the host records whether the active knight's fire or confirm button is already
+held and masks map `FIRE` until that button is released. This prevents a gamepad fire press
+held across game start or screen return from immediately entering the knight's home village
+or another overlapping map node. The latch state is hashed in session checkpoints and stored
+in `CampaignCheckpoint.map_fire_latch`.
+
 ### 13.10 Live display preview
 
 F10 opens a game-window panel over the current scene. Up and Down select a row,
@@ -5871,3 +5880,28 @@ every discrete transition intact and preserving causal ordering:
 `--version`, `--output` / `-o <path>`, `--no-window`, `--duration <seconds>`,
 `--max-records <N>` (default `10000`), `--coalesce-ms <ms>` (default `50`),
 `--axis-epsilon <float>` (default `0.02`), `--raw`.
+
+### 13.13 Host control modes (not original; Phase 17, T17.1, ADR-066)
+
+The host input router supports two active control modes configured via `[input] mode`
+in `config.toml` or `--control-mode` on `harddaysengine` (CLI overrides config; default `auto`):
+
+- **`auto` (default):** resolved dynamically from the number of currently connected gamepads.
+  Selects `shared-pad` whenever exactly one gamepad is connected, and `standard` when zero or
+  two or more gamepads are connected, updating live as gamepads are plugged in or removed.
+- **`standard` (Mode A):** static per-slot mapping of keyboards (`DEFAULT_KEY_BINDINGS`) and
+  open gamepads (`0..3`) onto player slots `0..3` (§13.8).
+- **`shared-pad` (Mode B):** pass-the-pad routing driven by the session's read-only
+  `ControlTargets(primary, duel_opponent)`:
+  - *Single-active-player scenes* (`duel_opponent is None`: title, menus, overworld, towns,
+    sheets, services, dice house, Stonehenge, Wizard, Village, Valley, Next Day, Game Over,
+    meeting protection/loot sheets, and single-human fights): the connected gamepad (first open
+    pad) merged with Player 1 keyboard backup (`DEFAULT_KEY_BINDINGS[KnightId.RED]`) drives
+    `primary`. Map shortcut keys (`1`–`9`, `E`, `Q`, `Space`) continue to work normally.
+  - *Two-human duels* (`COMBAT` with two human knights in `PVP_DUEL` or `Practice`): the
+    gamepad drives `primary` (the duel initiator `knight_ids[0]`) exclusively, and keyboard
+    `WASD + Space` (fire) drives `duel_opponent` (`knight_ids[1]`) exclusively with no cross-slot
+    bleed. Pressing `P` or gamepad Start forwards `pause` to slot 0 so `step_tick` can pause.
+
+All routing occurs before `InputFrame` emission; `sim/`, replay recordings, and state hashes
+are unchanged.

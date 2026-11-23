@@ -69,6 +69,8 @@ def test_host_eight_rounds_show_next_day_each_time_and_spawn_dragon_on_day_two(
     for round_index in range(8):
         visited = []
         for _ in range(4):
+            while session.palette_fx.is_fading:
+                _ticks(session, 1)
             visited.append(world.current_knight_id)
             session.step_tick(InputFrame(key=ord("E")))
             session.step_tick(InputFrame(key=ord("E")))

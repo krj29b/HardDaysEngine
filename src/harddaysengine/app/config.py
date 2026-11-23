@@ -14,6 +14,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from harddaysengine.app.input import ControlMode
 from harddaysengine.render.presentation import (
     DEFAULT_SURROUND_COLOR_HEX,
     MAX_CRT_CURVATURE,
@@ -45,6 +46,8 @@ ADF_IMAGE_SIZE = 901_120
 
 ENV_ADF_DIR = "HARDDAYSENGINE_ADF_DIR"
 DISPLAY_TABLE = "display"
+INPUT_TABLE = "input"
+_INPUT_KEYS = frozenset({"mode"})
 _DISPLAY_KEYS = frozenset(
     {
         "scale",
@@ -183,6 +186,24 @@ def resolve_save_path(config_path: Path) -> Path | None:
         raise ConfigError(f"{config_path}: gameplay must be a table")
     enabled = _bool_setting(gameplay.get("save_load", False), "save_load", str(config_path))
     return config_path.with_name("campaign-save.json") if enabled else None
+
+
+def resolve_control_mode(
+    config_path: Path,
+    *,
+    cli_mode: str | None = None,
+) -> ControlMode:
+    """Resolve ``[input] mode``: CLI flag, then ``config.toml``, then ``auto`` (§13.13)."""
+    table = load_config_file(config_path).get(INPUT_TABLE, {})
+    if not isinstance(table, dict):
+        raise ConfigError(f"{config_path}: [{INPUT_TABLE}] must be a table")
+    unknown = sorted(set(table) - _INPUT_KEYS)
+    if unknown:
+        raise ConfigError(f"{config_path}: unknown [{INPUT_TABLE}] key(s): {', '.join(unknown)}")
+    file_source = f"{config_path}: [{INPUT_TABLE}]"
+    return _resolve_enum(
+        cli_mode, table, ControlMode, "mode", "--control-mode", ControlMode.AUTO, file_source
+    )
 
 
 def _float_setting(

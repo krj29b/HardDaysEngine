@@ -7,11 +7,12 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import numpy as np
+import pygame
 import pytest
 
 from harddaysengine.app.audit import AuditRig
 from harddaysengine.app.game import GameScene, GameSession
-from harddaysengine.app.input import InputFrame, PlayerInput
+from harddaysengine.app.input import InputFrame, InputRouter, PlayerInput
 from harddaysengine.app.village_audit import village_exit, village_temple
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.hunk import parse_hunk_executable
@@ -157,3 +158,49 @@ def test_rendering_map_temple_and_black_wait_tail_is_pure(adf_dir: Path) -> None
         assert len(np.unique(first.rgb.reshape(-1, 3), axis=0)) > 3
     finally:
         rig.release()
+
+
+@pytest.mark.parametrize("via_pick", [False, True])
+def test_held_gamepad_fire_from_knight_select_does_not_enter_home_village(
+    adf_dir: Path, via_pick: bool
+) -> None:
+    """Holding gamepad fire while starting a game must not enter the home village (§11.4, §13.9)."""
+    disks = DiskSet.from_directory(adf_dir)
+    session = GameSession(disk_set=disks, start_scene=GameScene.KNIGHT_SELECT)
+    if via_pick:
+        session.knight_pick_active = True
+        session.knight_pick_slot = 0  # SIR GODBER -> KnightId.BLUE
+    router = InputRouter(init_joysticks=False)
+    fire_down = pygame.event.Event(pygame.JOYBUTTONDOWN, joy=0, button=0)
+    fire_up = pygame.event.Event(pygame.JOYBUTTONUP, joy=0, button=0)
+
+    router.process_pygame_event(fire_down)
+    session.step_tick(router.sample_frame())
+    assert session.scene == GameScene.OVERWORLD
+    expected_knight = KnightId.BLUE if via_pick else KnightId.RED
+    assert session.overworld.current_knight_id == expected_knight
+
+    # Save/restore while the map fire latch is active must keep identical state and behavior.
+    checkpoint = session.campaign_checkpoint()
+    assert checkpoint.map_fire_latch is True
+    restored = GameSession.from_campaign_checkpoint(checkpoint, disks)
+    assert restored.state_hash() == session.state_hash()
+
+    for _ in range(60):
+        frame = router.sample_frame()
+        session.step_tick(frame)
+        restored.step_tick(frame)
+        assert restored.state_hash() == session.state_hash()
+    assert not session.palette_fx.is_fading
+    assert session.scene == GameScene.OVERWORLD
+    assert session.village_visit is None and session.sheet_screen is None
+    assert session.overworld.spent == 0
+
+    router.process_pygame_event(fire_up)
+    session.step_tick(router.sample_frame())
+    router.process_pygame_event(fire_down)
+    for _ in range(8):
+        session.step_tick(router.sample_frame())
+        if session.scene != GameScene.OVERWORLD:
+            break
+    assert session.scene == GameScene.VILLAGE and session.village_visit is not None

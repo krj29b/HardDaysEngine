@@ -142,6 +142,7 @@ class CampaignAudit:
             if self.session.scene == GameScene.NEW_DAY:
                 self.until(lambda: self.session.overworld.turns.wait_stage == 1)
                 return
+            self.settle()
             self.tick(InputFrame(key=ord("E")))
             self.tick()
         if self.session.scene != GameScene.NEW_DAY:
