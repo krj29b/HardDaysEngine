@@ -1377,10 +1377,10 @@ FreeType (FTL), IJG, and LGPL-2.1 source/relinking notices were missing, and
    FTL, IJG, and LGPL-2.1 (§4/§6 `--onedir` shared-library replacement and exact source URLs)
    notices at the top of `THIRD_PARTY_LICENSES.txt`, plus full copyright and license texts for
    every bundled native DLL not already covered verbatim above (`SDL2`, `SDL2_image`,
-   `SDL2_mixer`, `SDL2_ttf`, `libogg`, `libopus`, `opusfile`, `libwavpack`, `libxmp`,
-   `portmidi`, `libffi`), and verified references for DLLs whose verbatim licenses appear in
-   `pillow`, `numpy`, or CPython (`freetype`, `libjpeg`, `libpng`, `libtiff`, `libwebp`,
-   `libscipy_openblas`, `OpenSSL`).
+   `SDL2_mixer`, `SDL2_ttf`, `libjpeg / libjpeg-turbo`, `libogg`, `libopus`, `opusfile`,
+   `libwavpack`, `libxmp`, `portmidi`, `libffi`), and verified references for DLLs whose verbatim
+   licenses appear in `pillow`, `numpy`, or CPython across platforms (`freetype`, `libpng`,
+   `libtiff`, `libwebp`, `libscipy_openblas`, `OpenSSL`).
 4. Enforce hard assertions in `verify_archive_contents()`: presence and match of `LICENSE.txt`,
    `NOTICE.txt`, and `THIRD_PARTY_LICENSES.txt`; mandatory FTL, IJG, and LGPL-2.1 notices;
    substantive license text in every section (rejecting empty, fallback, or pointer-only stubs);

@@ -313,6 +313,40 @@ _LIBFFI_LICENSE = (
     f"{_MIT_LICENSE_BODY}"
 )
 
+_LIBJPEG_TURBO_LICENSE = """\
+The Modified (3-clause) BSD License (libjpeg-turbo)
+
+Copyright (C) 2009-2026 D. R. Commander
+Copyright (C) 2018-2023 Randy <randy408@protonmail.com>
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+- Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+- Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+- Neither the name of the libjpeg-turbo Project nor the names of its
+  contributors may be used to endorse or promote products derived from this
+  software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS",
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+Note: The full Independent JPEG Group (IJG) License also appears in the pillow
+package section above, and the mandatory IJG acknowledgment appears at the top
+of this notice."""
+
 _PSF_FALLBACK_LICENSE = """\
 PYTHON SOFTWARE FOUNDATION LICENSE VERSION 2
 --------------------------------------------
@@ -427,11 +461,7 @@ _NATIVE_DLL_SPECS: tuple[NativeDllSpec, ...] = (
             "Copyright (C) 1991-2026 Thomas G. Lane, Guido Vollbeding, "
             "D. R. Commander, and contributors"
         ),
-        upstream_reference=(
-            "Included verbatim in the pillow package section above "
-            "(IJG License and Modified 3-clause BSD License)."
-        ),
-        upstream_markers=("independent jpeg group", "the modified (3-clause) bsd license"),
+        license_text=_LIBJPEG_TURBO_LICENSE,
     ),
     NativeDllSpec(
         pattern=re.compile(r"^libpng\d*(-\d+)?\.dll$"),

@@ -245,6 +245,7 @@ def test_build_third_party_licenses_full_native_and_mandatory_notices(tmp_path: 
         "Native Library: SDL2_image",
         "Native Library: SDL2_mixer",
         "Native Library: SDL2_ttf",
+        "Native Library: libjpeg / libjpeg-turbo",
         "Native Library: libogg",
         "Native Library: libopus",
         "Native Library: opusfile",
@@ -253,6 +254,7 @@ def test_build_third_party_licenses_full_native_and_mandatory_notices(tmp_path: 
         "Native Library: PortMidi",
     ):
         assert lib_marker in text
+    assert "The Modified (3-clause) BSD License (libjpeg-turbo)" in text
     assert "David Bryant" in text
     assert "Claudio Matsuoka" in text
     assert "Roger B. Dannenberg" in text
