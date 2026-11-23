@@ -1451,3 +1451,31 @@ play with working knight class colors, fades, and animated map water, while arti
 incremental remaster workflow with hitbox-verified QA tools. GPU VRAM usage stays bounded via a
 lazy LRU texture cache released cleanly on pack toggle or shutdown. No new runtime dependencies
 are required (`Pillow`, `numpy`, `moderngl` are already in the stack).
+
+## ADR-072: Parallelize the quality gate with concurrent static checks, `pytest-xdist`, and `sysmon` coverage
+
+**Status:** ACCEPTED (2026-11-23, T1.8; extends ADR-064)
+
+**Context:** With 1,958 deterministic tests (including long real-disk ADF campaign, audio, and AI
+traces) running sequentially on one CPU core under default Python trace coverage,
+`scripts/quality_gate.py` took 451–511 seconds (~7.5–8.5 minutes) per run locally. All six static
+checks together took under 10 seconds, while single-threaded `pytest` accounted for ~98% of wall
+time.
+
+**Decision:**
+1. Add `pytest-xdist` (pure Python, MIT) to `[dependency-groups].dev` in `pyproject.toml` and
+   `uv.lock`. Because `publish.yml`'s Windows bundle builds install with `--no-dev`, `pytest-xdist`
+   never enters runtime distributions or Windows license audits (ADR-070).
+2. Configure `[tool.coverage.run]` with `core = "sysmon"` in `pyproject.toml` to use Python 3.12's
+   low-overhead PEP 669 monitoring engine while keeping identical statement-coverage reporting.
+3. Update `scripts/quality_gate.py` to execute the six static gates (`ruff format`, `ruff check`,
+   `pyrefly`, `lint-imports`, `radon`, `vulture`) concurrently via `ThreadPoolExecutor` with
+   buffered per-gate output (halting before `pytest` if any static gate fails), then execute
+   `uv run pytest -n auto --dist worksteal -m "not gl"` so heavy ADF modules rebalance across
+   idle workers.
+
+**Consequences:** Measured locally on Windows (4 workers, real disks present): total
+`scripts/quality_gate.py` wall time dropped from 451–511 s to 90.8 s (pytest 83.8 s, ~5.5×
+speedup), with identical test counts (`1958 passed`) and coverage (`87%`). CI workflows
+(`ci.yml`, `publish.yml`) run `uv sync --frozen` followed by `uv run python scripts/quality_gate.py`
+and require no YAML changes; no gate rule or check is weakened.

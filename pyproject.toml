@@ -62,6 +62,7 @@ dev = [
     "radon>=6.0.1",
     "vulture>=2.13",
     "pip-audit>=2.7.3",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -158,6 +159,9 @@ markers = [
     "adf: Tests requiring original Amiga .adf disk images in ./disks/",
     "gl: Tests requiring an active OpenGL 3.3 context",
 ]
+
+[tool.coverage.run]
+core = "sysmon"
 
 # ============================================================================
 # VULTURE: Dead-Code Detection

@@ -67,6 +67,12 @@ Status lives in `PROGRESS.md`. Every task ends with a green `scripts/quality_gat
 - **T1.7 Pyrefly quality gate:** Replace mypy in the shared gate.
   *Accept:* The locked development environment runs Pyrefly on all of `src` in the full gate
   used by local development, CI and release validation.
+- **T1.8 Parallel quality gate:** Run the six static gates concurrently in `scripts/quality_gate.py`,
+  add `pytest-xdist` (`-n auto --dist worksteal`) to dev dependencies, and enable `core = "sysmon"`
+  for Python 3.12 coverage (ADR-072).
+  *Accept:* Full `scripts/quality_gate.py` (with real disks) and disk-free CI-style pytest
+  (`-m "not adf and not gl"`) pass with identical test counts and coverage, zero weakened rules,
+  and measured before/after timing recorded in `docs/PROGRESS.md`.
 
 ### Phase 2: Format and behaviour specification (`docs/ARCHITECTURE.md`)
 - **T2.1 Disks:** OFS layout, the per-disk file catalogue, marker files, duplicate resolution (`kn1.ob`).
