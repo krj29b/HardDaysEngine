@@ -15,7 +15,7 @@ mode = "auto"               # auto, standard, shared-pad
 # Optional display settings (CLI flags override these; unknown keys are an error).
 # [display]
 # scale = 3                   # 1..8
-# filter = "faithful"         # faithful, scanlines, crt, smooth
+# filter = "faithful"         # faithful, scanlines, crt, smooth, scalefx
 # scale_mode = "integer"      # integer, sharp-bilinear, fit
 # aspect = "square"           # square, pal
 # crop = "full"               # full, playfield
