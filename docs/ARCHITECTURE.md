@@ -1946,9 +1946,9 @@ past the margin keeps flying).
 
 **Hop.** `hop` sets the hop counter to `$FFFF`. `hop_step`, called by the owner's script each
 frame of a throw: the counter goes up by 1; the owner's `input` becomes 0 and its `facing` the hop
-facing. With hop facing 1, bit 1 (left) is set, the arena clip runs, and if bit 1 survived the
-owner's job `x` drops by the word at `counter * 2` of the hop table; with any other hop facing,
-bit 0 and `x` rises by that word. The hop table lies in the script hunk.
+facing. With hop facing 1, bit 0 (right) is set, the arena clip runs, and if bit 0 survived the
+owner's job `x` rises by the word at `counter * 2` of the hop table; with any other hop facing,
+bit 1 (left) is set and `x` drops by that word. The hop table lies in the script hunk.
 
 **Read from `mog`** (`assets/fighter_rules.py`, version `$FA43E5B2`): the step tables and action
 tables through their relocated `LEA`s; the clip, probe and obstacle numbers, every amount, the

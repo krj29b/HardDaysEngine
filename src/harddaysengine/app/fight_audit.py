@@ -126,7 +126,7 @@ def _dragon_input(audit: FightAudit) -> int:
     return FIRE | table.index(0x18)
 
 
-def _guardian_input(audit: FightAudit) -> int:
+def _guardian_input(audit: FightAudit, *, reach: int = 100) -> int:
     """Audit bot aligns, faces and uses the heavy sword move against the Guardian."""
     f = audit.scene.fight
     knight, target = f.actor(audit.first), f.actor(audit.opponent)
@@ -136,7 +136,7 @@ def _guardian_input(audit: FightAudit) -> int:
     if (knight.facing == 1) != (dx > 0):
         return RIGHT if dx > 0 else LEFT
     table = audit.rules.actions_right if knight.facing == 1 else audit.rules.actions_left
-    if abs(dx) > 100:
+    if abs(dx) > reach:
         return RIGHT if dx > 0 else LEFT
     return FIRE | table.index(0x20)
 
@@ -617,7 +617,8 @@ def _host_input(session: GameSession, *, melee: bool) -> InputFrame:
             targets, key=lambda handle: abs(s16(runtime.fight.actor(handle).x) - s16(first.x))
         )
         audit = FightAudit(runtime.scene, loader.knight_rules, target, runtime.first)
-        word = _guardian_input(audit) if melee else audit.input_word()
+        reach = 75 if runtime.fight.actor(target).type == GUARDIAN_TYPE else 100
+        word = _guardian_input(audit, reach=reach) if melee else audit.input_word()
     inp = PlayerInput(
         dx=int(bool(word & RIGHT)) - int(bool(word & LEFT)),
         dy=int(bool(word & DOWN)) - int(bool(word & UP)),

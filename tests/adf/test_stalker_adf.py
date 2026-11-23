@@ -121,3 +121,32 @@ def test_unknown_executable_is_rejected(bundle: GameAssetBundle) -> None:
     changed = replace(section, data=b"\x00\x00" + section.data[2:])
     with pytest.raises(MogVersionError):
         parse_stalker_rules(replace(executable, sections=(changed, *executable.sections[1:])), ())
+
+
+@pytest.mark.parametrize(("troll_x", "expected_sign"), [(110, 1), (210, -1)])
+def test_troll_strike_knocks_knight_away_from_troll(
+    bundle: GameAssetBundle, troll_x: int, expected_sign: int
+) -> None:
+    """A Troll strike facing right knocks the knight right; facing left knocks left (§10.19)."""
+    audit = build_stalker_audit(bundle)
+    f = audit.scene.fight
+    knight, troll = f.actor(1), f.actor(audit.opponent)
+    knight_job, troll_job = f.find_job(1), f.find_job(audit.opponent)
+    assert knight_job is not None and troll_job is not None
+    knight.hp = knight.hp_max = 60
+    knight.x = knight_job.x = 160
+    knight.y = knight_job.depth = 120
+    troll.x = troll_job.x = troll_x
+    troll.y = troll_job.depth = 120
+    troll.facing = troll_job.facing = 1 if expected_sign > 0 else 3
+    troll_job.running = False
+    start_x = s16(knight.x)
+    for frame in range(60):
+        audit.scene.advance(frame * 6)
+        if s16(knight.hp) < 60:
+            break
+    assert s16(knight.hp) < 60
+    for frame in range(60, 80):
+        audit.scene.advance(frame * 6)
+    delta = s16(knight.x) - start_x
+    assert delta * expected_sign > 0

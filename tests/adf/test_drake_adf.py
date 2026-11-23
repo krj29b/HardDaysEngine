@@ -123,3 +123,37 @@ def test_unidentified_executable_is_rejected(bundle: GameAssetBundle) -> None:
             loader.caster_rules.flight,
             loader.stalker_rules.spark,
         )
+
+
+@pytest.mark.parametrize(("balok_x", "expected_sign"), [(85, 1), (235, -1)])
+def test_balok_strike_knocks_knight_away_from_balok(
+    bundle: GameAssetBundle, balok_x: int, expected_sign: int
+) -> None:
+    """A Balok strike facing right knocks the knight right; facing left knocks left (§10.19)."""
+    audit = build_drake_audit(bundle)
+    f = audit.scene.fight
+    for frame in range(15):
+        audit.scene.advance(frame * 6)
+    knight, balok = f.actor(1), f.actor(audit.opponent)
+    knight_job, balok_job = f.find_job(1), f.find_job(audit.opponent)
+    assert knight_job is not None and balok_job is not None
+    knight.hp = knight.hp_max = 60
+    knight.x = knight_job.x = 160
+    knight.y = knight_job.depth = 120
+    knight.facing = knight_job.facing = 3 if expected_sign > 0 else 1
+    balok.x = balok_job.x = balok_x
+    balok.y = balok_job.depth = 120
+    balok.facing = balok_job.facing = 1 if expected_sign > 0 else 3
+    f.drake.flags = 0
+    balok_job.running = False
+    hit_x: int | None = None
+    for frame in range(15, 40):
+        audit.scene.advance(frame * 6)
+        if s16(knight.hp) < 60:
+            hit_x = s16(knight.x)
+            break
+    assert hit_x is not None and balok.action == 8
+    for frame in range(40, 60):
+        audit.scene.advance(frame * 6)
+    delta = s16(knight.x) - hit_x
+    assert delta * expected_sign > 0

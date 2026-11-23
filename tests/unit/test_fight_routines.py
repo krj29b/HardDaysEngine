@@ -76,7 +76,7 @@ def test_a_dagger_that_hit_is_gone() -> None:
     assert _dagger(100, 1, hit=1) is END
 
 
-def test_hop_steps_move_the_job_against_the_hop_facing() -> None:
+def test_hop_steps_move_the_job_in_the_hop_facing() -> None:
     fight, _ = make_fight()
     job = fight.start_job(10, 1, 1, (100, 0, 100), 3, 0x0C)
     assert job is not None
@@ -86,20 +86,22 @@ def test_hop_steps_move_the_job_against_the_hop_facing() -> None:
     hop_step(RULES, fight, _call("hop_step"))
     hop_step(RULES, fight, _call("hop_step"))
     assert fight.hop_counter == 1
-    assert job.x == 100 - HOP_WORDS[0] - HOP_WORDS[1]
+    assert job.x == 100 + HOP_WORDS[0] + HOP_WORDS[1]
     knight = fight.actor(1)
-    assert (knight.facing, knight.input) == (1, 0x02)
+    assert (knight.facing, knight.input) == (1, 0x01)
     fight.hop_facing = 3
     hop_step(RULES, fight, _call("hop_step"))
-    assert job.x == 100 - HOP_WORDS[0] - HOP_WORDS[1] + HOP_WORDS[2]
+    assert job.x == 100 + HOP_WORDS[0] + HOP_WORDS[1] - HOP_WORDS[2]
+    assert (knight.facing, knight.input) == (3, 0x02)
 
 
-def test_the_arena_clip_stops_a_hop() -> None:
+@pytest.mark.parametrize(("hop_facing", "edge_x"), [(1, 320), (3, 0xFFEC)])
+def test_the_arena_clip_stops_a_hop(hop_facing: int, edge_x: int) -> None:
     fight, _ = make_fight()
-    job = fight.start_job(10, 1, 1, (100, 0, 100), 1, 0x0C)
+    job = fight.start_job(10, 1, 1, (100, 0, 100), hop_facing, 0x0C)
     assert job is not None
-    fight.actor(1).x = 0xFFEC
-    fight.hop_facing, fight.hop_table, fight.hop_counter = 1, RULES.hop_table, 0xFFFF
+    fight.actor(1).x = edge_x
+    fight.hop_facing, fight.hop_table, fight.hop_counter = hop_facing, RULES.hop_table, 0xFFFF
     hop_step(RULES, fight, _call("hop_step"))
     assert (job.x, fight.actor(1).input) == (100, 0)
 

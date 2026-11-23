@@ -59,7 +59,7 @@ def hop_step(rules: KnightRules, fight: Fight, call: RoutineCall) -> None:
     owner = fight.actor(call.owner)
     owner.input = 0
     owner.facing = fight.hop_facing
-    bit = LEFT if fight.hop_facing == _FACING_RIGHT else RIGHT
+    bit = RIGHT if fight.hop_facing == _FACING_RIGHT else LEFT
     owner.input |= bit
     arena_clip(owner, rules.clip)
     if not owner.input & bit:
