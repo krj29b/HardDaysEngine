@@ -38,6 +38,7 @@ class FilterPreset(StrEnum):
     SCANLINES = "scanlines"
     CRT = "crt"
     SMOOTH = "smooth"
+    SCALEFX = "scalefx"
 
 
 class CrtMaskMode(StrEnum):

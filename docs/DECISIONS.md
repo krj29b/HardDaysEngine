@@ -1309,3 +1309,41 @@ CPython runtime, Python dependencies, PyInstaller bootloader, and native DLLs.
 **Consequences:** No GPL-2.0 runtime dependency remains in the package metadata or lockfile.
 Windows portable releases ship complete legal notices and fail archive verification if any
 required notice or runtime dependency license entry is missing.
+
+## ADR-069: Multi-pass clean-room ScaleFX post-process preset (Phase 18)
+
+**Status:** ACCEPTED (2026-11-23; user kicked off Phase 18 scoped to Phase A of `docs/GRAPHIC_UPDATE_PROPOSAL.md`; extends ADR-053)
+
+**Context:** `FilterPreset.SMOOTH` (T13.7, §13.4.2) runs a single-pass 5×5 cross-stencil 4×
+xBR-style scaler. Single-pass local edge detection cannot resolve longer shallow slopes (e.g.
+3:1 / 4:1 sword blades, arches, dragon wings) or multi-edge T-junction ambiguities as cleanly
+as a multi-pass edge-resolving scaler, and `PostProcessChain` (`render/postfx.py`) currently
+exposes only the immediately preceding pass texture (`u_input_tex`) to each stage. Meanwhile,
+external HD asset packs and a true-colour GPU compositor (Phases B–D of
+`docs/GRAPHIC_UPDATE_PROPOSAL.md`) require palette-recolouring and stamping redesigns that
+belong in a separate future phase.
+
+**Decision:**
+1. Scope Phase 18 strictly to Phase A (post-palette-lookup GPU upscaling shaders), keeping
+   all ADR-053 invariants: `faithful` remains the default, `sim/` and `assets/` are untouched,
+   and replay hashes remain identical across all presets.
+2. Extend `PostProcessChain._run_stage` (`render/postfx.py`) to optionally bind the cropped
+   original RGB canvas texture (`u_orig_tex` at texture unit 1, plus `u_orig_origin`,
+   `u_orig_size`, and `u_orig_tex_size`) when a shader declares those uniforms, leaving
+   existing presets (`faithful`, `scanlines`, `crt`, `smooth`) byte-identical.
+3. Implement a clean-room GLSL 330 core multi-pass ScaleFX 3× edge-resolving preset
+   (`FilterPreset.SCALEFX = "scalefx"`, shaders under `src/harddaysengine/render/shaders/`)
+   directly from the published ScaleFX mathematical specification documented in
+   `docs/ARCHITECTURE.md` §13.4.3 — never ported or copied from GPL shader code (ADR-001,
+   ADR-053).
+4. Wire `scalefx` automatically through `FilterPreset` (`[display] filter`, `--filter`, `F9`
+   preset cycling, `F10` live display preview, and `scripts/audit_shots.py --present`), with
+   a target 1080p GPU budget of `<= 2 ms` and zero leaked textures across preset switches.
+5. Defer external HD asset packs, GPU RGBA compositing, HD typography, and widescreen backdrop
+   extensions (Phases B–D of `docs/GRAPHIC_UPDATE_PROPOSAL.md`) to a separate future ADR.
+
+**Consequences:** Players gain a higher-grade multi-pass pixel-art upscaler across every
+scene with zero art dependencies and full Amiga palette-effect fidelity (fades, cycling,
+pulses, class/region swaps). `PostProcessChain` gains clean original-source pass access for
+future multi-pass filters. No new Python dependencies, no new `[display]` keys, and no
+simulation changes are introduced.

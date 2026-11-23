@@ -562,6 +562,52 @@ format, or state hashes (ADR-066).
   either player initiating (zero cross-input bleed), Practice, pause forwarding, and
   deterministic replay compatibility; full quality gate passes.
 
+### Phase 18: Multi-pass ScaleFX upscaling preset
+
+Extend the §13.4 post-process chain with a clean-room multi-pass ScaleFX 3× pixel-art
+upscaler (Phase A of `docs/GRAPHIC_UPDATE_PROPOSAL.md`, ADR-069). Stays strictly after the
+palette lookup in `render/`, preserves `faithful` as the default, and introduces zero changes
+to `sim/`, `assets/`, or replay hashes.
+
+- **T18.1 ScaleFX specification (§13.4.3) and `PostProcessChain` original-source binding
+  (`docs/ARCHITECTURE.md`, `render/postfx.py`):** document the clean-room multi-pass ScaleFX
+  metric, corner-classification, junction-resolution, and 3× interpolation rules in
+  `docs/ARCHITECTURE.md` §13.4.3 (and update §13.4 / §13.7). Extend
+  `PostProcessChain._run_stage` in `render/postfx.py` to optionally bind the original RGB
+  canvas texture (`u_orig_tex` at unit 1, plus `u_orig_origin`, `u_orig_size`,
+  `u_orig_tex_size`) alongside `u_input_tex` (unit 0) whenever a stage shader declares those
+  uniforms, without changing existing passes or leaking GPU resources.
+  *Accept:* unit tests (`tests/unit/test_postfx.py`) and GL tests
+  (`tests/gl/test_postfx_gl.py`) prove a multi-pass custom chain can read both the prior
+  stage and the cropped original canvas with zero border bleed in `playfield` crop, zero
+  leaked textures across switches, and byte-identical output for all existing presets; full
+  quality gate passes.
+
+- **T18.2 Clean-room ScaleFX shaders and `FilterPreset.SCALEFX` wiring
+  (`render/shaders/scalefx_*.frag`, `render/presentation.py`, `render/postfx.py`):**
+  implement the GLSL 330 core ScaleFX multi-pass shaders cleanly from §13.4.3 (strictly
+  crop-clamped `texelFetch`, perceptual colour metric, corner/junction resolution, 3× final
+  interpolation pass reading `u_orig_tex`). Add `FilterPreset.SCALEFX = "scalefx"` in
+  `render/presentation.py` and register its ordered `PostPassSpec` chain in
+  `render/postfx.py`, automatically exposing it to `[display] filter`, `--filter`, `F9`
+  cycling, `F10` live preview, and `scripts/audit_shots.py --present`.
+  *Accept:* unit tests (`tests/unit/test_display_settings.py`, `tests/unit/test_postfx.py`)
+  cover config/CLI parsing, `preset_passes(FilterPreset.SCALEFX)`, and `F9` / `F10` preset
+  cycling; all shaders compile cleanly under OpenGL 3.3 core; full quality gate passes.
+
+- **T18.3 ScaleFX GL verification, GPU timing, real-disk audit review, and README
+  (`tests/gl/test_scalefx_gl.py`, `tests/gl/test_presentation_replay_gl.py`, `README.md`):**
+  add standalone GL 3.3 tests verifying flat-colour preservation, diagonal/shallow-slope
+  smoothness, 90° solid box-corner preservation, crop isolation, palette-cycling stability on
+  real-disk map forests, zero leaked textures across 100 preset switches, and byte-identical
+  replay hashes across all presets (including `scalefx`). Measure 1080p GPU frame time
+  (target `<= 2 ms`), generate and visually review real-disk `scripts/audit_shots.py --present
+  scalefx --size 1920x1080` contact sheets vs. `faithful` and `smooth` (fight, map, town,
+  text/sheets), and document `scalefx` in `README.md`.
+  *Accept:* full quality gate passes, full GL suite (`uv run pytest -m gl`) passes, 1080p GPU
+  timing is recorded in `docs/PROGRESS.md`, and reviewed contact sheets remain under ignored
+  `build/`.
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:

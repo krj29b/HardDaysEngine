@@ -103,8 +103,8 @@ def test_cli_values_beat_the_file(tmp_path: Path) -> None:
         ("[display]\nscale = true\n", "integer"),
         ("[display]\nscale = 0\n", "1..8"),
         ("[display]\nscale = 9\n", "1..8"),
-        ('[display]\nfilter = "vhs"\n', "faithful, scanlines, crt, smooth"),
-        ("[display]\nfilter = 1\n", "faithful, scanlines, crt, smooth"),
+        ('[display]\nfilter = "vhs"\n', "faithful, scanlines, crt, smooth, scalefx"),
+        ("[display]\nfilter = 1\n", "faithful, scanlines, crt, smooth, scalefx"),
         ('[display]\nscale_mode = "nearest"\n', "integer, sharp-bilinear, fit"),
         ("[display]\nscale_mode = 2\n", "integer, sharp-bilinear, fit"),
         ('[display]\naspect = "4:3"\n', "square, pal"),
@@ -162,6 +162,18 @@ def test_smooth_filter_resolves_from_file_and_cli(tmp_path: Path) -> None:
     assert not resolve_display_settings(cfg).scanlines
     cli_settings = resolve_display_settings(tmp_path / "missing.toml", filter_name="smooth")
     assert cli_settings.filter is FilterPreset.SMOOTH
+
+
+def test_scalefx_filter_resolves_from_file_and_cli(tmp_path: Path) -> None:
+    cfg = _config(tmp_path, '[display]\nfilter = "scalefx"\n')
+    assert resolve_display_settings(cfg).filter is FilterPreset.SCALEFX
+    assert not resolve_display_settings(cfg).scanlines
+    cli_settings = resolve_display_settings(tmp_path / "missing.toml", filter_name="scalefx")
+    assert cli_settings.filter is FilterPreset.SCALEFX
+    assert cli_main.build_parser().parse_args(["--filter", "scalefx"]).filter == "scalefx"
+    assert (
+        inspect_cli.build_inspect_parser().parse_args(["--filter", "scalefx"]).filter == "scalefx"
+    )
 
 
 def test_crt_settings_dataclass_validates_bounds() -> None:

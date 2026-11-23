@@ -148,11 +148,51 @@ SMOOTH_PASS = PostPassSpec(
     sampling=PassSampling.NEAREST,
 )
 
+SCALEFX_METRIC_PASS = PostPassSpec(
+    name="scalefx_metric",
+    fragment_shader=load_shader("scalefx_metric.frag"),
+    scale_x=1,
+    scale_y=1,
+    sampling=PassSampling.NEAREST,
+)
+
+SCALEFX_STRENGTH_PASS = PostPassSpec(
+    name="scalefx_strength",
+    fragment_shader=load_shader("scalefx_strength.frag"),
+    scale_x=1,
+    scale_y=1,
+    sampling=PassSampling.NEAREST,
+)
+
+SCALEFX_RESOLVE_PASS = PostPassSpec(
+    name="scalefx_resolve",
+    fragment_shader=load_shader("scalefx_resolve.frag"),
+    scale_x=1,
+    scale_y=1,
+    sampling=PassSampling.NEAREST,
+)
+
+SCALEFX_INTERP_PASS = PostPassSpec(
+    name="scalefx_interp",
+    fragment_shader=load_shader("scalefx_interp.frag"),
+    scale_x=3,
+    scale_y=3,
+    sampling=PassSampling.NEAREST,
+)
+
+SCALEFX_PASSES: tuple[PostPassSpec, ...] = (
+    SCALEFX_METRIC_PASS,
+    SCALEFX_STRENGTH_PASS,
+    SCALEFX_RESOLVE_PASS,
+    SCALEFX_INTERP_PASS,
+)
+
 _PRESET_PASSES: dict[FilterPreset, tuple[PostPassSpec, ...]] = {
     FilterPreset.FAITHFUL: (),
     FilterPreset.SCANLINES: (),
     FilterPreset.CRT: (CRT_BLOOM_H_PASS, CRT_BLOOM_V_PASS),
     FilterPreset.SMOOTH: (SMOOTH_PASS,),
+    FilterPreset.SCALEFX: SCALEFX_PASSES,
 }
 
 
@@ -167,6 +207,7 @@ def preset_passes(
     and applies output-grid scanlines in the final viewport presentation step (§13.3).
     ``crt`` runs two separable source-resolution bloom passes when ``crt_bloom_enabled`` is true.
     ``smooth`` runs a single 4x xBR-style edge-directed upscaling pass (§13.4.2).
+    ``scalefx`` runs a four-pass clean-room ScaleFX 3x edge-resolving chain (§13.4.3).
     """
     if preset is FilterPreset.CRT and not crt_bloom_enabled:
         return ()
@@ -179,6 +220,16 @@ def _set_optional_uniform(prog: moderngl.Program, name: str, value: UniformValue
     member = prog[name]
     if isinstance(member, moderngl.Uniform):
         member.value = value
+
+
+@dataclass(slots=True, frozen=True)
+class _TextureView:
+    """Texture and top-down crop rectangle handed to a post-process stage (§13.4)."""
+
+    texture: moderngl.Texture
+    origin: tuple[float, float]
+    size: tuple[float, float]
+    tex_size: tuple[float, float]
 
 
 @dataclass(slots=True)
@@ -289,48 +340,61 @@ class PostProcessChain:
         if self._active_input_size != input_size or len(self._stages) != len(self._active_passes):
             self._rebuild_stages(input_size)
 
-        cur_tex = canvas_tex
-        cur_origin = (float(source.x), float(source.y))
-        cur_size = (float(source.width), float(source.height))
-        cur_tex_size = (float(canvas_size[0]), float(canvas_size[1]))
+        orig_view = _TextureView(
+            texture=canvas_tex,
+            origin=(float(source.x), float(source.y)),
+            size=(float(source.width), float(source.height)),
+            tex_size=(float(canvas_size[0]), float(canvas_size[1])),
+        )
+        cur_view = orig_view
 
         for stage in self._stages:
-            self._run_stage(stage, cur_tex, cur_origin, cur_size, cur_tex_size)
+            self._run_stage(stage, cur_view, orig_view)
             out_w, out_h = stage.output_size
-            cur_tex = stage.texture
-            cur_origin = (0.0, 0.0)
-            cur_size = (float(out_w), float(out_h))
-            cur_tex_size = cur_size
+            out_dim = (float(out_w), float(out_h))
+            cur_view = _TextureView(
+                texture=stage.texture,
+                origin=(0.0, 0.0),
+                size=out_dim,
+                tex_size=out_dim,
+            )
 
         last_w, last_h = self._stages[-1].output_size
-        return (cur_tex, SourceRect(0, 0, last_w, last_h), (last_w, last_h))
+        return (cur_view.texture, SourceRect(0, 0, last_w, last_h), (last_w, last_h))
 
     def _run_stage(
         self,
         stage: _CompiledStage,
-        in_tex: moderngl.Texture,
-        in_origin: tuple[float, float],
-        in_size: tuple[float, float],
-        in_tex_size: tuple[float, float],
+        src: _TextureView,
+        orig: _TextureView,
     ) -> None:
+        """Execute one compiled pass, optionally binding ``u_orig_tex`` at unit 1 (§13.4, T18.1)."""
         out_w, out_h = stage.output_size
         gl_filter = (
             moderngl.LINEAR if stage.spec.sampling is PassSampling.LINEAR else moderngl.NEAREST
         )
-        in_tex.filter = (gl_filter, gl_filter)
+        src.texture.filter = (gl_filter, gl_filter)
 
         stage.fbo.use()
         self.ctx.viewport = (0, 0, out_w, out_h)
         prog = stage.program
         _set_optional_uniform(prog, "u_input_tex", 0)
-        _set_optional_uniform(prog, "u_in_origin", in_origin)
-        _set_optional_uniform(prog, "u_in_size", in_size)
-        _set_optional_uniform(prog, "u_in_tex_size", in_tex_size)
+        _set_optional_uniform(prog, "u_in_origin", src.origin)
+        _set_optional_uniform(prog, "u_in_size", src.size)
+        _set_optional_uniform(prog, "u_in_tex_size", src.tex_size)
         _set_optional_uniform(prog, "u_out_size", (float(out_w), float(out_h)))
+        if "u_orig_tex" in prog:
+            if orig.texture is not src.texture:
+                orig.texture.filter = (gl_filter, gl_filter)
+            _set_optional_uniform(prog, "u_orig_tex", 1)
+            _set_optional_uniform(prog, "u_orig_origin", orig.origin)
+            _set_optional_uniform(prog, "u_orig_size", orig.size)
+            _set_optional_uniform(prog, "u_orig_tex_size", orig.tex_size)
+            orig.texture.use(location=1)
         for u_name, u_val in stage.spec.uniforms:
             _set_optional_uniform(prog, u_name, u_val)
 
-        in_tex.use(location=0)
+        src.texture.use(location=0)
         stage.vao.render(moderngl.TRIANGLES)
 
     def _rebuild_stages(self, input_size: tuple[int, int]) -> None:

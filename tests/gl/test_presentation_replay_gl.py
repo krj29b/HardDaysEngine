@@ -116,6 +116,16 @@ def test_replay_hashes_identical_under_every_preset_and_size() -> None:
                     ),
                     (2560, 1080),
                 ),
+                (
+                    DisplaySettings(
+                        filter=FilterPreset.SCALEFX,
+                        scale_mode=ScaleMode.FIT,
+                        aspect=AspectMode.PAL,
+                        crop=CropMode.PLAYFIELD,
+                        surround=SurroundSettings(mode=SurroundMode.BLUR),
+                    ),
+                    (2560, 1080),
+                ),
             ]
         )
         for settings, win_size in variants:
@@ -194,7 +204,11 @@ def test_real_disk_campaign_replay_identical_under_every_preset(adf_dir: Path) -
 @pytest.mark.adf
 def test_audit_rig_present_renders_real_preset_at_target_size(adf_dir: Path) -> None:
     """AuditRig --present path renders non-flat presented frames at exact requested WxH."""
-    for preset, size in ((FilterPreset.CRT, (1920, 1080)), (FilterPreset.SMOOTH, (1366, 768))):
+    for preset, size in (
+        (FilterPreset.CRT, (1920, 1080)),
+        (FilterPreset.SMOOTH, (1366, 768)),
+        (FilterPreset.SCALEFX, (1920, 1080)),
+    ):
         rig = AuditRig(adf_dir, display=DisplaySettings(filter=preset), present_size=size)
         try:
             session = rig.new_session()

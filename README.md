@@ -126,7 +126,7 @@ uv run harddaysengine                       # launch the game (default 3x scale)
 Useful CLI flags:
 
 - `--scale <N>`: initial window size, 1..8 canvas pixels per pixel (default `3`)
-- `--filter faithful|scanlines|crt|smooth`: presentation preset (default `faithful`, crisp pixels without effects)
+- `--filter faithful|scanlines|crt|smooth|scalefx`: presentation preset (default `faithful`, crisp pixels without effects)
 - `--scale-mode integer|sharp-bilinear|fit`: viewport scaling mode (default `integer`)
 - `--aspect square|pal`: source pixel shape (default `square`; `pal` gives 4:3 on the full 320x256 frame)
 - `--crop full|playfield`: show the full 320x256 PAL canvas or crop to the 320x200 playfield (default `full`)
@@ -172,6 +172,7 @@ Presentation presets (`--filter` or `F9` / `Shift+F9` at runtime; all presets ru
 | `scanlines` | Crisp pixels with output-grid scanlines (no non-integer moiré banding) |
 | `crt` | Linear-light intensity-widening scanline beams, aperture/shadow phosphor mask, optional barrel curvature + rounded bezel, and separable bloom |
 | `smooth` | 4× xBR-style edge-directed upscaler preserving 90° corners and dithered textures across palette cycling |
+| `scalefx` | Multi-pass 3× ScaleFX edge-resolving upscaler handling 45°, 2:1, and 3:1 slopes while preserving 90° corners, thin 1px details, and dithered textures |
 
 - `--inspect-assets`: launch the 50 Hz ModernGL Lair Background, Sprite, and Hitbox Inspector (`--cel kn4 --background fol1.t`)
 - `--extract-assets`: unpack ADF assets into `--output-dir` (default `./build/assets`) with `manifest.json`
@@ -185,7 +186,7 @@ HardDaysEngine is a clean-room reimplementation of the 1991 Amiga game. It runs 
 
 - **Simulation (`src/harddaysengine/sim/`)**: deterministic 50 Hz integer/fixed-point kernel (persistent combat jobs and handlers, pixel map, turn scheduler, sheets and places, palette FX, PRNG). No floats, no wall clock, no `random`, no I/O.
 - **Assets (`src/harddaysengine/assets/`)**: reads original Amiga `.adf` disk images (OFS) at runtime, unpacks RNC1/LZSS streams, and decodes pictures, cels, `collide.hit` attack sets, `.t` arena layouts, `program`/`mog` hunk tables, and audio banks.
-- **Render (`src/harddaysengine/render/`)**: ModernGL (OpenGL 3.3 core) `320x256` virtual canvas, indexed palette textures, presentation presets (`faithful`, `scanlines`, `crt`, `smooth`) with optional widescreen surround, and debug hitbox overlay.
+- **Render (`src/harddaysengine/render/`)**: ModernGL (OpenGL 3.3 core) `320x256` virtual canvas, indexed palette textures, presentation presets (`faithful`, `scanlines`, `crt`, `smooth`, `scalefx`) with optional widescreen surround, and debug hitbox overlay.
 - **App & CLI (`src/harddaysengine/app/`, `src/harddaysengine/cli/`)**: `pygame-ce` window host, 50 Hz fixed-timestep loop, keyboard/gamepad input, audio mixer, and CLI entry points.
 
 ## Development & Verification

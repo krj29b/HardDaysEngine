@@ -15,6 +15,11 @@ from harddaysengine.render.postfx import (
     DEFAULT_POST_VERT,
     IDENTITY_PASS,
     IDENTITY_POST_FRAG,
+    SCALEFX_INTERP_PASS,
+    SCALEFX_METRIC_PASS,
+    SCALEFX_PASSES,
+    SCALEFX_RESOLVE_PASS,
+    SCALEFX_STRENGTH_PASS,
     SMOOTH_PASS,
     PassSampling,
     PostPassSpec,
@@ -22,6 +27,7 @@ from harddaysengine.render.postfx import (
     preset_passes,
 )
 from harddaysengine.render.presentation import (
+    CrtSettings,
     DisplaySettings,
     FilterPreset,
     FullscreenMode,
@@ -83,6 +89,39 @@ def test_preset_passes_for_built_in_presets() -> None:
     assert SMOOTH_PASS.scale_x == 4
     assert SMOOTH_PASS.scale_y == 4
     assert SMOOTH_PASS.sampling is PassSampling.NEAREST
+    assert preset_passes(FilterPreset.SCALEFX) == SCALEFX_PASSES
+    assert SCALEFX_PASSES == (
+        SCALEFX_METRIC_PASS,
+        SCALEFX_STRENGTH_PASS,
+        SCALEFX_RESOLVE_PASS,
+        SCALEFX_INTERP_PASS,
+    )
+    assert [(p.scale_x, p.scale_y, p.sampling) for p in SCALEFX_PASSES] == [
+        (1, 1, PassSampling.NEAREST),
+        (1, 1, PassSampling.NEAREST),
+        (1, 1, PassSampling.NEAREST),
+        (3, 3, PassSampling.NEAREST),
+    ]
+
+
+def test_multi_pass_spec_accepts_original_source_shader_chain() -> None:
+    mask_pass = PostPassSpec(
+        name="mask",
+        fragment_shader=IDENTITY_POST_FRAG,
+        scale_x=1,
+        scale_y=1,
+        sampling=PassSampling.NEAREST,
+    )
+    combine_pass = PostPassSpec(
+        name="combine_orig",
+        fragment_shader="uniform sampler2D u_input_tex; uniform sampler2D u_orig_tex;",
+        scale_x=3,
+        scale_y=3,
+        sampling=PassSampling.NEAREST,
+    )
+    assert (mask_pass.scale_x, mask_pass.scale_y) == (1, 1)
+    assert (combine_pass.scale_x, combine_pass.scale_y) == (3, 3)
+    assert "u_orig_tex" in combine_pass.fragment_shader
 
 
 def test_f9_cycles_filter_preset_and_is_consumed_before_router() -> None:
@@ -91,6 +130,7 @@ def test_f9_cycles_filter_preset_and_is_consumed_before_router() -> None:
         (960, 768),
         FullscreenMode.OFF,
         initial_filter=FilterPreset.FAITHFUL,
+        initial_crt=CrtSettings(),
         backend=backend,
     )
     router = InputRouter()
@@ -115,20 +155,29 @@ def test_f9_cycles_filter_preset_and_is_consumed_before_router() -> None:
         players={kid: router.sample_frame().for_player(kid) for kid in KnightId}
     )
 
-    # Second F9 cycles SCANLINES -> CRT, third CRT -> SMOOTH, fourth wraps to FAITHFUL
+    # Second F9 cycles SCANLINES -> CRT, third CRT -> SMOOTH, fourth SMOOTH -> SCALEFX, fifth wraps
     assert window.consume_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=0))
     assert window.filter_preset is FilterPreset.CRT
     assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
 
     assert window.consume_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=0))
     assert window.filter_preset is FilterPreset.SMOOTH
+    assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
+
+    assert window.consume_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=0))
+    assert window.filter_preset is FilterPreset.SCALEFX
     assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
 
     assert window.consume_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=0))
     assert window.filter_preset is FilterPreset.FAITHFUL
     assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
 
-    # Shift+F9 cycles backwards FAITHFUL -> SMOOTH -> CRT
+    # Shift+F9 cycles backwards FAITHFUL -> SCALEFX -> SMOOTH -> CRT
+    assert window.consume_event(
+        pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=pygame.KMOD_LSHIFT)
+    )
+    assert window.filter_preset is FilterPreset.SCALEFX
+    assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
     assert window.consume_event(
         pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F9, mod=pygame.KMOD_LSHIFT)
     )
@@ -139,6 +188,17 @@ def test_f9_cycles_filter_preset_and_is_consumed_before_router() -> None:
     )
     assert window.filter_preset is FilterPreset.CRT
     assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F9, mod=0))
+
+    # F10 live display preview can select and apply SCALEFX
+    assert window.consume_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_F10, mod=0))
+    assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_F10, mod=0))
+    for _ in range(2):  # CRT -> SMOOTH -> SCALEFX
+        assert window.consume_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RIGHT, mod=0))
+        assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_RIGHT, mod=0))
+    assert window.apply_display_settings(base_settings).filter is FilterPreset.SCALEFX
+    assert window.consume_event(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN, mod=0))
+    assert window.consume_event(pygame.event.Event(pygame.KEYUP, key=pygame.K_RETURN, mod=0))
+    assert window.filter_preset is FilterPreset.SCALEFX
 
 
 def test_f9_preset_hotkey_is_never_recorded_in_replays() -> None:

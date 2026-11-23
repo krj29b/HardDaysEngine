@@ -5468,11 +5468,17 @@ to the destination of §13.2 → window. A preset is an ordered list of passes; 
 relative to its input, its input-texture sampling mode (`nearest` or `linear`), its GLSL 330
 core shader pair, and optional custom uniforms. Pass 0 crops the 320×256 RGB canvas to
 `SourceRect` (`u_in_origin`, `u_in_size`); subsequent passes read the full intermediate texture
-`(0, 0, prev_w, prev_h)` produced by the preceding pass. `faithful` has no passes (even
+`(0, 0, prev_w, prev_h)` produced by the preceding pass. Any pass whose shader declares
+`u_orig_tex` also receives the original RGB canvas texture bound on texture unit `1` alongside
+its cropped source rectangle (`u_orig_origin`, `u_orig_size`, `u_orig_tex_size`, T18.1 / ADR-069),
+allowing multi-pass pixel-art scalers to combine intermediate classification maps with exact
+original RGB texels without affecting single-input passes. `faithful` has no passes (even
 pixels, no effects). `scanlines` adds §13.3 in the final viewport presentation step. `crt`
 (§13.4.1, T13.6) runs a two-pass separable source-resolution bloom in the post-process chain
 followed by a native-resolution CRT presentation pass. `smooth` (§13.4.2, T13.7) runs a 4×
 edge-directed upscaling pass in the post-process chain before final viewport presentation.
+`scalefx` (§13.4.3, Phase 18 / ADR-069) runs a four-pass clean-room ScaleFX 3× edge-resolving
+upscaling chain before final viewport presentation.
 Switching presets or pass lists releases the intermediate framebuffers, textures, vertex arrays
 and shader programs of the previous chain.
 Passes run on RGB values, so palette effects (fades, colour cycling, recoloured messages,
@@ -5555,6 +5561,97 @@ The `smooth` preset is a clean-room GLSL 330 core xBR-style edge-directed 4× up
    4K), and switches to `LINEAR` on axes whose destination is not an exact multiple (e.g. 3× at
    960×768 or 1366×768) so subpixels are never dropped or unevenly duplicated.
 
+#### 13.4.3 Multi-pass ScaleFX preset (`render/shaders/scalefx_*.frag`, Phase 18, ADR-069)
+
+The `scalefx` preset is a clean-room GLSL 330 core four-pass ScaleFX 3× edge-resolving pixel-art
+upscaler executed in `PostProcessChain` before the final §13.2 viewport presentation pass. All
+four passes reuse `DEFAULT_POST_VERT`, use `PassSampling.NEAREST`, and sample texels strictly
+via integer `texelFetch` clamped inside the active crop (`SourceRect` for `u_orig_tex` and pass 0;
+`[0, W-1] × [0, H-1]` for passes 1–3) so overscan border rows never bleed into `playfield` crop:
+
+1. **Pass 0 — Perceptual edge-distance metric (`scalefx_metric.frag`, 1×1):**
+   For each cropped source pixel $E = (x, y)$, compute the normalized Redmean perceptual RGB
+   distance $d(A, B) \in [0, 1]$:
+   $$d(A, B) = \sqrt{\frac{(2 + \bar{r})\Delta_r^2 + 4\Delta_g^2 + (3 - \bar{r})\Delta_b^2}{9}},
+     \qquad \bar{r} = \tfrac{1}{2}(A_r + B_r), \quad \Delta = A - B.$$
+   Store the four non-redundant neighbour distances in `RGBA8`:
+   - `r` = $d(E, (x + 1, y))$ (right)
+   - `g` = $d(E, (x, y + 1))$ (down)
+   - `b` = $d(E, (x + 1, y + 1))$ (down-right)
+   - `a` = $d(E, (x - 1, y + 1))$ (down-left)
+   Every horizontal, vertical, and diagonal adjacency in the image is stored once and recovered by
+   Pass 1 via `texelFetch` on $E$ and its $(-1, 0)$, $(0, -1)$, $(-1, -1)$, and $(+1, -1)$
+   neighbours.
+
+2. **Pass 1 — Corner interpolation strength (`scalefx_strength.frag`, 1×1):**
+   For each pixel $E$, evaluate its four corners (`r = TL`, `g = TR`, `b = BR`, `a = BL`) by
+   symmetric 90° rotations of one canonical bottom-right corner rule on the 3×3 neighbourhood
+   $(A, B, C; D, E, F; G, H, I)$ using Pass 0's distances:
+   - Similarity threshold $T = 0.40$ (two pixels are perceptually equal when $d \le T_{\text{eq}}$
+     with $T_{\text{eq}} = 0.08$, and eligible to bridge a diagonal edge when $d(F, H) < T$).
+   - Local corner clearance:
+     $$\operatorname{clr}(d_{\text{diag}}, d_1, d_2)
+       = \max\!\left(0,\; 1 - \frac{d_{\text{diag}}}{T}\right) \cdot \min(d_1, d_2).$$
+   - The canonical `BR` corner (diagonal $F\text{--}H$ cutting $E$ from $I$) requires:
+     - $E$ differs perceptually from both $F$ and $H$ ($d(E, F) > T_{\text{eq}}$ and
+       $d(E, H) > T_{\text{eq}}$);
+     - $F$ and $H$ agree more closely than the corner contrast
+       ($d(F, H) < 0.5 \min(d(E, F), d(E, H))$);
+     - **Anti-dither orthogonal-support gate:** at least one side of the corner connects
+       orthogonally to a matching neighbour
+       ($\operatorname{eq}(E, B) \lor \operatorname{eq}(E, D) \lor \operatorname{eq}(F, I) \lor \operatorname{eq}(H, I)$),
+       preventing checkerboard and multi-shade dithers (such as the map's forests) from slicing
+       or crawling under palette cycling;
+     - **90° solid box-corner guard:** reject axis-aligned solid rectangle corners
+       ($\operatorname{eq}(E, B) \land \operatorname{eq}(E, D) \land \operatorname{eq}(E, A) \land \neg\operatorname{eq}(E, C) \land \neg\operatorname{eq}(E, G)$)
+       so UI frames, doors, and bitmap glyph boxes remain crisp.
+   - Store $s_{\text{BR}} = \operatorname{clamp}(\operatorname{clr}(d(F, H), d(E, F), d(E, H)), 0, 1)$
+     (and its three 90° rotations) in `RGBA8`.
+
+3. **Pass 2 — Global junction resolution and slope classification (`scalefx_resolve.frag`, 1×1):**
+   Reads Pass 1's corner strengths across the 3×3 neighbourhood so every shared 2×2 junction is
+   resolved identically by all four touching pixels:
+   - **2×2 diagonal competition:** in junction $\{E, F; H, I\}$, diagonal $F\text{--}H$ has
+     combined weight $w_{FH} = E_{\text{BR}} + I_{\text{TL}}$ and competing diagonal $E\text{--}I$
+     has combined weight $w_{EI} = F_{\text{BL}} + H_{\text{TR}}$. Corner $E_{\text{BR}}$ survives
+     if and only if $E_{\text{BR}} > 0$ and $w_{FH} > w_{EI}$ (exact ties suppress both diagonals
+     to preserve symmetry).
+   - **Multi-slope classification:** each surviving corner at $E$ inspects adjacent surviving
+     corners along its horizontal and vertical runs to classify the cut as:
+     - `0` — no cut;
+     - `1` — 45° diagonal cut;
+     - `2` — 2:1 shallow horizontal slope (e.g. `BR` paired with horizontal continuation where
+       $D$'s `BR` is inactive and $F$'s `TL` is active across the step, or symmetric partner);
+     - `3` — 1:2 steep vertical slope (symmetric vertical counterpart);
+     - `4` — 3:1 extended horizontal slope (2:1 horizontal run extending across an additional
+       unopposed neighbour pixel without conflicting opposite corner);
+     - `5` — 1:3 extended vertical slope (symmetric vertical counterpart).
+   - Pack the four discrete codes (`r = TL`, `g = TR`, `b = BR`, `a = BL`) as `code / 255.0` into
+     `RGBA8`.
+
+4. **Pass 3 — 3×3 subpixel synthesis (`scalefx_interp.frag`, 3×3):**
+   Reads Pass 2's resolved corner codes from `u_input_tex` (unit 0) and original cropped RGB
+   colours from `u_orig_tex` (unit 1). Each source pixel $E$ produces a 3×3 subpixel block
+   $(s_x, s_y) \in \{0, 1, 2\}^2$:
+   - The center subpixel $(1, 1)$ always keeps exact $E$, preserving 1-pixel outlines, thin lines,
+     and small bitmap font stems (`Small.font`).
+   - For each active corner (shown in canonical `BR` orientation; `TL`, `TR`, `BL` follow exact
+     90° rotations), let $C_{\text{BR}}$ be whichever of $F$ or $H$ is perceptually closer to $E$:
+     - Code `1` (45°): assigns corner subpixel $(2, 2) \leftarrow C_{\text{BR}}$.
+     - Code `2` (2:1 horizontal): assigns $(2, 2)$ and bottom-midpoint $(1, 2) \leftarrow C_{\text{BR}}$.
+     - Code `3` (1:2 vertical): assigns $(2, 2)$ and right-midpoint $(2, 1) \leftarrow C_{\text{BR}}$.
+     - Code `4` (3:1 horizontal): assigns $(2, 2)$, $(1, 2)$, and $(0, 2) \leftarrow C_{\text{BR}}$
+       (only when `BL == 0`, so opposing corners never overwrite each other).
+     - Code `5` (1:3 vertical): assigns $(2, 2)$, $(2, 1)$, and $(2, 0) \leftarrow C_{\text{BR}}$
+       (only when `TR == 0`).
+   - If two adjacent corners both claim the same edge midpoint (e.g. `BL == 2` and `BR == 2` both
+     claiming $(1, 2)$), the midpoint averages their two target colours symmetrically to avoid
+     directional bias.
+   - Final viewport presentation follows the same rule as §13.4.2 item 5: `_present_standard`
+     keeps exact `NEAREST` on any `integer` axis that is an exact multiple of the 3× output
+     (e.g. `960×768` or `1920×1200`), and switches to `LINEAR` on non-multiple axes so no 3×
+     subpixels are dropped.
+
 ### 13.5 Surround (optional, T13.8)
 
 When the window is wider than the letterboxed destination (`dest_width < window_width`), the side
@@ -5596,7 +5693,7 @@ silently falls back to a default. Each key is added by the task that implements 
 | Key | Type / values | Default | CLI | Task |
 |---|---|---|---|---|
 | `scale` | integer 1..8: initial window size, in canvas pixels | 3 | `--scale` | T13.1 |
-| `filter` | `faithful`, `scanlines`, `crt`, `smooth` | `faithful` | `--filter` | T13.1, T13.6, T13.7 |
+| `filter` | `faithful`, `scanlines`, `crt`, `smooth`, `scalefx` | `faithful` | `--filter` | T13.1, T13.6, T13.7, T18.2 |
 | `scale_mode` | `integer`, `sharp-bilinear`, `fit` | `integer` | `--scale-mode` | T13.2 |
 | `aspect` | `square`, `pal` | `square` | `--aspect` | T13.2 |
 | `crop` | `full`, `playfield` | `full` | `--crop` | T13.2 |

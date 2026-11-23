@@ -59,6 +59,54 @@ void main() {
 }
 """
 
+_HALF_MASK_FRAG = """
+#version 330 core
+uniform sampler2D u_input_tex;
+uniform vec2 u_in_origin;
+uniform vec2 u_in_size;
+uniform vec2 u_in_tex_size;
+in vec2 v_uv;
+out vec4 f_color;
+void main() {
+    vec2 top_down = vec2(v_uv.x, 1.0 - v_uv.y) * u_in_size;
+    float right_half = (top_down.x >= u_in_size.x * 0.5) ? 1.0 : 0.0;
+    f_color = vec4(right_half, 0.0, 0.0, 1.0);
+}
+"""
+
+_COMBINE_ORIG_FRAG = """
+#version 330 core
+uniform sampler2D u_input_tex;
+uniform vec2 u_in_origin;
+uniform vec2 u_in_size;
+uniform vec2 u_in_tex_size;
+uniform sampler2D u_orig_tex;
+uniform vec2 u_orig_origin;
+uniform vec2 u_orig_size;
+uniform vec2 u_orig_tex_size;
+in vec2 v_uv;
+out vec4 f_color;
+void main() {
+    vec2 top_uv = vec2(v_uv.x, 1.0 - v_uv.y);
+    ivec2 in_size = ivec2(round(u_in_size));
+    ivec2 in_origin = ivec2(round(u_in_origin));
+    int in_tex_h = int(round(u_in_tex_size.y));
+    ivec2 p_in = clamp(ivec2(floor(top_uv * u_in_size)), ivec2(0), in_size - ivec2(1));
+    ivec2 in_texel = ivec2(in_origin.x + p_in.x, in_tex_h - 1 - (in_origin.y + p_in.y));
+    float mask = texelFetch(u_input_tex, in_texel, 0).r;
+
+    ivec2 orig_size = ivec2(round(u_orig_size));
+    ivec2 orig_origin = ivec2(round(u_orig_origin));
+    int orig_tex_h = int(round(u_orig_tex_size.y));
+    ivec2 p_orig = clamp(ivec2(floor(top_uv * u_orig_size)), ivec2(0), orig_size - ivec2(1));
+    ivec2 orig_texel = ivec2(orig_origin.x + p_orig.x, orig_tex_h - 1 - (orig_origin.y + p_orig.y));
+    vec3 orig_rgb = texelFetch(u_orig_tex, orig_texel, 0).rgb;
+
+    vec3 out_rgb = (mask > 0.5) ? orig_rgb : (vec3(1.0) - orig_rgb);
+    f_color = vec4(out_rgb, 1.0);
+}
+"""
+
 
 def _render_presented(
     ctx: moderngl.Context,
@@ -208,6 +256,130 @@ def test_multi_pass_chain_executes_scaled_stages_and_custom_uniforms() -> None:
         assert abs(int(center[0]) - 100) <= 1
         assert int(center[1]) == 100
         assert int(center[2]) == 50
+    finally:
+        scene.release()
+        renderer.release()
+        ctx.release()
+
+
+def test_multi_pass_chain_reads_prior_stage_and_cropped_original_canvas() -> None:
+    ctx = moderngl.create_standalone_context(require=330)
+    renderer = HardDaysRenderer(ctx)
+    scene = SceneRenderer(renderer)
+    try:
+        palette = [(0, 0, 0)] * 32
+        palette[1] = (255, 0, 255)  # overscan border sentinel
+        palette[2] = (40, 120, 210)  # top playfield band
+        palette[3] = (200, 80, 30)  # bottom playfield band
+        scene.set_palette(palette)
+        scene.canvas[:, :] = 1
+        scene.canvas[28:128, :] = 2
+        scene.canvas[128:228, :] = 3
+        scene.flush_to_fbo()
+
+        pass_mask = PostPassSpec(
+            name="half_mask",
+            fragment_shader=_HALF_MASK_FRAG,
+            scale_x=1,
+            scale_y=1,
+            sampling=PassSampling.NEAREST,
+        )
+        pass_combine = PostPassSpec(
+            name="combine_orig_3x",
+            fragment_shader=_COMBINE_ORIG_FRAG,
+            scale_x=3,
+            scale_y=3,
+            sampling=PassSampling.NEAREST,
+        )
+        settings = DisplaySettings(
+            filter=FilterPreset.FAITHFUL,
+            scale_mode=ScaleMode.INTEGER,
+            aspect=AspectMode.SQUARE,
+            crop=CropMode.PLAYFIELD,
+        )
+        img = _render_presented(
+            ctx,
+            renderer,
+            (CANVAS_WIDTH * 3, PLAYFIELD_HEIGHT * 3),
+            settings=settings,
+            passes=(pass_mask, pass_combine),
+        )
+        assert renderer.post_chain.active_texture_count == 2
+        textures = renderer.post_chain.stage_textures
+        assert textures[0].size == (CANVAS_WIDTH, PLAYFIELD_HEIGHT)
+        assert textures[1].size == (CANVAS_WIDTH * 3, PLAYFIELD_HEIGHT * 3)
+
+        # Right half (mask == 1): exact original playfield colours
+        assert tuple(int(v) for v in img[0, 600, :3]) == (40, 120, 210)
+        assert tuple(int(v) for v in img[599, 600, :3]) == (200, 80, 30)
+        # Left half (mask == 0): inverted original playfield colours
+        assert tuple(int(v) for v in img[0, 100, :3]) == (215, 135, 45)
+        assert tuple(int(v) for v in img[599, 100, :3]) == (55, 175, 225)
+        # Zero magenta overscan bleed anywhere in the presented playfield
+        magenta = (img[:, :, 0] == 255) & (img[:, :, 1] == 0) & (img[:, :, 2] == 255)
+        assert not np.any(magenta)
+    finally:
+        scene.release()
+        renderer.release()
+        ctx.release()
+
+
+def test_orig_tex_chain_preserves_existing_presets_and_releases_textures() -> None:
+    ctx = moderngl.create_standalone_context(require=330)
+    renderer = HardDaysRenderer(ctx)
+    scene = SceneRenderer(renderer)
+    try:
+        _fill_test_pattern(scene)
+        orig_passes = (
+            PostPassSpec(name="half_mask", fragment_shader=_HALF_MASK_FRAG),
+            PostPassSpec(
+                name="combine_orig_3x",
+                fragment_shader=_COMBINE_ORIG_FRAG,
+                scale_x=3,
+                scale_y=3,
+            ),
+        )
+        presets = (
+            FilterPreset.FAITHFUL,
+            FilterPreset.SCANLINES,
+            FilterPreset.CRT,
+            FilterPreset.SMOOTH,
+        )
+        baselines = {
+            preset: _render_presented(
+                ctx,
+                renderer,
+                (960, 768),
+                settings=DisplaySettings(filter=preset),
+            )
+            for preset in presets
+        }
+
+        for preset in presets:
+            _render_presented(
+                ctx,
+                renderer,
+                (960, 768),
+                settings=DisplaySettings(filter=FilterPreset.FAITHFUL),
+                passes=orig_passes,
+            )
+            after = _render_presented(
+                ctx,
+                renderer,
+                (960, 768),
+                settings=DisplaySettings(filter=preset),
+            )
+            assert np.array_equal(after, baselines[preset])
+
+        _render_presented(
+            ctx,
+            renderer,
+            (960, 768),
+            settings=DisplaySettings(filter=FilterPreset.FAITHFUL),
+        )
+        chain = renderer.post_chain
+        assert chain.active_texture_count == 0
+        assert chain.total_textures_created == chain.total_textures_released
     finally:
         scene.release()
         renderer.release()
