@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import moderngl
@@ -418,23 +419,67 @@ class HardDaysRenderer:
         present_tex.use(location=0)
         self._fs_vao.render(moderngl.TRIANGLES)
 
+    def _resolve_hd_source(
+        self,
+        pv: PresentationViewport,
+        hd_tex: moderngl.Texture | None,
+        hd_scale: int,
+    ) -> tuple[moderngl.Texture, SourceRect, tuple[int, int], PresentationViewport]:
+        if hd_tex is None:
+            return (self._canvas_tex, pv.source, (CANVAS_WIDTH, CANVAS_HEIGHT), pv)
+        if hd_scale < 1:
+            raise ValueError(f"hd_scale must be >= 1, got {hd_scale}")
+        expected_size = (CANVAS_WIDTH * hd_scale, CANVAS_HEIGHT * hd_scale)
+        if hd_tex.size != expected_size:
+            raise ValueError(
+                f"hd_tex size {hd_tex.size} does not match expected {expected_size} "
+                f"for hd_scale={hd_scale}"
+            )
+        hd_src = SourceRect(
+            pv.source.x * hd_scale,
+            pv.source.y * hd_scale,
+            pv.source.width * hd_scale,
+            pv.source.height * hd_scale,
+        )
+        return (hd_tex, hd_src, expected_size, replace(pv, source=hd_src))
+
+    @staticmethod
+    def _resolve_effective_filter(
+        hd_tex: moderngl.Texture | None,
+        passes: Sequence[PostPassSpec] | None,
+        preset: FilterPreset,
+    ) -> FilterPreset:
+        if (
+            hd_tex is not None
+            and passes is None
+            and preset in (FilterPreset.SMOOTH, FilterPreset.SCALEFX)
+        ):
+            return FilterPreset.FAITHFUL
+        return preset
+
     def _present_crt(
         self,
         target: moderngl.Framebuffer,
         pv: PresentationViewport,
         crt: CrtSettings,
         bloom_tex: moderngl.Texture,
+        source_tex: moderngl.Texture,
+        source_rect: SourceRect,
+        tex_size: tuple[int, int],
     ) -> None:
         target.use()
         self.ctx.viewport = pv.gl_viewport
 
-        self._canvas_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        source_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
         bloom_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
 
         prog = self._crt_shader_prog
-        _set_uniform_vec2(prog, "u_src_origin", (float(pv.source.x), float(pv.source.y)))
-        _set_uniform_vec2(prog, "u_src_size", (float(pv.source.width), float(pv.source.height)))
-        _set_uniform_vec2(prog, "u_tex_size", (float(CANVAS_WIDTH), float(CANVAS_HEIGHT)))
+        _set_uniform_vec2(prog, "u_src_origin", (float(source_rect.x), float(source_rect.y)))
+        _set_uniform_vec2(prog, "u_src_size", (float(source_rect.width), float(source_rect.height)))
+        _set_uniform_vec2(
+            prog, "u_logical_src_size", (float(pv.source.width), float(pv.source.height))
+        )
+        _set_uniform_vec2(prog, "u_tex_size", (float(tex_size[0]), float(tex_size[1])))
         _set_uniform_vec2(prog, "u_dest_size", (float(pv.dest_width), float(pv.dest_height)))
         _set_uniform_int(prog, "u_mask_type", _CRT_MASK_IDS[crt.mask])
         _set_uniform_float(prog, "u_mask_strength", crt.mask_strength)
@@ -442,7 +487,7 @@ class HardDaysRenderer:
         _set_uniform_float(prog, "u_curvature", crt.curvature)
         _set_uniform_float(prog, "u_bloom_strength", crt.bloom)
 
-        self._canvas_tex.use(location=0)
+        source_tex.use(location=0)
         bloom_tex.use(location=1)
         self._crt_shader_vao.render(moderngl.TRIANGLES)
 
@@ -454,8 +499,10 @@ class HardDaysRenderer:
         settings: DisplaySettings | None = None,
         scanlines: bool | None = None,
         passes: Sequence[PostPassSpec] | None = None,
+        hd_tex: moderngl.Texture | None = None,
+        hd_scale: int = 1,
     ) -> PresentationViewport:
-        """Present the canvas into ``target`` through the post-process chain and viewport (§13)."""
+        """Present the canvas (or ``hd_tex``) into ``target`` through post-process and viewport."""
         resolved = settings if settings is not None else DisplaySettings()
         use_scanlines = resolved.scanlines if scanlines is None else scanlines
         win_w, win_h = window_size
@@ -466,22 +513,28 @@ class HardDaysRenderer:
             aspect=resolved.aspect,
             scale_mode=resolved.scale_mode,
         )
+        src_tex, src_rect, src_tex_size, surround_pv = self._resolve_hd_source(pv, hd_tex, hd_scale)
+        effective_filter = self._resolve_effective_filter(hd_tex, passes, resolved.filter)
 
-        if passes is None and resolved.filter is FilterPreset.CRT:
+        if passes is None and effective_filter is FilterPreset.CRT:
             self.post_chain.set_preset(FilterPreset.CRT, crt_bloom_enabled=resolved.crt.bloom > 0.0)
-            bloom_tex, _, _ = self.post_chain.execute(self._canvas_tex, pv.source)
-            self.surround.render(target, self._canvas_tex, pv, resolved.surround)
-            self._present_crt(target, pv, resolved.crt, bloom_tex)
+            bloom_tex, _, _ = self.post_chain.execute(src_tex, src_rect, canvas_size=src_tex_size)
+            self.surround.render(
+                target, src_tex, surround_pv, resolved.surround, canvas_size=src_tex_size
+            )
+            self._present_crt(target, pv, resolved.crt, bloom_tex, src_tex, src_rect, src_tex_size)
             return pv
 
         if passes is None:
-            self.post_chain.set_preset(resolved.filter)
+            self.post_chain.set_preset(effective_filter)
         else:
             self.post_chain.set_passes(passes)
         present_tex, present_src, present_tex_size = self.post_chain.execute(
-            self._canvas_tex, pv.source
+            src_tex, src_rect, canvas_size=src_tex_size
         )
-        self.surround.render(target, self._canvas_tex, pv, resolved.surround)
+        self.surround.render(
+            target, src_tex, surround_pv, resolved.surround, canvas_size=src_tex_size
+        )
         self._present_standard(
             target,
             pv,
@@ -499,14 +552,18 @@ class HardDaysRenderer:
         settings: DisplaySettings | None = None,
         scanlines: bool | None = None,
         passes: Sequence[PostPassSpec] | None = None,
+        hd_tex: moderngl.Texture | None = None,
+        hd_scale: int = 1,
     ) -> PresentationViewport:
-        """Blit the 320x256 virtual canvas to the default screen framebuffer (§13.2-§13.4)."""
+        """Blit the canvas (or ``hd_tex``) to the default screen framebuffer (§13.2-§13.4)."""
         return self.present_to_framebuffer(
             self.ctx.screen,
             (viewport[2], viewport[3]),
             settings=settings,
             scanlines=scanlines,
             passes=passes,
+            hd_tex=hd_tex,
+            hd_scale=hd_scale,
         )
 
     def blit_screen_texture(

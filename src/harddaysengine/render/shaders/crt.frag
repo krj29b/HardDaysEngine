@@ -7,6 +7,7 @@ uniform sampler2D u_canvas_tex;
 uniform sampler2D u_bloom_tex;
 uniform vec2 u_src_origin;
 uniform vec2 u_src_size;
+uniform vec2 u_logical_src_size;
 uniform vec2 u_tex_size;
 uniform vec2 u_dest_size;
 uniform int u_mask_type;
@@ -104,15 +105,22 @@ void main() {
     }
 
     // Two-row intensity-dependent Gaussian scanline beam reconstruction in linear light
-    vec2 src_pos = w_uv * u_src_size;
-    float y_rel = src_pos.y - 0.5;
+    // Scanline rows track logical Amiga rows while X/Y sampling uses HD source coordinates.
+    vec2 logical_pos = w_uv * u_logical_src_size;
+    float y_rel = logical_pos.y - 0.5;
     float row0 = floor(y_rel);
     float t = y_rel - row0;
     float d0 = t;
     float d1 = 1.0 - t;
 
-    vec3 col0 = sample_row_linear(src_pos.x, row0 + 0.5);
-    vec3 col1 = sample_row_linear(src_pos.x, row0 + 1.5);
+    float hd_scale_y = u_src_size.y / max(u_logical_src_size.y, 1.0);
+    float hd_x = w_uv.x * u_src_size.x;
+    float hd_y = w_uv.y * u_src_size.y;
+    float row0_y = clamp(hd_y, row0 * hd_scale_y + 0.5, (row0 + 1.0) * hd_scale_y - 0.5);
+    float row1_y = clamp(hd_y, (row0 + 1.0) * hd_scale_y + 0.5, (row0 + 2.0) * hd_scale_y - 0.5);
+
+    vec3 col0 = sample_row_linear(hd_x, row0_y);
+    vec3 col1 = sample_row_linear(hd_x, row1_y);
     vec3 w0 = scanline_beam(d0, col0, u_scanline_strength);
     vec3 w1 = scanline_beam(d1, col1, u_scanline_strength);
     vec3 color = (col0 * w0 + col1 * w1) * (1.0 + 0.18 * u_scanline_strength);
