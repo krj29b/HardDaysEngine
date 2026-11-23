@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from harddaysengine.app.hd_host import FightHdHistory
 from harddaysengine.app.map_scene import draw_map_text
 from harddaysengine.assets.audio import decode_sample_bank
 from harddaysengine.assets.fight_program import cel_shape, fight_constants, script_image
+from harddaysengine.assets.hd_pack_schema import HdAssetKind
 from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.mog_code import MogCode
 from harddaysengine.assets.wizard_data import parse_wizard_dialogue
@@ -68,6 +70,8 @@ class WizardScreen:
         self.state = WizardState(knight, kind, loading_index, wait=self.rules.fade_wait)
         self.animation: WizardAnimation | None = None
         self.canvas: FightCanvas | None = None
+        self.hd_history: FightHdHistory | None = None
+        self.hd_stage: int | None = None
         colors = list(tower.palette)
         shades = next((row for key, row in self.rules.ramps if key == kind), ())
         start = self.rules.palette_entry
@@ -114,7 +118,20 @@ class WizardScreen:
         return pixels[PLAYFIELD_Y_OFFSET : PLAYFIELD_Y_OFFSET + 200].copy()
 
     def start_stage(self, stage: int, rng: Rng, vbl: int) -> None:
-        self.canvas = FightCanvas(self._background(stage), {self.rules.cel: self.cel})
+        cels = {self.rules.cel: self.cel}
+        self.canvas = FightCanvas(self._background(stage), cels)
+        picture = self.gift if stage == 1 else self.tower
+        pic_name = self.rules.gift if stage == 1 else self.rules.tower
+        base_pal = self.gift.palette if stage == 1 else self.tower_palette
+        self.hd_stage = stage
+        self.hd_history = FightHdHistory(
+            arena_name=pic_name,
+            arena_kind=HdAssetKind.PICTURE,
+            arena_variant=None,
+            background=picture.pixels[:200, :320],
+            cels=cels,
+            base_palette=base_pal,
+        )
         self.animation = open_animation(self.rules, self.engine, stage, rng, vbl)
         self._accept()
 
@@ -123,6 +140,8 @@ class WizardScreen:
             raise ValueError("wizard animation is not started")
         for draws in self.animation.batches:
             self.canvas.accept(draws)
+            if self.hd_history is not None:
+                self.hd_history.record(draws)
 
     def advance(self, vbl: int, fire: bool) -> bool:
         if self.animation is None:

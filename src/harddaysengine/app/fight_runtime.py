@@ -11,6 +11,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from harddaysengine.app.fight_scene import FightScene
+from harddaysengine.app.hd_host import make_fight_cel_variant_fn, region_variant
 from harddaysengine.assets.arena import DecodedArena
 from harddaysengine.assets.caster_rules import parse_caster_rules
 from harddaysengine.assets.computer_knight_rules import parse_computer_knight_rules
@@ -33,6 +34,7 @@ from harddaysengine.assets.fight_setup import parse_fight_setup
 from harddaysengine.assets.fighter_rules import parse_knight_rules
 from harddaysengine.assets.flyer_rules import parse_flyer_rules
 from harddaysengine.assets.guardian_rules import parse_guardian_rules
+from harddaysengine.assets.hd_pack_schema import HdAssetKind
 from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.mog_code import MogCode
 from harddaysengine.assets.screen_fx import parse_shake_rules
@@ -396,15 +398,30 @@ class FightLoader:
             _initialise(actor, self.defs.knight, keys)
         picture = loaded[1]
         words = [pack_rgb12(r >> 4, g >> 4, b >> 4) for r, g, b in picture.palette]
+        region_code = _REGIONS[loaded[0].region]
+        first_kind = f.actor(first).kind
         palette = assemble_fight_palette(
             words,
             palettes,
             scene=scene_code,
-            region=_REGIONS[loaded[0].region],
-            first_kind=f.actor(first).kind,
+            region=region_code,
+            first_kind=first_kind,
             second_kind=f.actor(second).kind if second else 0,
         )
-        return FightScene(f, picture.pixels, cels, palette_fx_to_rgb(palette))
+        hd_bg_name = (
+            f"test_{valley_arena(self.mog).picture}" if arena_name == "valley" else arena_name
+        )
+        hd_bg_kind = HdAssetKind.PICTURE if arena_name == "valley" else HdAssetKind.ARENA
+        return FightScene(
+            f,
+            picture.pixels,
+            cels,
+            palette_fx_to_rgb(palette),
+            arena_name=hd_bg_name,
+            arena_kind=hd_bg_kind,
+            arena_variant=region_variant(region_code),
+            cel_variant_fn=make_fight_cel_variant_fn(first_kind, is_duel=second != 0),
+        )
 
     def creature(
         self,

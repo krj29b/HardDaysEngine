@@ -29,6 +29,7 @@ from harddaysengine.app.config import find_adf_images
 from harddaysengine.app.dice_screen import DiceScreen
 from harddaysengine.app.ending_screen import EndingScreen
 from harddaysengine.app.fight_runtime import FightLoader, FightRuntime, FightUnavailableError
+from harddaysengine.app.hd_host import HdHostPresenter
 from harddaysengine.app.input import (
     ControlMode,
     ControlTargets,
@@ -57,6 +58,7 @@ from harddaysengine.app.wizard_screen import WizardScreen
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.dice_house_data import SCRIPT_HUNK as DICE_SCRIPT_HUNK, parse_dice_house
 from harddaysengine.assets.fight_program import cel_shape, fight_constants, script_image
+from harddaysengine.assets.hd_pack import HdPack
 from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.mog_code import MogCode
 from harddaysengine.assets.palette import (
@@ -2816,12 +2818,22 @@ def _present_game_frame(
     window: WindowController,
     panel: DisplayPanel,
     campaign_menu: CampaignMenu,
+    hd_host: HdHostPresenter | None = None,
 ) -> None:
     cur_w, cur_h = pygame.display.get_window_size()
-    session.render_to_scene(scene_renderer, font)
+    effective = window.apply_display_settings(settings)
+    hd_tex: moderngl.Texture | None = None
+    hd_scale = 1
+    if hd_host is not None:
+        compositor = hd_host.ensure_active(base_renderer.ctx, enabled=effective.hd_enabled)
+        if compositor is not None:
+            hd_tex = hd_host.render_session_hd(session, compositor)
+            hd_scale = hd_host.scale
+    if hd_tex is None:
+        session.render_to_scene(scene_renderer, font)
     if cur_w > 0 and cur_h > 0:
         base_renderer.present_to_screen(
-            (0, 0, cur_w, cur_h), settings=window.apply_display_settings(settings)
+            (0, 0, cur_w, cur_h), settings=effective, hd_tex=hd_tex, hd_scale=hd_scale
         )
         preview = window.display_preview
         if campaign_menu.is_open:
@@ -2861,6 +2873,13 @@ def _pump_game_events(
         pacer.set_refresh_rate(window.get_refresh_rate())
 
 
+def _build_hd_host(settings: DisplaySettings, hd_pack: HdPack | None) -> HdHostPresenter:
+    loaded = hd_pack
+    if loaded is None and settings.hd_pack_dir is not None:
+        loaded = HdPack.load(settings.hd_pack_dir)
+    return HdHostPresenter(loaded)
+
+
 def run_game_window(
     adf_dir: Path,
     *,
@@ -2871,9 +2890,11 @@ def run_game_window(
     max_ticks: int | None = None,
     save_path: Path | None = None,
     control_mode: ControlMode = ControlMode.AUTO,
+    hd_pack: HdPack | None = None,
 ) -> int:
-    """Open the interactive ``pygame-ce`` + ModernGL 3.3 Moonstone game window (§13)."""
+    """Open the interactive ``pygame-ce`` + ModernGL 3.3 Moonstone game window (§13, §14)."""
     settings = display if display is not None else DisplaySettings()
+    hd_host = _build_hd_host(settings, hd_pack)
     replay_rec = load_replay(replay_path) if replay_path is not None else None
     origin = replay_rec or ReplayRecording(seed, (KnightId.RED,), ())
     active_seed, active_players, checkpoint = origin.seed, origin.players, origin.start_checkpoint
@@ -2892,6 +2913,8 @@ def run_game_window(
         settings.fullscreen,
         initial_filter=settings.filter,
         initial_crt=settings.crt,
+        initial_hd_available=hd_host.pack is not None,
+        initial_hd_enabled=settings.hd_enabled,
         vsync=settings.vsync,
     )
     window.open()
@@ -2940,6 +2963,7 @@ def run_game_window(
                     window,
                     panel,
                     campaign_menu,
+                    hd_host,
                 )
             elif not settings.vsync:
                 pygame.time.wait(1)
@@ -2954,6 +2978,7 @@ def run_game_window(
                     start_checkpoint=checkpoint,
                 ),
             )
+        hd_host.release()
         panel.release()
         scene_renderer.release()
         base_renderer.release()

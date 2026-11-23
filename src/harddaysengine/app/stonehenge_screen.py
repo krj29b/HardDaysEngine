@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import TYPE_CHECKING
 
+from harddaysengine.app.hd_host import FightHdHistory
 from harddaysengine.app.map_scene import draw_map_text
 from harddaysengine.assets.audio import decode_sample_bank
 from harddaysengine.assets.fight_program import cel_shape
+from harddaysengine.assets.hd_pack_schema import HdAssetKind
 from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.mog_code import MogCode
 from harddaysengine.assets.stonehenge_data import parse_stone_rules, ritual_engine
@@ -69,6 +71,7 @@ class StoneScreen:
         self.kind = actor.kind
         self.run: RitualRun | None = None
         self.canvas: FightCanvas | None = None
+        self.hd_history: FightHdHistory | None = None
 
     def snapshot(self) -> dict[str, object]:
         return {
@@ -98,7 +101,16 @@ class StoneScreen:
         if self.picture is None or self.cel is None:
             raise ValueError("Stonehenge ritual assets missing")
         self.run = open_ritual(self.rules.ritual, self.engine, rng)
-        self.canvas = FightCanvas(self.picture.pixels, {self.rules.ritual.cel: self.cel})
+        cels = {self.rules.ritual.cel: self.cel}
+        self.canvas = FightCanvas(self.picture.pixels, cels)
+        self.hd_history = FightHdHistory(
+            arena_name=self.rules.ritual.picture,
+            arena_kind=HdAssetKind.PICTURE,
+            arena_variant=None,
+            background=self.picture.pixels,
+            cels=cels,
+            base_palette=self.ritual_palette(),
+        )
 
     def advance_ritual(self, vbl: int) -> bool:
         if self.run is None or self.canvas is None:
@@ -106,6 +118,8 @@ class StoneScreen:
         self.run.advance(vbl)
         for draws in self.run.batches:
             self.canvas.accept(draws)
+            if self.hd_history is not None:
+                self.hd_history.record(draws)
         return self.run.done
 
     def render(self, renderer: SceneRenderer) -> None:

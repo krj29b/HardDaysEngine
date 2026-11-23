@@ -29,6 +29,7 @@ from harddaysengine.render.presentation import (
     CropMode,
     FilterPreset,
     FullscreenMode,
+    HdMode,
     ScaleMode,
     SurroundMode,
 )
@@ -136,6 +137,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[mode.value for mode in SurroundMode],
         default=None,
         help="widescreen side-bar surround fill (default: [display] surround or off)",
+    )
+    parser.add_argument(
+        "--hd-pack",
+        default=None,
+        metavar="DIR",
+        help="external HD asset pack directory (overrides HARDDAYSENGINE_HD_PACK_DIR / config)",
+    )
+    parser.add_argument(
+        "--hd-mode",
+        choices=[mode.value for mode in HdMode],
+        default=None,
+        help="HD pack activation mode: off, auto, or on (default: [display] hd_mode or auto)",
     )
     parser.add_argument(
         "--headless-frames",
@@ -301,6 +314,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             fullscreen=args.fullscreen,
             vsync=args.vsync,
             surround=args.surround,
+            hd_pack=args.hd_pack,
+            hd_mode=args.hd_mode,
+            environ=os.environ,
         )
         save_path = resolve_save_path(Path(args.config))
         control_mode = resolve_control_mode(Path(args.config), cli_mode=args.control_mode)
@@ -328,6 +344,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"ticks={result.ticks_executed} scene={result.scene.name} hash={result.final_hash}")
         return 0
 
+    hd_pack: HdPack | None = None
+    if display.hd_pack_dir is not None:
+        try:
+            hd_pack = HdPack.load(display.hd_pack_dir)
+        except HdPackError as exc:
+            parser.error(f"invalid HD pack: {exc}")
+
     return run_game_window(
         adf_dir,
         display=display,
@@ -336,4 +359,5 @@ def main(argv: Sequence[str] | None = None) -> int:
         replay_path=replay_path,
         save_path=save_path,
         control_mode=control_mode,
+        hd_pack=hd_pack,
     )

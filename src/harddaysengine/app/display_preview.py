@@ -26,21 +26,42 @@ def cycle_filter(preset: FilterPreset, step: int) -> FilterPreset:
     return presets[(presets.index(preset) + step) % len(presets)]
 
 
-class DisplayPreview:
-    """Editable preset and CRT controls, separate from the applied window settings."""
+def _set_crt_slider(crt: CrtSettings, field: str, value: float) -> CrtSettings:
+    if field == "mask_strength":
+        return replace(crt, mask_strength=value)
+    if field == "scanlines":
+        return replace(crt, scanlines=value)
+    if field == "curvature":
+        return replace(crt, curvature=value)
+    return replace(crt, bloom=value)
 
-    def __init__(self, preset: FilterPreset, crt: CrtSettings) -> None:
+
+class DisplayPreview:
+    """Editable preset, HD mode, and CRT controls, separate from applied window settings."""
+
+    def __init__(
+        self,
+        preset: FilterPreset,
+        crt: CrtSettings,
+        *,
+        hd_available: bool = False,
+        hd_enabled: bool = False,
+    ) -> None:
         self.preset = preset
         self.crt = crt
+        self.hd_available = hd_available
+        self.hd_enabled = hd_enabled and hd_available
         self.selected = 0
 
     def rows(self) -> tuple[tuple[str, str], ...]:
         """Return the currently editable labels and formatted values."""
-        preset = (("Filter", self.preset.value),)
+        head: list[tuple[str, str]] = [("Filter", self.preset.value)]
+        if self.hd_available:
+            head.append(("HD mode", "on" if self.hd_enabled else "off"))
         if self.preset is not FilterPreset.CRT:
-            return preset
+            return tuple(head)
         return (
-            *preset,
+            *head,
             ("Mask pattern", self.crt.mask.value),
             *((label, f"{getattr(self.crt, field):.2f}") for field, label, _, _ in _CRT_SLIDERS),
         )
@@ -54,24 +75,27 @@ class DisplayPreview:
         self.preset = cycle_filter(self.preset, step)
         self.selected = 0
 
+    def toggle_hd(self) -> bool:
+        """Toggle draft HD mode when a pack is loaded (§14.7)."""
+        if self.hd_available:
+            self.hd_enabled = not self.hd_enabled
+        return self.hd_enabled
+
     def adjust(self, direction: int) -> None:
         """Step the selected value, wrapping presets and clamping numeric controls."""
         if self.selected == 0:
             self.cycle(direction)
-        elif self.selected == 1:
+            return
+        if self.hd_available and self.selected == 1:
+            self.toggle_hd()
+            return
+        crt_offset = self.selected - (2 if self.hd_available else 1)
+        if crt_offset == 0:
             masks = tuple(CrtMaskMode)
             selected_mask = (masks.index(self.crt.mask) + direction) % len(masks)
             self.crt = replace(self.crt, mask=masks[selected_mask])
         else:
-            field, _, step, maximum = _CRT_SLIDERS[self.selected - 2]
+            field, _, step, maximum = _CRT_SLIDERS[crt_offset - 1]
             value = round(float(getattr(self.crt, field)) + step * direction, 2)
             value = max(0.0, min(maximum, value))
-            match field:
-                case "mask_strength":
-                    self.crt = replace(self.crt, mask_strength=value)
-                case "scanlines":
-                    self.crt = replace(self.crt, scanlines=value)
-                case "curvature":
-                    self.crt = replace(self.crt, curvature=value)
-                case "bloom":
-                    self.crt = replace(self.crt, bloom=value)
+            self.crt = _set_crt_slider(self.crt, field, value)

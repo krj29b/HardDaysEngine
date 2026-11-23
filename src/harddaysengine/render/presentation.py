@@ -9,6 +9,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 DEFAULT_WINDOW_SCALE = 3
 MIN_WINDOW_SCALE = 1
@@ -87,6 +91,14 @@ class SurroundMode(StrEnum):
     SOLID = "solid"
 
 
+class HdMode(StrEnum):
+    """Host activation mode for an external HD asset pack (§14.7, ADR-071)."""
+
+    OFF = "off"
+    AUTO = "auto"
+    ON = "on"
+
+
 def _validate_float_range(value: float, name: str, lo: float, hi: float) -> None:
     if not math.isfinite(value) or not lo <= value <= hi:
         msg = f"{name} must be a finite float in {lo}..{hi}, got {value!r}"
@@ -149,7 +161,7 @@ class SurroundSettings:
 
 @dataclass(slots=True, frozen=True)
 class DisplaySettings:
-    """Resolved ``[display]`` settings (§13.7)."""
+    """Resolved ``[display]`` settings (§13.7, §14.7)."""
 
     scale: int = DEFAULT_WINDOW_SCALE
     filter: FilterPreset = FilterPreset.FAITHFUL
@@ -160,8 +172,15 @@ class DisplaySettings:
     vsync: bool = True
     crt: CrtSettings = CrtSettings()
     surround: SurroundSettings = SurroundSettings()
+    hd_pack_dir: Path | None = None
+    hd_mode: HdMode = HdMode.AUTO
 
     @property
     def scanlines(self) -> bool:
         """Whether the preset darkens alternate halves of each source row (§13.3)."""
         return self.filter is FilterPreset.SCANLINES
+
+    @property
+    def hd_enabled(self) -> bool:
+        """Whether HD compositing is active for this settings snapshot (§14.7)."""
+        return self.hd_pack_dir is not None and self.hd_mode is not HdMode.OFF

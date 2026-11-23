@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from harddaysengine.app.hd_host import FightHdHistory
 from harddaysengine.app.map_scene import draw_map_text
+from harddaysengine.assets.hd_pack_schema import HdAssetKind
 from harddaysengine.render.fight import FightCanvas
 from harddaysengine.render.renderer import PLAYFIELD_Y_OFFSET
 from harddaysengine.render.scene import blit_indexed_sprite, palette_fx_to_rgb
@@ -53,6 +55,7 @@ class DiceScreen:
         self.run = open_dice(house, engine, number, pointer_y)
         self.round_palette = self._round_palette(house.ramp(kind), house.ramp_entry)
         self._canvas: FightCanvas | None = None
+        self.hd_history: FightHdHistory | None = None
         self._shown: list[Draw] | None = None
 
     def _round_palette(self, ramp: tuple[int, ...], entry: int) -> tuple[RGBColor, ...]:
@@ -66,15 +69,25 @@ class DiceScreen:
         before = self.run.fight
         step(self.run, world, (inp.dx, inp.dy, inp.fire or inp.confirm), fading=fading)
         if self.run.fight is not before:
-            self._canvas = (
-                None
-                if self.run.fight is None
-                else FightCanvas(
-                    self.tavern.pixels[:200, :320], {self.run.house.cel_file: self.cel}
+            if self.run.fight is None:
+                self._canvas = None
+                self.hd_history = None
+            else:
+                bg = self.tavern.pixels[:200, :320]
+                cels = {self.run.house.cel_file: self.cel}
+                self._canvas = FightCanvas(bg, cels)
+                self.hd_history = FightHdHistory(
+                    arena_name=self.run.house.tavern,
+                    arena_kind=HdAssetKind.PICTURE,
+                    arena_variant=None,
+                    background=bg,
+                    cels=cels,
+                    base_palette=self.round_palette,
                 )
-            )
         if self._canvas is not None and self.run.draws is not self._shown:
             self._canvas.accept(self.run.draws)
+            if self.hd_history is not None:
+                self.hd_history.record(self.run.draws)
             self._shown = self.run.draws
         return self.run.state.phase == DicePhase.DONE
 

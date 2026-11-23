@@ -32,6 +32,7 @@ from harddaysengine.render.presentation import (
     DisplaySettings,
     FilterPreset,
     FullscreenMode,
+    HdMode,
     ScaleMode,
     SurroundMode,
     SurroundSettings,
@@ -45,6 +46,7 @@ ADF_IMAGE_SIZE = 901_120
 """Size of a standard double-density Amiga floppy image: 80 cyl * 2 heads * 11 sectors * 512."""
 
 ENV_ADF_DIR = "HARDDAYSENGINE_ADF_DIR"
+ENV_HD_PACK_DIR = "HARDDAYSENGINE_HD_PACK_DIR"
 DISPLAY_TABLE = "display"
 INPUT_TABLE = "input"
 _INPUT_KEYS = frozenset({"mode"})
@@ -65,6 +67,8 @@ _DISPLAY_KEYS = frozenset(
         "surround",
         "surround_brightness",
         "surround_color",
+        "hd_pack_dir",
+        "hd_mode",
     }
 )
 
@@ -302,6 +306,30 @@ def _resolve_surround_settings(
     return SurroundSettings(mode=mode, brightness=brightness, color=color)
 
 
+def _resolve_hd_pack_dir(
+    cli_value: str | None,
+    table: Mapping[str, object],
+    *,
+    environ: Mapping[str, str],
+    config_path: Path,
+    file_source: str,
+) -> Path | None:
+    if cli_value:
+        return Path(cli_value)
+    env_value = environ.get(ENV_HD_PACK_DIR, "")
+    if env_value:
+        return Path(env_value)
+    raw = table.get("hd_pack_dir")
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ConfigError(f"{file_source}: hd_pack_dir must be a string, got {type(raw).__name__}")
+    if not raw:
+        return None
+    candidate = Path(raw)
+    return candidate if candidate.is_absolute() else config_path.parent / candidate
+
+
 def resolve_display_settings(
     config_path: Path,
     *,
@@ -313,8 +341,11 @@ def resolve_display_settings(
     fullscreen: str | None = None,
     vsync: bool | None = None,
     surround: str | None = None,
+    hd_pack: str | None = None,
+    hd_mode: str | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> DisplaySettings:
-    """Resolve ``[display]`` settings: CLI value, then the config file, then the default (§13.7)."""
+    """Resolve ``[display]`` settings: CLI value, env, config file, then default (§13.7, §14.7)."""
     table = _display_table(load_config_file(config_path), config_path)
     defaults = DisplaySettings()
     file_source = f"{config_path}: [{DISPLAY_TABLE}]"
@@ -328,6 +359,21 @@ def resolve_display_settings(
         if vsync is not None
         else _bool_setting(table.get("vsync", defaults.vsync), "vsync", file_source)
     )
+    resolved_hd_pack = _resolve_hd_pack_dir(
+        hd_pack,
+        table,
+        environ={} if environ is None else environ,
+        config_path=config_path,
+        file_source=file_source,
+    )
+    resolved_hd_mode = _resolve_enum(
+        hd_mode, table, HdMode, "hd_mode", "--hd-mode", defaults.hd_mode, file_source
+    )
+    if resolved_hd_mode is HdMode.ON and resolved_hd_pack is None:
+        raise ConfigError(
+            f"{file_source}: hd_mode='on' requires an HD pack directory "
+            f"(--hd-pack, {ENV_HD_PACK_DIR}, or [display] hd_pack_dir)"
+        )
     return DisplaySettings(
         scale=resolved_scale,
         filter=_resolve_enum(
@@ -358,4 +404,6 @@ def resolve_display_settings(
         vsync=resolved_vsync,
         crt=_resolve_crt_settings(table, defaults.crt, file_source),
         surround=_resolve_surround_settings(surround, table, defaults.surround, file_source),
+        hd_pack_dir=resolved_hd_pack,
+        hd_mode=resolved_hd_mode,
     )

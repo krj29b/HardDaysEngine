@@ -21,6 +21,7 @@ from harddaysengine.render.overlay import (
     build_rect_lines,
     pack_overlay_vertex_array,
 )
+from harddaysengine.render.presentation import HdMode
 from harddaysengine.render.renderer import (
     CANVAS_HEIGHT,
     CANVAS_WIDTH,
@@ -43,6 +44,7 @@ __all__ = [
     "HardDaysRenderer",
     "HdCacheStats",
     "HdCompositor",
+    "HdMode",
     "OverlayLine",
     "RGBAFloat",
     "build_crosshair_lines",

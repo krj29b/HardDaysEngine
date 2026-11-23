@@ -772,6 +772,7 @@ class HdCompositor:
         arena_name: str,
         fallback_bg: npt.NDArray[np.uint8],
         *,
+        kind: HdAssetKind = HdAssetKind.ARENA,
         variant: str | None = None,
         palette: Sequence[RGBColor] | None = None,
         base_palette: Sequence[RGBColor] | None = None,
@@ -789,13 +790,17 @@ class HdCompositor:
         self.ctx.viewport = (0, 0, self.playfield_size[0], self.playfield_size[1])
         self.ctx.clear(0.0, 0.0, 0.0, 1.0)
 
-        entry = self._pack.resolve_arena(arena_name, variant=variant)
+        entry = (
+            self._pack.resolve_picture(arena_name, variant=variant)
+            if kind is HdAssetKind.PICTURE
+            else self._pack.resolve_arena(arena_name, variant=variant)
+        )
         if entry is not None:
             asset = self._get_or_upload_hd(
                 entry, orig_w=CANVAS_WIDTH, orig_h=PLAYFIELD_HEIGHT, cycle_slot=None
             )
         else:
-            asset = self._get_or_upload_fallback("arena", arena_name, None, fallback_bg)
+            asset = self._get_or_upload_fallback(kind.value, arena_name, None, fallback_bg)
 
         self._render_asset_to_fbo(
             self._bg_fbo,

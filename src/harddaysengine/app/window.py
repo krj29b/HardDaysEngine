@@ -24,6 +24,7 @@ from harddaysengine.render.presentation import (
     DisplaySettings,
     FilterPreset,
     FullscreenMode,
+    HdMode,
 )
 
 if TYPE_CHECKING:
@@ -193,6 +194,8 @@ class WindowController:
         *,
         initial_filter: FilterPreset = FilterPreset.FAITHFUL,
         initial_crt: CrtSettings | None = None,
+        initial_hd_available: bool = False,
+        initial_hd_enabled: bool = False,
         vsync: bool = True,
         backend: WindowModeBackend | None = None,
     ) -> None:
@@ -200,6 +203,8 @@ class WindowController:
         self._mode = initial_mode
         self._filter_preset = initial_filter
         self._crt = initial_crt
+        self._hd_available = initial_hd_available
+        self._hd_enabled = initial_hd_enabled and initial_hd_available
         self.display_preview: DisplayPreview | None = None
         self._fullscreen_target = (
             initial_mode if initial_mode is not FullscreenMode.OFF else FullscreenMode.DESKTOP
@@ -220,6 +225,20 @@ class WindowController:
         return self._filter_preset
 
     @property
+    def hd_enabled(self) -> bool:
+        """Whether HD pack rendering is currently enabled (§14.7)."""
+        return self._hd_enabled
+
+    @property
+    def active_hd_enabled(self) -> bool:
+        """HD mode active for the current frame, including an open ``F10`` draft (§14.7)."""
+        if not self._hd_available:
+            return False
+        if self.display_preview is not None:
+            return self.display_preview.hd_enabled
+        return self._hd_enabled
+
+    @property
     def windowed_size(self) -> tuple[int, int]:
         """Last known resizable windowed ``(width, height)``."""
         return self._windowed_size
@@ -236,17 +255,32 @@ class WindowController:
         """Return the settings used for the current frame, including a draft when open."""
         preset = self._filter_preset
         crt = self._crt if self._crt is not None else settings.crt
+        hd_mode = settings.hd_mode
         if self.display_preview is not None:
             preset, crt = self.display_preview.preset, self.display_preview.crt
-        if (settings.filter, settings.crt, settings.fullscreen) == (preset, crt, self._mode):
+        if self._hd_available:
+            hd_mode = HdMode.ON if self.active_hd_enabled else HdMode.OFF
+        if (settings.filter, settings.crt, settings.fullscreen, settings.hd_mode) == (
+            preset,
+            crt,
+            self._mode,
+            hd_mode,
+        ):
             return settings
-        return replace(settings, filter=preset, crt=crt, fullscreen=self._mode)
+        return replace(settings, filter=preset, crt=crt, fullscreen=self._mode, hd_mode=hd_mode)
 
     def cycle_filter_preset(self, *, reverse: bool = False) -> FilterPreset:
         """Cycle the active :class:`FilterPreset` forward (or backward when ``reverse``)."""
         step = -1 if reverse else 1
         self._filter_preset = cycle_filter(self._filter_preset, step)
         return self._filter_preset
+
+    def toggle_hd_mode(self) -> bool:
+        """Toggle Classic <-> HD mode when a pack is available (§14.7)."""
+        if not self._hd_available:
+            return False
+        self._hd_enabled = not self._hd_enabled
+        return self._hd_enabled
 
     def toggle_fullscreen(self) -> FullscreenMode:
         """Toggle between windowed mode and the active fullscreen target."""
@@ -260,6 +294,17 @@ class WindowController:
         self._apply_mode(self._mode)
         return self._mode
 
+    def _consume_f7_keydown(self, key: int, *, repeat: bool) -> bool:
+        if key != pygame.K_F7:
+            return False
+        self._suppressed_keyups.add(key)
+        if not repeat:
+            if self.display_preview is not None:
+                self.display_preview.toggle_hd()
+            else:
+                self.toggle_hd_mode()
+        return True
+
     def _consume_keydown(self, event: pygame.event.Event) -> bool:
         key = int(event.key)
         repeat = bool(getattr(event, "repeat", 0))
@@ -269,6 +314,8 @@ class WindowController:
             self._suppressed_keyups.add(key)
             if not repeat:
                 self.toggle_fullscreen()
+            return True
+        if self._consume_f7_keydown(key, repeat=repeat):
             return True
         if self._consume_preview_keydown(event, key, repeat=repeat):
             return True
@@ -288,7 +335,14 @@ class WindowController:
             if not repeat:
                 self._suppressed_keyups.add(key)
                 self.display_preview = (
-                    DisplayPreview(self._filter_preset, self._crt) if preview is None else None
+                    DisplayPreview(
+                        self._filter_preset,
+                        self._crt,
+                        hd_available=self._hd_available,
+                        hd_enabled=self._hd_enabled,
+                    )
+                    if preview is None
+                    else None
                 )
             return True
         if preview is None or key not in _PREVIEW_KEYS:
@@ -303,6 +357,8 @@ class WindowController:
     ) -> None:
         if key in _ENTER_KEYS:
             self._filter_preset, self._crt = preview.preset, preview.crt
+            if self._hd_available:
+                self._hd_enabled = preview.hd_enabled
             self.display_preview = None
         elif key == pygame.K_ESCAPE:
             self.display_preview = None
