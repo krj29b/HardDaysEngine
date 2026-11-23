@@ -91,18 +91,29 @@ and confirm each with Enter. Keyboard slots follow portrait selection order.
 | Toggle fullscreen (not recorded in replays) | F11 or Alt+Enter |
 
 Player 2 uses WASD/F, player 3 IJKL/U, and player 4 the numeric keypad/Keypad 0 for
-movement/fire. Gamepads use the directional pad or left stick and button 0 for fire.
-When **exactly one gamepad** is connected (`--control-mode auto`, the default),
-**shared-pad mode** activates automatically (and switches dynamically if pads are plugged
-in or removed): the active player always uses the gamepad
-(with Player 1 keyboard arrows/Enter/Space and map shortcuts `1`–`9`, `E`, `Q`, `P`
-available as backup), and in a two-human duel (`PVP` or `Practice`) the duel initiator
-uses the gamepad while the second knight uses **WASD + Space** (fire). Use
-`--control-mode standard` (or `[input] mode = "standard"` in `config.toml`) to force
-per-slot controls, or `--control-mode shared-pad` to force shared-pad mode.
-Practice uses two human knights. All nine creature handlers, loot, shops, services,
+movement/fire. Practice uses two human knights. All nine creature handlers, loot, shops, services,
 place callers and the original ending are implemented; playing the campaign requires the original disks.
 See [docs/PROGRESS.md](docs/PROGRESS.md) for acceptance evidence and documented deviations.
+
+### Gamepad Controls & Control Modes
+
+| Gamepad input | Action |
+|---|---|
+| D-pad or Left stick | Move on the map, move pointers, choose fight moves |
+| Button 0 (A) | Fire, confirm menus/dialogs, skip intro |
+| Button 1 (B) | Open status sheet on the map / secondary action |
+| Button 2 (X) | End current map turn / weapon switch |
+| Button 7 (Start) | Pause map or combat / confirm |
+
+HardDaysEngine supports configurable host control modes via `--control-mode` or `[input] mode` in `config.toml` (CLI wins over config; replay compatibility is unchanged):
+
+| Mode | Behaviour |
+|---|---|
+| `auto` *(default)* | Switches dynamically as gamepads are connected or removed: uses `shared-pad` whenever **exactly 1 gamepad** is connected, and `standard` when 0 or 2+ gamepads are connected. |
+| `standard` | Static per-slot controls: gamepad slots 0–3 map to players 1–4 alongside their respective keyboard layouts. |
+| `shared-pad` | Pass-the-pad mode: the active human knight always uses the connected gamepad across menus, overworld, towns, sheets, services, and monster fights (with Player 1 keyboard arrows/Enter/Space and map shortcuts `1`–`9`, `E`, `Q`, `P` available as backup). In two-human duels (`PVP` and `Practice`), the **duel initiator** uses the gamepad exclusively and the **second knight** uses **`WASD` + `Space` (fire)** exclusively. |
+
+For detailed router behaviour, controller compatibility notes, and USB vs Bluetooth troubleshooting with `harddaysengine-input-diagnostics`, see [docs/INPUT_AND_DIAGNOSTICS.md](docs/INPUT_AND_DIAGNOSTICS.md).
 
 ## Run from Source
 
@@ -122,10 +133,14 @@ Useful CLI flags:
 - `--fullscreen off|desktop|exclusive`: start windowed, borderless desktop fullscreen, or exclusive fullscreen (default `off`)
 - `--vsync` / `--no-vsync`: enable or disable vertical sync (default `true`; `--no-vsync` presents once per 50 Hz tick)
 - `--surround off|blur|solid`: decorative widescreen side-bar fill (default `off`)
+- `--control-mode auto|standard|shared-pad`: host gamepad routing mode (default `[input] mode` or `auto`)
 
-Display settings can also live in `config.toml` (CLI flags win; unknown keys are an error):
+Display and input settings can also live in `config.toml` (CLI flags win; unknown keys are an error):
 
 ```toml
+[input]
+mode = "auto"               # auto, standard, shared-pad
+
 [display]
 scale = 4
 filter = "crt"
