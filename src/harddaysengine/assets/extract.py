@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
 from PIL import Image
 
 from harddaysengine.assets.adf import DiskSet, OFSFileEntry
@@ -18,13 +19,32 @@ from harddaysengine.assets.audio import (
     decode_sample_bank,
     pcm8_to_wav_bytes,
 )
-from harddaysengine.assets.cel import CelFrame, cel_frame_to_rgba, decode_cel
+from harddaysengine.assets.cel import CelFormatError, CelFrame, cel_frame_to_rgba, decode_cel
+from harddaysengine.assets.dice_house_data import parse_dice_house
+from harddaysengine.assets.ending_data import parse_ending_plan
+from harddaysengine.assets.fight_defs import parse_fight_defs
+from harddaysengine.assets.fight_palette import (
+    REGION_FOREST,
+    REGION_GLEN,
+    REGION_SWAMP,
+    REGION_WASTELAND,
+    SCENE_BALOK,
+    SCENE_DUEL,
+    SCENE_FLYER,
+    SCENE_GUARDIAN,
+    MogVersionError,
+    assemble_fight_palette,
+    parse_fight_palette_tables,
+)
+from harddaysengine.assets.hd_pack_schema import MAX_PALETTE_INDEX, normalize_hd_asset_key
 from harddaysengine.assets.hit import HitFrame, HitSet, compute_cel_hurtbox, parse_collide_hit
 from harddaysengine.assets.hunk import (
     HUNK_HEADER,
+    HunkFormatError,
     parse_hunk_executable,
     parse_mog_synth_instruments,
 )
+from harddaysengine.assets.intro_data import parse_intro_plan, parse_menu_data
 from harddaysengine.assets.manifest import (
     ArenaManifestEntry,
     AssetManifest,
@@ -37,19 +57,35 @@ from harddaysengine.assets.manifest import (
     ModuleManifestEntry,
     PictureManifestEntry,
 )
-from harddaysengine.assets.palette import RGBColor, default_combat_palette
+from harddaysengine.assets.map_rules import parse_map_rules
+from harddaysengine.assets.mog_code import MogCode
+from harddaysengine.assets.palette import (
+    RGBColor,
+    cell_word_to_rgb,
+    decode_palette_word,
+    default_combat_palette,
+)
 from harddaysengine.assets.picture import (
     DecodedPicture,
+    PictureFormatError,
     decode_picture,
     decode_picture_pack,
     picture_to_rgba,
 )
+from harddaysengine.assets.service_screen_data import parse_service_screens
+from harddaysengine.assets.sheet_data import parse_sheet_data
+from harddaysengine.assets.stonehenge_data import parse_stone_rules
+from harddaysengine.assets.valley_data import valley_arena
+from harddaysengine.assets.wizard_screen_data import parse_wizard_rules
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    import numpy as np
     import numpy.typing as npt
+
+    from harddaysengine.assets.fight_defs import ArenaDef, FightDefs
+    from harddaysengine.assets.fight_palette import FightPaletteTables
+    from harddaysengine.assets.hunk import DecodedHunkExecutable
 
 CEL_EXTENSIONS = (".cel", ".ob", ".c", ".f", ".font")
 PICTURE_EXTENSIONS = (".piv", ".p")
@@ -404,3 +440,651 @@ def extract_all_assets(
     """Discover `.adf` images in `adf_dir` and extract all assets into `output_dir`."""
     disk_set = DiskSet.from_directory(adf_dir)
     return extract_disk_set(disk_set, output_dir, export_cel_pngs=export_cel_pngs)
+
+
+# ---------------------------------------------------------------------------
+# HD asset pack template exporter (ARCHITECTURE.md §14.5)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_ARENA_REGION: dict[str, int] = {
+    "dragon": REGION_WASTELAND,
+    "guardian": REGION_WASTELAND,
+    "trogg_axe": REGION_FOREST,
+    "trogg_axe_2": REGION_FOREST,
+}
+
+_REGION_TO_FG_SHEET: dict[int, int] = {
+    REGION_GLEN: 0,
+    REGION_FOREST: 0,
+    REGION_SWAMP: 2,
+    REGION_WASTELAND: 3,
+}
+
+_PROGRAM_CEL_PICTURES: dict[str, tuple[str, ...]] = {
+    "au1.cel": ("bg4.piv", "bg5a.piv"),
+    "li1.cel": ("bg5a.piv",),
+    "da1.cel": ("bg3.piv",),
+    "ha1.cel": ("bg2a.piv",),
+    "dw1.cel": ("bg2.piv",),
+    "ov1.cel": ("bg2a.piv", "bg2.piv"),
+    "dg1.cel": ("bg5.piv",),
+    "klift1.cel": ("bg5.piv", "bg5a.piv"),
+    "co1.cel": ("bg7.piv",),
+}
+
+
+@dataclass(slots=True, frozen=True)
+class HdTemplateSummary:
+    """Summary of an exported 1x HD asset pack template (ARCHITECTURE.md §14.5)."""
+
+    pack_root: Path
+    picture_count: int
+    arena_count: int
+    cel_count: int
+    cel_frame_count: int
+    mask_count: int
+    meta_count: int
+    skipped_zero_frames: int
+
+
+@dataclass(slots=True)
+class _TemplateContext:
+    disk_set: DiskSet
+    test_pics: list[DecodedPicture]
+    hit_sets: dict[str, HitSet]
+    map_mask_indices: frozenset[int]
+    cel_palettes: dict[str, tuple[RGBColor, ...]]
+    frame_palettes: dict[tuple[str, int], tuple[RGBColor, ...]]
+
+
+def encode_mask_png_bytes(mask: npt.NDArray[np.uint8]) -> bytes:
+    """Deterministically encode a 2D uint8 palette-slot mask (0..31) as 8-bit 'L' PNG (§14.5)."""
+    raw = np.asarray(mask)
+    if raw.dtype != np.uint8:
+        raise ValueError("Mask array must have dtype uint8")
+    if raw.ndim != 2 or raw.size == 0:
+        raise ValueError("Mask array must be a non-empty 2D uint8 array")
+    max_val = int(raw.max())
+    if max_val > MAX_PALETTE_INDEX:
+        raise ValueError(f"Mask index {max_val} exceeds Amiga 5-bit maximum ({MAX_PALETTE_INDEX})")
+    arr = np.ascontiguousarray(raw)
+    img = Image.fromarray(arr, mode="L")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", compress_level=1, optimize=False)
+    return buf.getvalue()
+
+
+def _try_parse_hunk(disk_set: DiskSet, name: str) -> DecodedHunkExecutable | None:
+    if not disk_set.has_file(name):
+        return None
+    try:
+        return parse_hunk_executable(name, disk_set.read_file(name))
+    except (FileNotFoundError, HunkFormatError):
+        return None
+
+
+def _words_to_rgb_palette(words: Sequence[int]) -> tuple[RGBColor, ...]:
+    return tuple(cell_word_to_rgb(w & 0x0FFF) for w in words)
+
+
+def _picture_words_12bit(pic: DecodedPicture) -> tuple[int, ...]:
+    return tuple(decode_palette_word(w) for w in pic.raw_palette)
+
+
+def _apply_palette_patch(
+    base: Sequence[RGBColor],
+    start: int,
+    words: Sequence[int],
+) -> tuple[RGBColor, ...]:
+    patched = list(base)
+    for offset, word in enumerate(words):
+        idx = start + offset
+        if 0 <= idx < len(patched):
+            patched[idx] = cell_word_to_rgb(word & 0x0FFF)
+    return tuple(patched)
+
+
+def _load_picture_palette(disk_set: DiskSet, *names: str) -> tuple[RGBColor, ...] | None:
+    for name in names:
+        if not disk_set.has_file(name):
+            continue
+        try:
+            pic = decode_picture(disk_set.read_file(name))
+        except (FileNotFoundError, PictureFormatError):
+            continue
+        return tuple(pic.palette)
+    return None
+
+
+def _resolve_arena_sheet_index(
+    mog_exec: DecodedHunkExecutable,
+    arena: ArenaDef,
+    region: int,
+    test_count: int,
+) -> int:
+    if arena.scene == SCENE_GUARDIAN:
+        try:
+            idx = valley_arena(MogCode(mog_exec)).picture
+            if 0 <= idx < test_count:
+                return idx
+        except (MogVersionError, HunkFormatError):
+            pass
+    idx = _REGION_TO_FG_SHEET.get(region, 0)
+    return idx if 0 <= idx < test_count else 0
+
+
+def _add_arena_cel_palettes(
+    mog_exec: DecodedHunkExecutable,
+    fight_defs: FightDefs,
+    fight_palettes: FightPaletteTables,
+    test_pics: Sequence[DecodedPicture],
+    cel_palettes: dict[str, tuple[RGBColor, ...]],
+) -> None:
+    for arena in fight_defs.arenas:
+        region = (
+            arena.region_override
+            if arena.region_override is not None
+            else _DEFAULT_ARENA_REGION.get(arena.name, REGION_GLEN)
+        )
+        sheet_idx = _resolve_arena_sheet_index(mog_exec, arena, region, len(test_pics))
+        words = assemble_fight_palette(
+            _picture_words_12bit(test_pics[sheet_idx]),
+            fight_palettes,
+            scene=arena.scene,
+            region=region,
+            first_kind=0,
+        )
+        pal = _words_to_rgb_palette(words)
+        for cf in arena.cels.slots:
+            if cf is not None:
+                cel_palettes[normalize_hd_asset_key(cf.name)] = pal
+
+
+def _add_fight_palettes(
+    mog_exec: DecodedHunkExecutable,
+    test_pics: Sequence[DecodedPicture],
+    cel_palettes: dict[str, tuple[RGBColor, ...]],
+) -> None:
+    if not test_pics:
+        return
+    try:
+        fight_palettes = parse_fight_palette_tables(mog_exec)
+        fight_defs = parse_fight_defs(mog_exec)
+    except (MogVersionError, HunkFormatError):
+        return
+
+    base_words = _picture_words_12bit(test_pics[0])
+    knight_pal = _words_to_rgb_palette(
+        assemble_fight_palette(
+            base_words, fight_palettes, scene=SCENE_FLYER, region=REGION_GLEN, first_kind=0
+        )
+    )
+    balok_knight_pal = _words_to_rgb_palette(
+        assemble_fight_palette(
+            base_words, fight_palettes, scene=SCENE_BALOK, region=REGION_GLEN, first_kind=0
+        )
+    )
+    for cf in (*fight_defs.knight_cels.knight_slots, *fight_defs.knight_cels.effect_slots):
+        if cf is not None:
+            cel_palettes[normalize_hd_asset_key(cf.name)] = knight_pal
+    cel_palettes["kn5.ob"] = balok_knight_pal
+
+    second_kind = fight_defs.duel_cels.kind if fight_defs.duel_cels.kind is not None else 4
+    duel_pal = _words_to_rgb_palette(
+        assemble_fight_palette(
+            base_words,
+            fight_palettes,
+            scene=SCENE_DUEL,
+            region=REGION_GLEN,
+            first_kind=0,
+            second_kind=second_kind,
+        )
+    )
+    for cf in fight_defs.duel_cels.slots:
+        if cf is not None:
+            key = normalize_hd_asset_key(cf.name)
+            if key.startswith("he"):
+                cel_palettes[key] = duel_pal
+
+    _add_arena_cel_palettes(mog_exec, fight_defs, fight_palettes, test_pics, cel_palettes)
+
+
+def _add_sheet_palettes(
+    mog_exec: DecodedHunkExecutable,
+    cel_palettes: dict[str, tuple[RGBColor, ...]],
+) -> None:
+    try:
+        sheet = parse_sheet_data(mog_exec)
+    except (MogVersionError, HunkFormatError):
+        return
+    base_pal = _words_to_rgb_palette(sheet.palette)
+    cel_palettes["po.cel"] = base_pal
+    cel_palettes["small.font"] = base_pal
+    if sheet.class_pairs:
+        cel_palettes["ki.cel"] = _apply_palette_patch(base_pal, 28, sheet.class_pairs[0])
+    else:
+        cel_palettes["ki.cel"] = base_pal
+
+
+def _add_dice_palettes(
+    disk_set: DiskSet,
+    mog_exec: DecodedHunkExecutable,
+    cel_palettes: dict[str, tuple[RGBColor, ...]],
+    frame_palettes: dict[tuple[str, int], tuple[RGBColor, ...]],
+) -> None:
+    try:
+        dice = parse_dice_house(mog_exec)
+    except (MogVersionError, HunkFormatError):
+        return
+    cel_key = normalize_hd_asset_key(dice.cel_file)
+    tav_pal = _load_picture_palette(disk_set, dice.tavern)
+    if tav_pal is not None:
+        cel_palettes[cel_key] = _apply_palette_patch(tav_pal, dice.ramp_entry, dice.ramp(0))
+    tbl_pal = _load_picture_palette(disk_set, dice.table)
+    if tbl_pal is not None:
+        for idx in range(len(dice.dice_at)):
+            frame_palettes[(cel_key, idx)] = tbl_pal
+
+
+def _add_service_palettes(
+    disk_set: DiskSet,
+    mog_exec: DecodedHunkExecutable,
+    cel_palettes: dict[str, tuple[RGBColor, ...]],
+) -> None:
+    try:
+        svc = parse_service_screens(mog_exec)
+    except (MogVersionError, HunkFormatError):
+        return
+    pal = _load_picture_palette(disk_set, svc.mystic.picture, svc.healer.picture)
+    if pal is not None:
+        cel_palettes[normalize_hd_asset_key(svc.donation.cel_file)] = pal
+
+
+def _add_ritual_palettes(
+    disk_set: DiskSet,
+    mog_exec: DecodedHunkExecutable,
+    cel_palettes: dict[str, tuple[RGBColor, ...]],
+) -> None:
+    try:
+        stone = parse_stone_rules(mog_exec)
+    except (MogVersionError, HunkFormatError):
+        return
+    pal = _load_picture_palette(disk_set, stone.ritual.picture)
+    if pal is None:
+        return
+    ramp = next((words for kind, words in stone.ritual.ramps if kind == 0), ())
+    cel_palettes[normalize_hd_asset_key(stone.ritual.cel)] = _apply_palette_patch(
+        pal, stone.ritual.palette_entry, ramp
+    )
+
+
+def _add_wizard_palettes(
+    disk_set: DiskSet,
+    mog_exec: DecodedHunkExecutable,
+    cel_palettes: dict[str, tuple[RGBColor, ...]],
+) -> None:
+    try:
+        wiz = parse_wizard_rules(mog_exec)
+    except (MogVersionError, HunkFormatError):
+        return
+    pal = _load_picture_palette(disk_set, wiz.tower, wiz.gift)
+    if pal is None:
+        return
+    ramp = next((words for kind, words in wiz.ramps if kind == 0), ())
+    cel_palettes[normalize_hd_asset_key(wiz.cel)] = _apply_palette_patch(
+        pal, wiz.palette_entry, ramp
+    )
+
+
+def _add_menu_palettes(
+    disk_set: DiskSet,
+    mog_exec: DecodedHunkExecutable,
+    cel_palettes: dict[str, tuple[RGBColor, ...]],
+    frame_palettes: dict[tuple[str, int], tuple[RGBColor, ...]],
+) -> None:
+    try:
+        menu = parse_menu_data(mog_exec)
+    except (MogVersionError, HunkFormatError):
+        return
+    cel_palettes["sel.cel"] = _words_to_rgb_palette(menu.knight_select.palette)
+    ch_pal = _load_picture_palette(disk_set, "ch.piv")
+    if ch_pal is not None:
+        frame_palettes[("sel.cel", menu.title.cursor_frame)] = ch_pal
+        cel_palettes.setdefault("bold.f", ch_pal)
+
+
+def _add_program_cel_palettes(
+    disk_set: DiskSet,
+    prog_exec: DecodedHunkExecutable | None,
+    cel_palettes: dict[str, tuple[RGBColor, ...]],
+) -> None:
+    if prog_exec is None:
+        return
+    loaded_cels: set[str] = set()
+    for parser in (parse_intro_plan, parse_ending_plan):
+        try:
+            plan = parser(prog_exec)
+        except (MogVersionError, HunkFormatError):
+            continue
+        loaded_cels.update(normalize_hd_asset_key(name) for _, name in plan.load.cels)
+        loaded_cels.add(normalize_hd_asset_key(plan.load.overlay))
+    for cel_key in sorted(loaded_cels):
+        pic_names = _PROGRAM_CEL_PICTURES.get(cel_key, ())
+        pal = _load_picture_palette(disk_set, *pic_names)
+        if pal is not None:
+            cel_palettes.setdefault(cel_key, pal)
+
+
+def _add_picture_fallbacks(
+    disk_set: DiskSet,
+    test_pics: Sequence[DecodedPicture],
+    cel_palettes: dict[str, tuple[RGBColor, ...]],
+) -> None:
+    if len(test_pics) > 8:
+        map_pal = tuple(test_pics[8].palette)
+        cel_palettes.setdefault("mi.c", map_pal)
+        cel_palettes.setdefault("small.font", map_pal)
+    for cel_key, pic_names in (
+        ("bold.f", ("ch.piv", "message.piv")),
+        ("sel.cel", ("ch.piv",)),
+        ("dice.cel", ("tav.piv", "dice.piv")),
+        ("mys.cel", ("mys.piv", "hea.piv")),
+        ("hen1.c", ("hen1.p",)),
+        ("wi1.c", ("wi2.p", "wi1.p")),
+    ):
+        if cel_key not in cel_palettes:
+            pal = _load_picture_palette(disk_set, *pic_names)
+            if pal is not None:
+                cel_palettes[cel_key] = pal
+
+
+def _compute_map_mask_indices(
+    disk_set: DiskSet,
+    mog_exec: DecodedHunkExecutable | None,
+) -> frozenset[int]:
+    if mog_exec is None or not disk_set.has_file("mi.c"):
+        return frozenset()
+    try:
+        mi_cel = decode_cel(disk_set.read_file("mi.c"))
+        sizes = tuple((f.meta.width, f.meta.height) for f in mi_cel.frames)
+        if not sizes:
+            return frozenset()
+        rules = parse_map_rules(mog_exec, sizes)
+    except (MogVersionError, HunkFormatError, CelFormatError, ValueError):
+        return frozenset()
+    raw_indices = {rules.ramp_index, *range(rules.cycle_start, rules.cycle_end + 1)}
+    return frozenset(idx for idx in raw_indices if 0 <= idx <= MAX_PALETTE_INDEX)
+
+
+def _build_template_context(disk_set: DiskSet) -> _TemplateContext:
+    test_pics = decode_picture_pack(disk_set.read_file("test")) if disk_set.has_file("test") else []
+    hit_sets = (
+        parse_collide_hit(disk_set.read_file("collide.hit"))
+        if disk_set.has_file("collide.hit")
+        else {}
+    )
+    mog_exec = _try_parse_hunk(disk_set, "mog")
+    prog_exec = _try_parse_hunk(disk_set, "program")
+    cel_palettes: dict[str, tuple[RGBColor, ...]] = {}
+    frame_palettes: dict[tuple[str, int], tuple[RGBColor, ...]] = {}
+
+    if mog_exec is not None:
+        _add_fight_palettes(mog_exec, test_pics, cel_palettes)
+        _add_sheet_palettes(mog_exec, cel_palettes)
+        _add_dice_palettes(disk_set, mog_exec, cel_palettes, frame_palettes)
+        _add_service_palettes(disk_set, mog_exec, cel_palettes)
+        _add_ritual_palettes(disk_set, mog_exec, cel_palettes)
+        _add_wizard_palettes(disk_set, mog_exec, cel_palettes)
+        _add_menu_palettes(disk_set, mog_exec, cel_palettes, frame_palettes)
+
+    _add_program_cel_palettes(disk_set, prog_exec, cel_palettes)
+    _add_picture_fallbacks(disk_set, test_pics, cel_palettes)
+    map_mask_indices = _compute_map_mask_indices(disk_set, mog_exec)
+
+    return _TemplateContext(
+        disk_set=disk_set,
+        test_pics=test_pics,
+        hit_sets=hit_sets,
+        map_mask_indices=map_mask_indices,
+        cel_palettes=cel_palettes,
+        frame_palettes=frame_palettes,
+    )
+
+
+def _resolve_cel_palette(
+    ctx: _TemplateContext,
+    norm_key: str,
+    frame_index: int,
+) -> tuple[RGBColor, ...]:
+    frame_pal = ctx.frame_palettes.get((norm_key, frame_index))
+    if frame_pal is not None:
+        return frame_pal
+    cel_pal = ctx.cel_palettes.get(norm_key)
+    if cel_pal is not None:
+        return cel_pal
+    if ctx.test_pics:
+        return tuple(ctx.test_pics[0].palette)
+    return default_combat_palette()
+
+
+def _build_cel_mask(norm_key: str, pixels: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8] | None:
+    if norm_key.startswith("kn") and norm_key.endswith(".ob"):
+        keep = (pixels >= 6) & (pixels <= 8)
+        return np.where(keep, pixels, 0).astype(np.uint8)
+    if norm_key.startswith("he") and norm_key.endswith(".ob"):
+        keep = ((pixels >= 6) & (pixels <= 8)) | ((pixels >= 9) & (pixels <= 11))
+        return np.where(keep, pixels, 0).astype(np.uint8)
+    return None
+
+
+def _build_arena_mask(pixels: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
+    keep = ((pixels >= 1) & (pixels <= 4)) | ((pixels >= 16) & (pixels <= 28))
+    return np.where(keep, pixels, 0).astype(np.uint8)
+
+
+def _build_map_mask(
+    pixels: npt.NDArray[np.uint8],
+    indices: frozenset[int],
+) -> npt.NDArray[np.uint8] | None:
+    if not indices:
+        return None
+    keep = np.isin(pixels, sorted(indices))
+    return np.where(keep, pixels, 0).astype(np.uint8)
+
+
+def _render_starter_pack_toml() -> str:
+    return (
+        "schema_version = 1\n"
+        'name = "Moonstone HD Template"\n'
+        'version = "0.1.0"\n'
+        'author = ""\n'
+        "scale = 4\n"
+        'default_mode = "rgba"\n'
+        'fallback_filter = "nearest"\n'
+    )
+
+
+def _format_cel_meta_toml(
+    norm_key: str,
+    frames: Sequence[CelFrame],
+    hit_set: HitSet | None,
+) -> str:
+    lines = [
+        f"# HD template reference metadata for {norm_key} (1x export; ARCHITECTURE.md §14.5)",
+        "# Uncomment overrides below only after upscaling (see §14.3.2):",
+        '# mode = "rgba"',
+        "# scale = 4",
+        "#",
+    ]
+    for idx, frame in enumerate(frames):
+        meta = frame.meta
+        if meta.width == 0 or meta.height == 0:
+            lines.append(
+                f"# frame_{meta.index:03d}: width=0 height=0 hot_x={meta.hot_x} "
+                "hurt_tight_box=[0, 0, 0, 0] (0x0 empty frame; PNG omitted)"
+            )
+            continue
+        hurt = compute_cel_hurtbox(frame)
+        hurt_box = f"[{hurt.tight_x}, {hurt.tight_y}, {hurt.tight_width}, {hurt.tight_height}]"
+        lines.append(
+            f"# frame_{meta.index:03d}: width={meta.width} height={meta.height} "
+            f"hot_x={meta.hot_x} hurt_tight_box={hurt_box}"
+        )
+        if hit_set is not None and idx < len(hit_set.frames) and hit_set.frames[idx].count > 0:
+            hf = hit_set.frames[idx]
+            pts = ", ".join(f"({p.x}, {p.y})" for p in hf.points)
+            lines.append(
+                f"#   collide.hit: hit_type={hf.hit_type} "
+                f"hit_max_box=[{hf.max_x}, {hf.max_y}] hit_points=[{pts}]"
+            )
+    return "\n".join(lines) + "\n"
+
+
+def _export_hd_pictures(ctx: _TemplateContext, output_dir: Path) -> tuple[int, int]:
+    pic_count = 0
+    mask_count = 0
+    for idx, pic in enumerate(ctx.test_pics):
+        _write_output_file(
+            output_dir,
+            f"pictures/test_{idx}.png",
+            encode_rgba_png_bytes(picture_to_rgba(pic)),
+        )
+        pic_count += 1
+        if idx == 8:
+            mask = _build_map_mask(pic.pixels, ctx.map_mask_indices)
+            if mask is not None:
+                _write_output_file(
+                    output_dir,
+                    "pictures/test_8.mask.png",
+                    encode_mask_png_bytes(mask),
+                )
+                mask_count += 1
+
+    for entry in ctx.disk_set.list_entries():
+        norm = entry.norm_name
+        if "/" in norm:
+            continue
+        if norm.endswith(PICTURE_EXTENSIONS) or norm == "mindscape":
+            pic = decode_picture(ctx.disk_set.read_file(norm))
+            key = normalize_hd_asset_key(norm)
+            _write_output_file(
+                output_dir,
+                f"pictures/{key}.png",
+                encode_rgba_png_bytes(picture_to_rgba(pic)),
+            )
+            pic_count += 1
+    return pic_count, mask_count
+
+
+def _export_hd_arenas(ctx: _TemplateContext, output_dir: Path) -> tuple[int, int]:
+    if len(ctx.test_pics) < 8:
+        return 0, 0
+    arena_count = 0
+    mask_count = 0
+    for entry in ctx.disk_set.list_entries():
+        norm = entry.norm_name
+        if "/" in norm or not norm.endswith(".t"):
+            continue
+        arena = decode_arena(norm, ctx.disk_set.read_file(norm))
+        bg_pic = composite_arena_background(arena, ctx.test_pics)
+        key = normalize_hd_asset_key(norm)
+        _write_output_file(
+            output_dir,
+            f"arenas/{key}.png",
+            encode_rgba_png_bytes(picture_to_rgba(bg_pic)),
+        )
+        _write_output_file(
+            output_dir,
+            f"arenas/{key}.mask.png",
+            encode_mask_png_bytes(_build_arena_mask(bg_pic.pixels)),
+        )
+        arena_count += 1
+        mask_count += 1
+    return arena_count, mask_count
+
+
+def _export_hd_cel_entry(
+    ctx: _TemplateContext,
+    entry: OFSFileEntry,
+    output_dir: Path,
+) -> tuple[int, int, int]:
+    key = normalize_hd_asset_key(entry.norm_name)
+    cel = decode_cel(ctx.disk_set.read_file(entry.norm_name))
+    hit_set = ctx.hit_sets.get(Path(key).stem)
+    exported_frames = 0
+    skipped_zero = 0
+    mask_count = 0
+
+    for frame in cel.frames:
+        if frame.meta.width == 0 or frame.meta.height == 0:
+            skipped_zero += 1
+            continue
+        pal = _resolve_cel_palette(ctx, key, frame.meta.index)
+        rgba = cel_frame_to_rgba(frame, pal)
+        _write_output_file(
+            output_dir,
+            f"cels/{key}/frame_{frame.meta.index:03d}.png",
+            encode_rgba_png_bytes(rgba),
+        )
+        exported_frames += 1
+        mask = _build_cel_mask(key, frame.pixels)
+        if mask is not None:
+            _write_output_file(
+                output_dir,
+                f"cels/{key}/frame_{frame.meta.index:03d}.mask.png",
+                encode_mask_png_bytes(mask),
+            )
+            mask_count += 1
+
+    meta_text = _format_cel_meta_toml(key, cel.frames, hit_set)
+    _write_output_file(output_dir, f"cels/{key}/meta.toml", meta_text.encode("utf-8"))
+    return exported_frames, skipped_zero, mask_count
+
+
+def _export_hd_cels(ctx: _TemplateContext, output_dir: Path) -> tuple[int, int, int, int, int]:
+    cel_count = 0
+    frame_count = 0
+    mask_count = 0
+    meta_count = 0
+    skipped_zero = 0
+    for entry in ctx.disk_set.list_entries():
+        norm = entry.norm_name
+        if "/" in norm or not norm.endswith(CEL_EXTENSIONS):
+            continue
+        frames, skipped, masks = _export_hd_cel_entry(ctx, entry, output_dir)
+        cel_count += 1
+        frame_count += frames
+        skipped_zero += skipped
+        mask_count += masks
+        meta_count += 1
+    return cel_count, frame_count, mask_count, meta_count, skipped_zero
+
+
+def export_hd_template_from_disk_set(disk_set: DiskSet, output_dir: Path) -> HdTemplateSummary:
+    """Export a ready-to-edit 1x HD asset pack template from `disk_set` (ARCHITECTURE.md §14.5)."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ctx = _build_template_context(disk_set)
+    _write_output_file(output_dir, "pack.toml", _render_starter_pack_toml().encode("utf-8"))
+
+    pic_count, pic_masks = _export_hd_pictures(ctx, output_dir)
+    arena_count, arena_masks = _export_hd_arenas(ctx, output_dir)
+    cel_count, cel_frame_count, cel_masks, meta_count, skipped_zero = _export_hd_cels(
+        ctx, output_dir
+    )
+
+    return HdTemplateSummary(
+        pack_root=output_dir,
+        picture_count=pic_count,
+        arena_count=arena_count,
+        cel_count=cel_count,
+        cel_frame_count=cel_frame_count,
+        mask_count=pic_masks + arena_masks + cel_masks,
+        meta_count=meta_count,
+        skipped_zero_frames=skipped_zero,
+    )
+
+
+def export_hd_template(adf_dir: Path, output_dir: Path) -> HdTemplateSummary:
+    """Discover `.adf` images in `adf_dir` and export a 1x HD template (ARCHITECTURE.md §14.5)."""
+    disk_set = DiskSet.from_directory(adf_dir)
+    return export_hd_template_from_disk_set(disk_set, output_dir)
