@@ -25,6 +25,7 @@ dist/
 .mypy_cache/
 .import_linter_cache/
 .coverage
+.coverage.*
 coverage.xml
 htmlcov/
 .agents/

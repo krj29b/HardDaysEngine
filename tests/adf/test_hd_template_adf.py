@@ -39,12 +39,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.adf
 
 
-def test_real_disk_hd_template_round_trip_and_masks(adf_dir: Path, tmp_path: Path) -> None:
-    out_dir = tmp_path / "hd_template"
-    rc = extract_cli_main(["--adf-dir", str(adf_dir), "--hd-template", "--output", str(out_dir)])
-    assert rc == 0
-
-    ds = DiskSet.from_directory(adf_dir)
+def _assert_round_trip_and_masks(out_dir: Path, ds: DiskSet) -> None:
     pack = HdPack.load(out_dir)
     report = pack.validate(disk_set=ds)
     assert report.checked_against_disks is True
@@ -83,16 +78,7 @@ def test_real_disk_hd_template_round_trip_and_masks(adf_dir: Path, tmp_path: Pat
     assert "hit_points=" in kn4_meta_text
 
 
-def test_real_disk_hd_template_uses_authentic_mog_scene_palettes(
-    adf_dir: Path, tmp_path: Path
-) -> None:
-    out_dir = tmp_path / "hd_template_pals"
-    assert (
-        extract_cli_main(["--adf-dir", str(adf_dir), "--hd-template", "--output", str(out_dir)])
-        == 0
-    )
-
-    ds = DiskSet.from_directory(adf_dir)
+def _assert_authentic_mog_scene_palettes(out_dir: Path, ds: DiskSet) -> None:
     mog_exec = parse_hunk_executable("mog", ds.read_file("mog"))
     tables = parse_fight_palette_tables(mog_exec)
     defs = parse_fight_defs(mog_exec)
@@ -158,3 +144,13 @@ def test_real_disk_hd_template_uses_authentic_mog_scene_palettes(
         assert np.array_equal(np.asarray(s0_img), cel_frame_to_rgba(sel_cel.frames[0], ch_pal))
     with Image.open(out_dir / "cels" / "sel.cel" / "frame_002.png") as s2_img:
         assert np.array_equal(np.asarray(s2_img), cel_frame_to_rgba(sel_cel.frames[2], ks_pal))
+
+
+def test_real_disk_hd_template_round_trip_masks_and_palettes(adf_dir: Path, tmp_path: Path) -> None:
+    out_dir = tmp_path / "hd_template"
+    rc = extract_cli_main(["--adf-dir", str(adf_dir), "--hd-template", "--output", str(out_dir)])
+    assert rc == 0
+
+    ds = DiskSet.from_directory(adf_dir)
+    _assert_round_trip_and_masks(out_dir, ds)
+    _assert_authentic_mog_scene_palettes(out_dir, ds)
