@@ -8,6 +8,7 @@ derived from game data and must stay under the git-ignored ``build/`` directory.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import moderngl
@@ -40,6 +41,7 @@ from harddaysengine.app.fight_audit import (
 )
 from harddaysengine.app.fight_runtime import FightLoader
 from harddaysengine.app.game import GameScene, GameSession
+from harddaysengine.app.hd_host import FightHdHistory, HdHostPresenter
 from harddaysengine.app.input import InputFrame, PlayerInput
 from harddaysengine.app.map_scene import compose_map
 from harddaysengine.app.meeting_audit import meeting_shots
@@ -47,23 +49,34 @@ from harddaysengine.app.valley_audit import valley_shots
 from harddaysengine.app.village_audit import village_exit, village_shots, village_temple
 from harddaysengine.app.wizard_audit import wizard_shots
 from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.cel import flip_cel_frame
+from harddaysengine.assets.hit import HitFrame, HitSet, parse_collide_hit
 from harddaysengine.assets.palette import default_combat_palette
-from harddaysengine.render.renderer import HardDaysRenderer
+from harddaysengine.render.overlay import OverlayLine, build_frame_overlay
+from harddaysengine.render.renderer import (
+    CANVAS_HEIGHT,
+    CANVAS_WIDTH,
+    PLAYFIELD_Y_OFFSET,
+    HardDaysRenderer,
+)
 from harddaysengine.render.scene import SceneRenderer, default_bitmap_font
+from harddaysengine.sim.m68k import s16
 from harddaysengine.sim.overworld import EncounterTrigger, MapSprite, TriggerKind, open_menu, scan
 from harddaysengine.sim.stonehenge import StonePhase
 from harddaysengine.sim.towns import TownEntry
 from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
-    from pathlib import Path
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     import numpy.typing as npt
 
     from harddaysengine.app.fight_scene import FightScene
     from harddaysengine.app.scene_assets import GameAssetBundle
+    from harddaysengine.assets.cel import DecodedCel
+    from harddaysengine.assets.hd_pack import HdPack
     from harddaysengine.render.presentation import DisplaySettings
+    from harddaysengine.sim.fight_script import Draw
 
 _PRIMARY = KnightId.RED
 _LABEL_HEIGHT = 12
@@ -125,6 +138,73 @@ def parse_present_size(spec: str) -> tuple[int, int]:
     return (width, height)
 
 
+def compose_side_by_side(
+    classic_rgb: npt.NDArray[np.uint8],
+    hd_rgb: npt.NDArray[np.uint8],
+) -> npt.NDArray[np.uint8]:
+    """Combine Classic (left) and HD (right) RGB frames at matching dimensions (§14.7)."""
+    target_h, target_w = hd_rgb.shape[:2]
+    src_h, src_w = classic_rgb.shape[:2]
+    if (src_h, src_w) != (target_h, target_w):
+        if target_h % src_h == 0 and target_w % src_w == 0:
+            left = np.repeat(
+                np.repeat(classic_rgb, target_h // src_h, axis=0),
+                target_w // src_w,
+                axis=1,
+            )
+        else:
+            resized = Image.fromarray(classic_rgb).resize(
+                (target_w, target_h), Image.Resampling.NEAREST
+            )
+            left = np.asarray(resized, dtype=np.uint8)
+    else:
+        left = classic_rgb
+    return np.ascontiguousarray(np.concatenate((left, hd_rgb), axis=1))
+
+
+def _resolve_hit_frame(
+    hit_sets: Mapping[str, HitSet], cel_name: str, frame_index: int
+) -> HitFrame | None:
+    hit_set = hit_sets.get(Path(cel_name).stem.lower())
+    if hit_set is None or frame_index >= len(hit_set.frames):
+        return None
+    return hit_set.frames[frame_index]
+
+
+def _draw_hitbox_lines(
+    draw: Draw,
+    cels: Mapping[str, DecodedCel],
+    hit_sets: Mapping[str, HitSet],
+    y_offset: int,
+) -> list[OverlayLine]:
+    if draw.stamp or draw.text:
+        return []
+    cel = cels.get(draw.cel)
+    if cel is None or not 0 <= draw.frame < len(cel.frames):
+        return []
+    raw = cel.frames[draw.frame]
+    if raw.meta.width <= 0 or raw.meta.height <= 0:
+        return []
+    shift = 0 if draw.mirrored else raw.meta.hot_x
+    draw_x = s16(draw.x) - shift
+    draw_y = s16(draw.y) + PLAYFIELD_Y_OFFSET + y_offset
+    frame = flip_cel_frame(raw) if draw.mirrored else raw
+    hit_frame = _resolve_hit_frame(hit_sets, draw.cel, draw.frame)
+    return build_frame_overlay(draw_x, draw_y, frame, hit_frame)
+
+
+def _build_fight_hitbox_lines(
+    history: FightHdHistory,
+    hit_sets: Mapping[str, HitSet],
+    *,
+    y_offset: int = 0,
+) -> list[OverlayLine]:
+    lines: list[OverlayLine] = []
+    for draw in history.last_draws:
+        lines.extend(_draw_hitbox_lines(draw, history.cels, hit_sets, y_offset))
+    return lines
+
+
 class AuditRig:
     """Standalone GL canvas plus the session factory used by all audit scenarios."""
 
@@ -134,6 +214,8 @@ class AuditRig:
         *,
         display: DisplaySettings | None = None,
         present_size: tuple[int, int] | None = None,
+        hd_pack: HdPack | None = None,
+        show_hitboxes: bool = False,
     ) -> None:
         self._adf_dir = adf_dir
         self._ctx = moderngl.create_standalone_context(require=330)
@@ -142,6 +224,11 @@ class AuditRig:
         self._scene.set_palette(default_combat_palette())
         self._font = default_bitmap_font()
         self._display = display
+        self._hd_host: HdHostPresenter | None = (
+            HdHostPresenter(hd_pack) if hd_pack is not None else None
+        )
+        self._show_hitboxes = show_hitboxes
+        self._hit_sets: dict[str, HitSet] | None = None
         self._present_size: tuple[int, int] | None = None
         self._present_tex: moderngl.Texture | None = None
         self._present_fbo: moderngl.Framebuffer | None = None
@@ -154,19 +241,94 @@ class AuditRig:
             self._present_tex = self._ctx.texture(size, 4)
             self._present_fbo = self._ctx.framebuffer(color_attachments=[self._present_tex])
 
-    def _read_shot(self, name: str) -> AuditShot:
-        if self._present_fbo is None or self._display is None or self._present_size is None:
-            rgba = self._base.read_canvas_rgba()
-            return AuditShot(name=name, rgb=np.ascontiguousarray(rgba[..., :3]))
+    def _load_hit_sets(self) -> dict[str, HitSet]:
+        if self._hit_sets is None:
+            disks = DiskSet.from_directory(self._adf_dir)
+            self._hit_sets = (
+                parse_collide_hit(disks.read_file("collide.hit"))
+                if disks.has_file("collide.hit")
+                else {}
+            )
+        return self._hit_sets
+
+    def _draw_overlay_classic(self, lines: Sequence[OverlayLine]) -> None:
+        if not lines:
+            return
+        self._base.canvas_fbo.use()
+        self._ctx.viewport = (0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+        self._base.draw_overlay_lines(lines)
+
+    def _read_present_rgb(
+        self,
+        *,
+        hd_tex: moderngl.Texture | None = None,
+        hd_scale: int = 1,
+    ) -> npt.NDArray[np.uint8]:
+        assert self._present_fbo is not None
+        assert self._display is not None
+        assert self._present_size is not None
         width, height = self._present_size
         self._base.present_to_framebuffer(
             self._present_fbo,
             (width, height),
             settings=self._display,
+            hd_tex=hd_tex,
+            hd_scale=hd_scale,
         )
         raw = self._present_fbo.read(components=4)
         arr = np.frombuffer(raw, dtype=np.uint8).reshape((height, width, 4))
-        return AuditShot(name=name, rgb=np.ascontiguousarray(arr[::-1, :, :3]))
+        return np.ascontiguousarray(arr[::-1, :, :3])
+
+    def _read_classic_rgb(self) -> npt.NDArray[np.uint8]:
+        if self._present_fbo is not None:
+            return self._read_present_rgb()
+        rgba = self._base.read_canvas_rgba()
+        return np.ascontiguousarray(rgba[..., :3])
+
+    def _read_hd_rgb(self, hd_tex: moderngl.Texture | None) -> npt.NDArray[np.uint8]:
+        assert self._hd_host is not None
+        compositor = self._hd_host.compositor
+        if hd_tex is None or compositor is None:
+            classic = self._read_classic_rgb()
+            if self._present_fbo is not None:
+                return classic
+            scale = self._hd_host.scale
+            return np.ascontiguousarray(np.repeat(np.repeat(classic, scale, axis=0), scale, axis=1))
+        if self._present_fbo is not None:
+            return self._read_present_rgb(hd_tex=hd_tex, hd_scale=self._hd_host.scale)
+        rgba = compositor.read_canvas_rgba()
+        return np.ascontiguousarray(rgba[..., :3])
+
+    def _read_shot(self, name: str, *, hd_tex: moderngl.Texture | None = None) -> AuditShot:
+        classic = self._read_classic_rgb()
+        if self._hd_host is None:
+            return AuditShot(name=name, rgb=classic)
+        hd_rgb = self._read_hd_rgb(hd_tex)
+        return AuditShot(name=name, rgb=compose_side_by_side(classic, hd_rgb))
+
+    def _fight_overlay_lines(
+        self,
+        history: FightHdHistory | None,
+        *,
+        y_offset: int = 0,
+    ) -> list[OverlayLine]:
+        if not self._show_hitboxes or history is None:
+            return []
+        return _build_fight_hitbox_lines(history, self._load_hit_sets(), y_offset=y_offset)
+
+    def _apply_hd_overlay(
+        self,
+        hd_tex: moderngl.Texture | None,
+        lines: Sequence[OverlayLine],
+    ) -> None:
+        if hd_tex is None or not lines or self._hd_host is None:
+            return
+        compositor = self._hd_host.compositor
+        if compositor is None:
+            return
+        compositor.output_fbo.use()
+        self._ctx.viewport = (0, 0, compositor.canvas_size[0], compositor.canvas_size[1])
+        self._base.draw_overlay_lines(lines)
 
     def new_session(self, players: tuple[KnightId, ...] = (_PRIMARY,)) -> GameSession:
         """Return a fresh single-player session on the real disks."""
@@ -175,13 +337,40 @@ class AuditRig:
     def capture(self, session: GameSession, name: str) -> AuditShot:
         """Render the session's current scene and return its canvas or presented frame as RGB."""
         session.render_to_scene(self._scene, self._font)
-        return self._read_shot(name)
+        fight_scene = (
+            session.active_encounter.runtime.scene if session.active_encounter is not None else None
+        )
+        lines = self._fight_overlay_lines(
+            fight_scene.hd_history if fight_scene is not None else None,
+            y_offset=fight_scene.fight.shake.offset if fight_scene is not None else 0,
+        )
+        self._draw_overlay_classic(lines)
+        hd_tex: moderngl.Texture | None = None
+        if self._hd_host is not None:
+            compositor = self._hd_host.ensure_active(self._ctx, enabled=True)
+            if compositor is not None:
+                hd_tex = self._hd_host.render_session_hd(session, compositor)
+                self._apply_hd_overlay(hd_tex, lines)
+        return self._read_shot(name, hd_tex=hd_tex)
 
     def capture_fight(self, scene: FightScene, name: str) -> AuditShot:
         """Capture the persistent engine's last output without stepping it (§10.17)."""
         scene.render(self._scene)
         self._scene.flush_to_fbo()
-        return self._read_shot(name)
+        lines = self._fight_overlay_lines(scene.hd_history, y_offset=scene.fight.shake.offset)
+        self._draw_overlay_classic(lines)
+        hd_tex: moderngl.Texture | None = None
+        if self._hd_host is not None:
+            compositor = self._hd_host.ensure_active(self._ctx, enabled=True)
+            if compositor is not None:
+                hd_tex = self._hd_host.render_fight_history(
+                    compositor,
+                    scene.hd_history,
+                    live_palette=scene.palette,
+                    background_y_offset=scene.fight.shake.offset,
+                )
+                self._apply_hd_overlay(hd_tex, lines)
+        return self._read_shot(name, hd_tex=hd_tex)
 
     def capture_map_frames(self, frames: tuple[int, ...]) -> AuditShot:
         """Preview every used mi.c frame separately from natural map captures (§11.15)."""
@@ -193,7 +382,22 @@ class AuditRig:
         compose_map(self._scene.canvas, picture.pixels, cel, sprites)
         self._scene.set_palette(picture.palette)
         self._scene.flush_to_fbo()
-        return self._read_shot("mi_frames_" + "_".join(map(str, frames)))
+        hd_tex: moderngl.Texture | None = None
+        if self._hd_host is not None:
+            compositor = self._hd_host.ensure_active(self._ctx, enabled=True)
+            if compositor is not None:
+                compositor.set_palettes(picture.palette, picture.palette)
+                compositor.begin_scene()
+                compositor.draw_picture("test_8", picture.pixels[:200, :320])
+                for sprite in sprites:
+                    compositor.draw_cel_frame(
+                        "mi.c",
+                        cel.frames[sprite.frame],
+                        sprite.x,
+                        sprite.y + PLAYFIELD_Y_OFFSET,
+                    )
+                hd_tex = compositor.output_texture
+        return self._read_shot("mi_frames_" + "_".join(map(str, frames)), hd_tex=hd_tex)
 
     def fight_assets(self) -> GameAssetBundle:
         """Return the real-disk bundle used for fight-engine audit fixtures."""
@@ -203,6 +407,9 @@ class AuditRig:
 
     def release(self) -> None:
         """Free the GL resources."""
+        if self._hd_host is not None:
+            self._hd_host.release()
+            self._hd_host = None
         if self._present_fbo is not None:
             self._present_fbo.release()
             self._present_fbo = None
@@ -1006,7 +1213,13 @@ def build_contact_sheet(
 def _sheet_layout(
     shot_count: int,
     present_size: tuple[int, int] | None,
+    *,
+    hd_compare: bool = False,
 ) -> tuple[int, int | None]:
+    if hd_compare:
+        if present_size is not None:
+            return (1, 1280)
+        return (min(2, max(1, shot_count)), 1280)
     if present_size is None:
         return (_SHEET_COLUMNS, None)
     if shot_count <= 4:
@@ -1016,6 +1229,19 @@ def _sheet_layout(
     return (cols, max_w)
 
 
+def _sheet_filename(
+    name: str,
+    display: DisplaySettings | None,
+    resolved_size: tuple[int, int] | None,
+    *,
+    hd_compare: bool,
+) -> str:
+    if display is not None and resolved_size is not None:
+        prefix = f"{name}_hd" if hd_compare else name
+        return f"{prefix}_{display.filter.value}_{resolved_size[0]}x{resolved_size[1]}.png"
+    return f"{name}_hd_compare.png" if hd_compare else f"{name}.png"
+
+
 def run_audit(
     adf_dir: Path,
     out_dir: Path,
@@ -1023,12 +1249,15 @@ def run_audit(
     *,
     display: DisplaySettings | None = None,
     present_size: tuple[int, int] | None = None,
+    hd_pack: HdPack | None = None,
+    show_hitboxes: bool = False,
 ) -> dict[str, Path]:
     """Capture selected scenarios, writing one contact sheet per scenario.
 
     When ``display`` is provided, each shot is rendered through the real presentation path into an
     offscreen framebuffer of ``present_size`` (default ``1920x1080``) and written as
-    ``<scenario>_<preset>_<W>x<H>.png``.
+    ``<scenario>_<preset>_<W>x<H>.png``. When ``hd_pack`` is provided, every shot is composed
+    side-by-side (Classic left, HD right) for visual artist QA (§14.7).
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     resolved_size = (
@@ -1036,24 +1265,26 @@ def run_audit(
         if display is None
         else (DEFAULT_PRESENT_SIZE if present_size is None else present_size)
     )
-    rig = AuditRig(adf_dir, display=display, present_size=resolved_size)
+    hd_compare = hd_pack is not None
+    rig = AuditRig(
+        adf_dir,
+        display=display,
+        present_size=resolved_size,
+        hd_pack=hd_pack,
+        show_hitboxes=show_hitboxes,
+    )
     written: dict[str, Path] = {}
     try:
         if scenarios is not None:
             names = tuple(scenarios)
-        elif display is not None:
+        elif display is not None or hd_compare:
             names = PRESENTATION_SCENARIOS
         else:
             names = tuple(AUDIT_SCENARIOS)
         for name in names:
             shots = list(AUDIT_SCENARIOS[name](rig))
-            cols, max_w = _sheet_layout(len(shots), resolved_size)
-            if display is not None and resolved_size is not None:
-                filename = (
-                    f"{name}_{display.filter.value}_{resolved_size[0]}x{resolved_size[1]}.png"
-                )
-            else:
-                filename = f"{name}.png"
+            cols, max_w = _sheet_layout(len(shots), resolved_size, hd_compare=hd_compare)
+            filename = _sheet_filename(name, display, resolved_size, hd_compare=hd_compare)
             path = out_dir / filename
             build_contact_sheet(shots, columns=cols, max_cell_width=max_w).save(path)
             written[name] = path

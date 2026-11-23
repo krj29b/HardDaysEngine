@@ -86,6 +86,7 @@ and confirm each with Enter. Keyboard slots follow portrait selection order.
 | Continue a message or Next Day | Press and release Enter or Space |
 | Leave a sheet or town | Move the pointer to its close/Exit region and confirm |
 | Quit the campaign to farewell on the map | Q |
+| Toggle Classic vs. External HD pack (not recorded in replays) | F7 |
 | Cycle filter preset (not recorded in replays) | F9 (Shift+F9 backwards) |
 | Open live display preview | F10 |
 | Toggle fullscreen (not recorded in replays) | F11 or Alt+Enter |
@@ -133,6 +134,8 @@ Useful CLI flags:
 - `--fullscreen off|desktop|exclusive`: start windowed, borderless desktop fullscreen, or exclusive fullscreen (default `off`)
 - `--vsync` / `--no-vsync`: enable or disable vertical sync (default `true`; `--no-vsync` presents once per 50 Hz tick)
 - `--surround off|blur|solid`: decorative widescreen side-bar fill (default `off`)
+- `--hd-pack <DIR>`: external HD asset pack directory (overrides `HARDDAYSENGINE_HD_PACK_DIR` and `[display] hd_pack_dir`)
+- `--hd-mode off|auto|on`: HD asset pack activation mode (default `auto`: active whenever a pack directory is configured)
 - `--control-mode auto|standard|shared-pad`: host gamepad routing mode (default `[input] mode` or `auto`)
 
 Display and input settings can also live in `config.toml` (CLI flags win; unknown keys are an error):
@@ -157,12 +160,15 @@ crt_bloom = 0.22            # 0.0..1.0 (0 disables bloom)
 surround = "off"            # off, blur, solid
 surround_brightness = 0.28  # 0.0..1.0 (blur mode)
 surround_color = "#101014"  # #RRGGBB (solid mode)
+# hd_pack_dir = "path/to/my-hd-pack"
+hd_mode = "auto"            # off, auto, on
 ```
 
 Press **F10** while playing to open the live display preview. Use **Up/Down** to choose a setting
 and **Left/Right** to change it. Select `crt` to adjust scanlines, mask pattern and strength,
-curvature, and bloom. **Enter** applies the settings for the current session. **Esc** or **F10**
-discards the preview. **F11** still toggles fullscreen.
+curvature, and bloom, or toggle **HD mode** when an HD pack is loaded (**F7** toggles Classic ↔ HD
+instantly without opening the menu). **Enter** applies the settings for the current session. **Esc**
+or **F10** discards the preview. **F11** still toggles fullscreen.
 
 Presentation presets (`--filter` or `F9` / `Shift+F9` at runtime; all presets run strictly after the palette lookup and never affect simulation or replay hashes):
 
@@ -174,11 +180,34 @@ Presentation presets (`--filter` or `F9` / `Shift+F9` at runtime; all presets ru
 | `smooth` | 4× xBR-style edge-directed upscaler preserving 90° corners and dithered textures across palette cycling |
 | `scalefx` | Multi-pass 3× ScaleFX edge-resolving upscaler handling 45°, 2:1, and 3:1 slopes while preserving 90° corners, thin 1px details, and dithered textures |
 
-- `--inspect-assets`: launch the 50 Hz ModernGL Lair Background, Sprite, and Hitbox Inspector (`--cel kn4 --background fol1.t`)
+- `--inspect-assets`: launch the 50 Hz ModernGL Lair Background, Sprite, and Hitbox Inspector (`--cel kn4 --background fol1.t`; supports `--hd-pack <DIR>` and live `F7` Classic ↔ HD preview with scaled `collide.hit` wireframes)
 - `--extract-assets`: unpack ADF assets into `--output-dir` (default `./build/assets`) with `manifest.json`
-- `--inspect-assets --headless-frames <N>` renders `N` inspector frames offscreen using OpenGL 3.3. Add `--screenshot <file.png>` to save the final frame.
+- `--inspect-assets --headless-frames <N>` renders `N` inspector frames offscreen using OpenGL 3.3 (in Classic or HD mode when `--hd-pack` is given). Add `--screenshot <file.png>` to save the final frame.
 - `--headless-ticks <N>` runs `N` gameplay simulation ticks without opening a window and prints the final scene and state hash.
 - `uv run harddaysengine-input-diagnostics --output build/input.jsonl`: standalone SDL input diagnostics for inspecting connected keyboards, mice, raw joysticks, and mapped game controllers (no game window or disks required). See [docs/INPUT_AND_DIAGNOSTICS.md](docs/INPUT_AND_DIAGNOSTICS.md) for current router details and USB vs Bluetooth controller comparison steps.
+
+## External HD Asset Packs
+
+HardDaysEngine supports optional user-supplied **2× / 3× / 4× HD asset packs** (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §14 and ADR-071) composited on the GPU in OpenGL 3.3 without ever touching the deterministic 50 Hz simulation or replay hashes. Unreplaced assets fall back automatically to the original disk art, so partial packs work cleanly.
+
+```powershell
+# 1. Generate a ready-to-paint HD pack scaffold from your local disks into build/
+uv run harddaysengine-extract --hd-template --output-dir build/my-hd-pack
+
+# 2. Validate pack.toml, dimensions, color modes, masks, and anchor bounds
+uv run harddaysengine --validate-hd-pack build/my-hd-pack
+
+# 3. Preview HD art + scaled collide.hit hitboxes in the inspector (F7 toggles Classic <-> HD)
+uv run harddaysengine-inspect --hd-pack build/my-hd-pack --cel kn4 --background fol1.t
+
+# 4. Play with the HD pack (F7 toggles Classic <-> HD at any time; F10 opens Display Preview)
+uv run harddaysengine --hd-pack build/my-hd-pack
+
+# 5. Generate side-by-side Classic vs. HD visual QA contact sheets into build/audit/
+uv run python scripts/audit_shots.py --hd-pack build/my-hd-pack --hitboxes
+```
+
+Pack resolution priority: `--hd-pack <DIR>` > `HARDDAYSENGINE_HD_PACK_DIR` > `[display] hd_pack_dir` in `config.toml`. HD packs live outside this repository; never commit extracted templates or copyrighted game art.
 
 ## Architecture
 

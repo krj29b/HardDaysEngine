@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,12 +17,15 @@ from harddaysengine.app.config import (
 )
 from harddaysengine.app.inspector import run_inspector_headless, run_inspector_window
 from harddaysengine.assets.adf import DiskSet
+from harddaysengine.assets.hd_pack import HdPack
+from harddaysengine.assets.hd_pack_schema import HdPackError
 from harddaysengine.render.presentation import (
     AspectMode,
     CropMode,
     DisplaySettings,
     FilterPreset,
     FullscreenMode,
+    HdMode,
     ScaleMode,
     SurroundMode,
 )
@@ -106,6 +110,18 @@ def build_inspect_parser() -> argparse.ArgumentParser:
         help="widescreen side-bar surround fill (default: [display] surround or off)",
     )
     parser.add_argument(
+        "--hd-pack",
+        default=None,
+        metavar="DIR",
+        help="external HD asset pack directory (overrides HARDDAYSENGINE_HD_PACK_DIR / config)",
+    )
+    parser.add_argument(
+        "--hd-mode",
+        choices=[mode.value for mode in HdMode],
+        default=None,
+        help="HD pack activation mode: off, auto, or on (default: [display] hd_mode or auto)",
+    )
+    parser.add_argument(
         "--headless-frames",
         type=int,
         default=None,
@@ -117,6 +133,16 @@ def build_inspect_parser() -> argparse.ArgumentParser:
         help="optional PNG path to write the rendered canvas when using --headless-frames",
     )
     return parser
+
+
+def _load_cli_hd_pack(display: DisplaySettings | None) -> tuple[HdPack | None, bool]:
+    if display is None or display.hd_pack_dir is None:
+        return (None, True)
+    try:
+        return (HdPack.load(display.hd_pack_dir), True)
+    except HdPackError as exc:
+        print(f"HD pack error: {exc}", file=sys.stderr)
+        return (None, False)
 
 
 def run_inspector_cli(
@@ -134,15 +160,20 @@ def run_inspector_cli(
     if not images:
         print(f"No .adf images found in {adf_dir}")
         return 1
+    hd_pack, ok = _load_cli_hd_pack(display)
+    if not ok:
+        return 1
     disk_set = DiskSet.from_directory(adf_dir)
     if headless_frames is not None:
         shot_path = Path(screenshot) if screenshot is not None else None
+        active_hd = hd_pack if (display is not None and display.hd_enabled) else None
         rgba = run_inspector_headless(
             disk_set,
             frames=headless_frames,
             cel_name=cel_name,
             background_name=background_name,
             screenshot_path=shot_path,
+            hd_pack=active_hd,
         )
         print(f"Rendered {headless_frames} frame(s) ({rgba.shape[1]}x{rgba.shape[0]} RGBA).")
         return 0
@@ -152,6 +183,7 @@ def run_inspector_cli(
         display=display,
         cel_name=cel_name,
         background_name=background_name,
+        hd_pack=hd_pack,
     )
 
 
@@ -176,6 +208,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             fullscreen=args.fullscreen,
             vsync=args.vsync,
             surround=args.surround,
+            hd_pack=args.hd_pack,
+            hd_mode=args.hd_mode,
+            environ=os.environ,
         )
     except ConfigError as exc:
         parser.error(str(exc))

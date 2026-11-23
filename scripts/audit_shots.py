@@ -1,8 +1,9 @@
-"""Write real-disk audit contact sheets to ``build/audit/`` (T11.1, T13.9).
+"""Write real-disk audit contact sheets to ``build/audit/`` (T11.1, T13.9, T19.7).
 
 Usage:
   ``uv run python scripts/audit_shots.py [--adf-dir DIR] [--out-dir DIR]``
   ``uv run python scripts/audit_shots.py --present faithful --size 1920x1080``
+  ``uv run python scripts/audit_shots.py --hd-pack path/to/pack [--hitboxes]``
 """
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ from harddaysengine.app.audit import (
     run_audit,
 )
 from harddaysengine.app.config import find_adf_images, resolve_adf_dir
+from harddaysengine.assets.hd_pack import HdPack
+from harddaysengine.assets.hd_pack_schema import HdPackError
 from harddaysengine.render.presentation import (
     AspectMode,
     CropMode,
@@ -83,6 +86,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=SurroundMode.OFF.value,
         help="widescreen surround mode for --present (default: off)",
     )
+    parser.add_argument(
+        "--hd-pack",
+        default=None,
+        metavar="DIR",
+        help="external HD asset pack directory for side-by-side Classic vs. HD sheets",
+    )
+    parser.add_argument(
+        "--hitboxes",
+        action="store_true",
+        help="overlay hurtbox and collide.hit weapon hitbox wireframes on fight shots",
+    )
     return parser
 
 
@@ -108,10 +122,23 @@ def _resolve_present_options(
     return (display, present_size)
 
 
+def _resolve_hd_pack(
+    parser: argparse.ArgumentParser,
+    hd_pack_arg: str | None,
+) -> HdPack | None:
+    if hd_pack_arg is None:
+        return None
+    try:
+        return HdPack.load(Path(hd_pack_arg))
+    except HdPackError as exc:
+        parser.error(str(exc))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     display, present_size = _resolve_present_options(parser, args)
+    hd_pack = _resolve_hd_pack(parser, args.hd_pack)
 
     adf_dir = resolve_adf_dir(
         args.adf_dir,
@@ -128,6 +155,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.scenario,
         display=display,
         present_size=present_size,
+        hd_pack=hd_pack,
+        show_hitboxes=args.hitboxes,
     )
     for name, path in written.items():
         print(f"{name}: {path}")
