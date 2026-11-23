@@ -1347,3 +1347,47 @@ scene with zero art dependencies and full Amiga palette-effect fidelity (fades, 
 pulses, class/region swaps). `PostProcessChain` gains clean original-source pass access for
 future multi-pass filters. No new Python dependencies, no new `[display]` keys, and no
 simulation changes are introduced.
+
+## ADR-070: Strict third-party license auditing and DLL coverage for Windows portable builds
+
+**Status:** ACCEPTED (2026-11-23; refines ADR-068)
+
+**Context:** ADR-068 added `THIRD_PARTY_LICENSES.txt` generation to `scripts/build_windows.py`,
+but walking `pyinstaller`'s build-time dependencies pulled non-redistributed build packages
+(`altgraph`, `packaging`, `pefile`, `pywin32-ctypes`, `setuptools`, `pyinstaller-hooks-contrib`)
+into the notice file, extension filtering skipped multi-file license variants such as
+`LICENSE.APACHE` / `LICENSE.BSD`, package-tree duplicates (notably in `numpy`) were repeated,
+bundled native DLLs only listed URLs instead of full copyright and license texts, mandatory
+FreeType (FTL), IJG, and LGPL-2.1 source/relinking notices were missing, and
+`verify_archive_contents()` did not enforce DLL coverage or reject empty/pointer-only sections.
+
+**Decision:**
+1. Walk transitive runtime dependencies solely from `harddaysengine`, excluding build-only
+   distributions (`altgraph`, `packaging`, `pefile`, `pywin32-ctypes`, `setuptools`) unless
+   actually redistributed. Add `pyinstaller` directly as a leaf (for its bootloader and runtime
+   hooks), and add `pyinstaller-hooks-contrib` only when its runtime hooks are empirically
+   detected inside the frozen `HardDaysEngine.exe` archive. Pass `--exclude-module setuptools`
+   and `--exclude-module pkg_resources` to PyInstaller.
+2. Collect all non-code license files under `*.dist-info/licenses/` (including extensions such
+   as `.APACHE` and `.BSD`) and `LICENSE*`/`COPYING*`/`NOTICE*`/`LGPL*` variants, deduplicating
+   identical normalized license texts within each package with `*.dist-info/` taking priority.
+3. Empirically query `libxmp.dll` (`xmp_version` / `xmp_vercode`) at build time (verified as
+   `4.6.3`, MIT-licensed since `4.6.1`, with automatic LGPL-2.1 handling if `< 4.6.1`) and
+   detect the bundled FreeType copyright year (`2026` for FreeType `2.14.3`). Emit mandatory
+   FTL, IJG, and LGPL-2.1 (§4/§6 `--onedir` shared-library replacement and exact source URLs)
+   notices at the top of `THIRD_PARTY_LICENSES.txt`, plus full copyright and license texts for
+   every bundled native DLL not already covered verbatim above (`SDL2`, `SDL2_image`,
+   `SDL2_mixer`, `SDL2_ttf`, `libogg`, `libopus`, `opusfile`, `libwavpack`, `libxmp`,
+   `portmidi`, `libffi`), and verified references for DLLs whose verbatim licenses appear in
+   `pillow`, `numpy`, or CPython (`freetype`, `libjpeg`, `libpng`, `libtiff`, `libwebp`,
+   `libscipy_openblas`, `OpenSSL`).
+4. Enforce hard assertions in `verify_archive_contents()`: presence and match of `LICENSE.txt`,
+   `NOTICE.txt`, and `THIRD_PARTY_LICENSES.txt`; mandatory FTL, IJG, and LGPL-2.1 notices;
+   substantive license text in every section (rejecting empty, fallback, or pointer-only stubs);
+   absence of `setuptools`/`pkg_resources` in `_internal/`; and 100% DLL coverage of `_internal/`
+   outside a narrow CPython/MSVC/Windows runtime DLL allowlist, failing the build on any new
+   unknown DLL.
+
+**Consequences:** Portable Windows builds are self-auditing against license regressions and
+dependency updates without relaxing any quality gate. No game data or simulation code is
+affected.
