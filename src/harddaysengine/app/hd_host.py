@@ -6,6 +6,16 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from harddaysengine.app.hd_scenes import (
+    render_calendar_hd,
+    render_meeting_hd,
+    render_menu_hd,
+    render_overworld_hd,
+    render_service_hd,
+    render_sheet_hd,
+    render_town_hd,
+    render_valley_hd,
+)
 from harddaysengine.app.map_scene import draw_map_text
 from harddaysengine.assets.fight_palette import (
     REGION_FOREST,
@@ -371,41 +381,148 @@ class HdHostPresenter:
             compositor.draw_indexed_overlay(overlay, cache_key=f"wizard_speech_{stage}")
         return compositor.output_texture
 
+    def _render_combat_hd(
+        self,
+        session: GameSession,
+        compositor: HdCompositor,
+    ) -> moderngl.Texture | None:
+        if session.active_encounter is None:
+            return None
+        scene = session.active_encounter.runtime.scene
+        live = _effective_session_palette(session, scene.palette)
+        return self.render_fight_history(
+            compositor,
+            scene.hd_history,
+            live_palette=live,
+            background_y_offset=scene.fight.shake.offset,
+        )
+
+    def _render_stone_scene_hd(
+        self,
+        session: GameSession,
+        compositor: HdCompositor,
+    ) -> moderngl.Texture | None:
+        screen = session.stone_screen
+        if screen is None:
+            return None
+        if screen.state.phase == StonePhase.MAP_OUT:
+            return render_overworld_hd(session, compositor, _effective_session_palette)
+        base = (
+            screen.ritual_palette()
+            if screen.state.phase in (StonePhase.RITUAL, StonePhase.RITUAL_OUT)
+            else screen.message_palette()
+        )
+        live = _effective_session_palette(session, base)
+        return self._render_stone_hd(compositor, screen, live)
+
+    def _render_wizard_scene_hd(
+        self,
+        session: GameSession,
+        compositor: HdCompositor,
+    ) -> moderngl.Texture | None:
+        screen = session.wizard_screen
+        if screen is None:
+            return None
+        if screen.state.phase == WizardPhase.MAP_OUT:
+            return render_overworld_hd(session, compositor, _effective_session_palette)
+        live = _effective_session_palette(session, screen.palette())
+        return self._render_wizard_hd(compositor, screen, live)
+
+    def _render_new_day_hd(
+        self,
+        session: GameSession,
+        compositor: HdCompositor,
+    ) -> moderngl.Texture | None:
+        if session._calendar_phase == 0:
+            return render_overworld_hd(session, compositor, _effective_session_palette)
+        return render_calendar_hd(session, compositor, _effective_session_palette, farewell=False)
+
+    def _render_location_hd(
+        self,
+        session: GameSession,
+        compositor: HdCompositor,
+    ) -> moderngl.Texture | None:
+        if session.town_screen is None:
+            return None
+        return render_town_hd(session, compositor, session.town_screen, _effective_session_palette)
+
+    def _render_dice_scene_hd(
+        self,
+        session: GameSession,
+        compositor: HdCompositor,
+    ) -> moderngl.Texture | None:
+        if session.dice_screen is None:
+            return None
+        live = _effective_session_palette(session, session.dice_screen.palette())
+        gold = session.actors[session.dice_screen.run.state.knight - 1].gold
+        return self._render_dice_hd(compositor, session.dice_screen, gold, live)
+
     def render_session_hd(
         self,
         session: GameSession,
         compositor: HdCompositor,
     ) -> moderngl.Texture | None:
-        """Render supported HD scenes (T19.5: combat + FightCanvas callers); else ``None``."""
+        """Render all gameplay scenes in HD; intro/ending fall back to Classic (§14.7)."""
         from harddaysengine.app.game import GameScene
 
-        if session.scene == GameScene.COMBAT:
-            if session.active_encounter is None:
-                return None
-            scene = session.active_encounter.runtime.scene
-            live = _effective_session_palette(session, scene.palette)
-            return self.render_fight_history(
-                compositor,
-                scene.hd_history,
-                live_palette=live,
-                background_y_offset=scene.fight.shake.offset,
-            )
-        if session.scene == GameScene.DICE and session.dice_screen is not None:
-            live = _effective_session_palette(session, session.dice_screen.palette())
-            gold = session.actors[session.dice_screen.run.state.knight - 1].gold
-            return self._render_dice_hd(compositor, session.dice_screen, gold, live)
-        if session.scene == GameScene.STONEHENGE and session.stone_screen is not None:
-            base = (
-                session.stone_screen.ritual_palette()
-                if session.stone_screen.state.phase in (StonePhase.RITUAL, StonePhase.RITUAL_OUT)
-                else session.stone_screen.message_palette()
-            )
-            live = _effective_session_palette(session, base)
-            return self._render_stone_hd(compositor, session.stone_screen, live)
-        if session.scene == GameScene.WIZARD and session.wizard_screen is not None:
-            live = _effective_session_palette(session, session.wizard_screen.palette())
-            return self._render_wizard_hd(compositor, session.wizard_screen, live)
-        return None
+        handlers: dict[GameScene, Callable[[], moderngl.Texture | None]] = {
+            GameScene.KNIGHT_SELECT: lambda: render_menu_hd(
+                session, compositor, _effective_session_palette
+            ),
+            GameScene.OVERWORLD: lambda: render_overworld_hd(
+                session, compositor, _effective_session_palette
+            ),
+            GameScene.VILLAGE: lambda: render_overworld_hd(
+                session, compositor, _effective_session_palette
+            ),
+            GameScene.COMBAT: lambda: self._render_combat_hd(session, compositor),
+            GameScene.LOCATION: lambda: self._render_location_hd(session, compositor),
+            GameScene.STATUS: lambda: (
+                None
+                if session.sheet_screen is None
+                else render_sheet_hd(
+                    session, compositor, session.sheet_screen, _effective_session_palette
+                )
+            ),
+            GameScene.NEW_DAY: lambda: self._render_new_day_hd(session, compositor),
+            GameScene.SERVICE: lambda: (
+                None
+                if session.service_screen is None
+                else render_service_hd(
+                    session, compositor, session.service_screen, _effective_session_palette
+                )
+            ),
+            GameScene.DICE: lambda: self._render_dice_scene_hd(session, compositor),
+            GameScene.STONEHENGE: lambda: self._render_stone_scene_hd(session, compositor),
+            GameScene.WIZARD: lambda: self._render_wizard_scene_hd(session, compositor),
+            GameScene.VALLEY: lambda: (
+                None
+                if session.valley_screen is None
+                else render_valley_hd(
+                    session,
+                    compositor,
+                    session.valley_screen,
+                    _effective_session_palette,
+                    lambda: self._render_combat_hd(session, compositor),
+                )
+            ),
+            GameScene.MEETING: lambda: (
+                None
+                if session.meeting_screen is None
+                else render_meeting_hd(
+                    session,
+                    compositor,
+                    session.meeting_screen,
+                    _effective_session_palette,
+                    lambda: self._render_combat_hd(session, compositor),
+                )
+            ),
+            GameScene.GAME_OVER: lambda: render_calendar_hd(
+                session, compositor, _effective_session_palette, farewell=True
+            ),
+        }
+        handler = handlers.get(session.scene)
+        return None if handler is None else handler()
 
     def release(self) -> None:
         """Release the active ``HdCompositor`` and reset all sync state."""

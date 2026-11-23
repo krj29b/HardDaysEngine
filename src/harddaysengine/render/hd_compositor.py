@@ -498,6 +498,8 @@ class HdCompositor:
         self,
         live_palette: Sequence[RGBColor],
         base_palette: Sequence[RGBColor] | None = None,
+        *,
+        fade_reference: Sequence[RGBColor] | None = None,
     ) -> None:
         """Upload ``live_palette`` and optional ``base_palette`` and refresh fade/flash."""
         self._ensure_alive()
@@ -512,9 +514,8 @@ class HdCompositor:
                     base_palette, size=_LUT_SIZE, zero_transparent=False
                 ).tobytes()
             )
-        self._fade_tint, self._flash_mix = compute_fade_and_flash(
-            self._live_palette, self._base_palette
-        )
+        ref = self._base_palette if fade_reference is None else tuple(fade_reference)
+        self._fade_tint, self._flash_mix = compute_fade_and_flash(self._live_palette, ref)
 
     def set_base_palette(self, palette: Sequence[RGBColor]) -> None:
         """Upload the un-faded reference palette."""
