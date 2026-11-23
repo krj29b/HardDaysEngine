@@ -14,7 +14,7 @@ A faithful, clean-room Python reimplementation of *Moonstone: A Hard Days Knight
 | Language | Python ≥ 3.12 (pinned to 3.12 through `.python-version`) |
 | Window, input, audio | `pygame-ce` (in `app/` only) |
 | GPU | `moderngl`, OpenGL 3.3 core (in `render/` only) |
-| ADF / OFS | `amitools` plus our own decoders (`assets/`) |
+| ADF / OFS | Clean-room OFS/ADF and AmigaDOS hunk decoders (`assets/`) |
 | Arrays | `numpy` (decoding, bitplane conversion, render uploads) |
 | Manifest schema | `pydantic` v2 |
 | ECS (simulation entities) | `esper` (pure Python, deterministic iteration order) |

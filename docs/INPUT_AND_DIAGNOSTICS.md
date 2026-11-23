@@ -138,7 +138,7 @@ for investigating controller discrepancies without modifying gameplay mappings o
 
 **Strict isolation guarantees:**
 - Never imports or invokes `sim/`, `render/`, `assets/`, `GameSession`, `InputRouter`, `moderngl`,
-  `amitools`, `pygame.mixer`, or `.adf` disk loaders.
+  `pygame.mixer`, or `.adf` disk loaders.
 - Sets `SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1` (via `os.environ.setdefault`) before SDL
   initialization so gamepads report events even when the terminal holds focus or no window is open.
 - Uses `pygame.display.init()` (without audio or OpenGL) and opens a small plain-SDL software

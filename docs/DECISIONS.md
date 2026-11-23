@@ -1283,3 +1283,29 @@ home village temple and spent the knight's first turn on exit.
 no longer triggers accidental home-village entry or node dispatch. Recordings or test helpers that
 sent overworld movement or keys during a map fade-in must wait for the fade to finish. No `sim/`
 rules or asset decoders are changed.
+
+## ADR-068: Remove unused `amitools` dependency and bundle third-party licenses on Windows
+
+**Status:** ACCEPTED (2026-11-23; refines ADR-054 and ADR-064)
+
+**Context:** `amitools>=0.7.0` (`GPL-2.0-or-later`) was declared in `pyproject.toml` during
+initial scaffolding, but `assets/adf.py` and `assets/hunk.py` implement clean-room OFS/ADF and
+AmigaDOS hunk decoders directly from `docs/ARCHITECTURE.md` (§1, §5) and nothing in `src/` or
+`scripts/` imports `amitools`. Meanwhile, `scripts/build_windows.py` copied only `LICENSE` into
+the portable Windows ZIP, omitting `NOTICE` and third-party license notices for the bundled
+CPython runtime, Python dependencies, PyInstaller bootloader, and native DLLs.
+
+**Decision:**
+1. Remove `amitools` from `[project.dependencies]`, `uv.lock`, and the Pyrefly
+   `ignore-missing-imports` list in `pyproject.toml`. Keep `amitools` in the forbidden-import
+   guards (`tests/unit/test_layering.py`, `.importlinter`) so it cannot be accidentally
+   reintroduced.
+2. Update `scripts/build_windows.py` to copy both `LICENSE` (`LICENSE.txt`) and `NOTICE`
+   (`NOTICE.txt`), generate `THIRD_PARTY_LICENSES.txt` dynamically from the build environment
+   (CPython runtime license, all transitive runtime distributions including package-internal
+   license files such as `pygame/docs/generated/LGPL.txt`, PyInstaller bootloader, and bundled
+   native DLL attributions), and validate all three legal files inside `verify_archive_contents`.
+
+**Consequences:** No GPL-2.0 runtime dependency remains in the package metadata or lockfile.
+Windows portable releases ship complete legal notices and fail archive verification if any
+required notice or runtime dependency license entry is missing.

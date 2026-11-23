@@ -44,7 +44,6 @@ dependencies = [
     "pydantic>=2.9.0",
     "numpy>=2.1.0",
     "pillow>=10.4.0",
-    "amitools>=0.7.0",
 ]
 
 [project.scripts]
@@ -119,7 +118,7 @@ project-includes = ["src"]
 search-path = ["src"]
 python-version = "3.12"
 preset = "legacy"
-ignore-missing-imports = ["moderngl.*", "amitools.*"]
+ignore-missing-imports = ["moderngl.*"]
 check-unannotated-defs = true
 infer-return-types = "never"
 
