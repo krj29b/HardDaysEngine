@@ -13,10 +13,12 @@ from zipfile import ZipFile
 import pytest
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from os import PathLike
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILD_SCRIPT = ROOT / "scripts" / "build_windows.py"
+LAUNCHER_SCRIPT = ROOT / "scripts" / "windows_launcher.py"
 
 
 class _LibxmpInfoProto(Protocol):
@@ -26,6 +28,8 @@ class _LibxmpInfoProto(Protocol):
 
 class _BuildWindowsModule(Protocol):
     BUILD_ONLY_DISTRIBUTIONS: frozenset[str]
+    INPUT_DIAGNOSTICS_WRAPPER: str
+    INPUT_DIAGNOSTICS_WRAPPER_TEXT: str
 
     def build_third_party_licenses(
         self,
@@ -88,17 +92,37 @@ def _load_build_windows() -> _BuildWindowsModule:
     return cast("_BuildWindowsModule", mod)
 
 
+class _WindowsLauncherModule(Protocol):
+    def launch(self, argv: Sequence[str] | None = None) -> int: ...
+
+
+def _load_windows_launcher() -> _WindowsLauncherModule:
+    spec = importlib.util.spec_from_file_location("windows_launcher_under_test", LAUNCHER_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return cast("_WindowsLauncherModule", mod)
+
+
 def _make_valid_zip(
     dest: Path,
     third_party: str,
     *,
     extra_entries: dict[str, bytes] | None = None,
+    include_wrapper: bool = True,
 ) -> None:
+    mod = _load_build_windows()
     shaders_dir = ROOT / "src" / "harddaysengine" / "render" / "shaders"
     with ZipFile(dest, "w") as zipped:
         zipped.writestr("disks/", "")
         zipped.write(ROOT / "LICENSE", "LICENSE.txt")
         zipped.write(ROOT / "NOTICE", "NOTICE.txt")
+        if include_wrapper:
+            zipped.writestr(
+                mod.INPUT_DIAGNOSTICS_WRAPPER,
+                mod.INPUT_DIAGNOSTICS_WRAPPER_TEXT.replace("\n", "\r\n"),
+            )
         zipped.writestr("THIRD_PARTY_LICENSES.txt", third_party)
         for shader in sorted(shaders_dir.glob("*")):
             if shader.is_file():
@@ -380,6 +404,43 @@ def test_verify_archive_rejects_missing_files_pointer_stubs_and_setuptools(tmp_p
     _make_valid_zip(undocumented_dll, valid_text, extra_entries={"_internal/SDL2.dll": b""})
     with pytest.raises(ValueError, match=r"Bundled Native Libraries|SDL2\.dll"):
         mod.verify_archive_contents(undocumented_dll)
+
+    # Missing or invalid input-diagnostics.bat wrapper must fail archive verification.
+    missing_wrapper = tmp_path / "missing_wrapper.zip"
+    _make_valid_zip(missing_wrapper, valid_text, include_wrapper=False)
+    with pytest.raises(ValueError, match=r"input-diagnostics\.bat"):
+        mod.verify_archive_contents(missing_wrapper)
+
+    invalid_wrapper = tmp_path / "invalid_wrapper.zip"
+    _make_valid_zip(
+        invalid_wrapper,
+        valid_text,
+        include_wrapper=False,
+        extra_entries={"input-diagnostics.bat": b"@echo off\r\necho broken\r\n"},
+    )
+    with pytest.raises(ValueError, match=r"Invalid wrapper script input-diagnostics\.bat"):
+        mod.verify_archive_contents(invalid_wrapper)
+
+
+def test_windows_launcher_dispatches_input_diagnostics(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    launcher = _load_windows_launcher()
+
+    with pytest.raises(SystemExit) as exc:
+        launcher.launch(["--input-diagnostics", "--version"])
+    assert exc.value.code == 0
+    assert "HardDaysEngine " in capsys.readouterr().out
+
+    report_path = tmp_path / "diag.jsonl"
+    code = launcher.launch(
+        ["--input-diagnostics", "--no-window", "--duration", "0", "--output", str(report_path)]
+    )
+    assert code == 0
+    assert "SESSION END" in capsys.readouterr().out
+    report_text = report_path.read_text(encoding="utf-8")
+    assert '"session_start"' in report_text
+    assert '"session_end"' in report_text
 
 
 def test_runtime_system_dll_allowlist_is_narrow() -> None:

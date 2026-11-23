@@ -21,6 +21,26 @@ ROOT = Path(__file__).resolve().parents[1]
 SHADERS = Path("harddaysengine/render/shaders")
 WINDOWS_ARCHITECTURES = {"win32": "x86", "win-amd64": "x64"}
 REQUIRED_LEGAL_FILES = ("LICENSE.txt", "NOTICE.txt", "THIRD_PARTY_LICENSES.txt")
+INPUT_DIAGNOSTICS_WRAPPER = "input-diagnostics.bat"
+INPUT_DIAGNOSTICS_WRAPPER_TEXT = """\
+@echo off
+setlocal
+if "%~1"=="" (
+    echo Running HardDaysEngine SDL input diagnostics...
+    echo Report will be saved to: "%~dp0input-diagnostics.jsonl"
+    echo Close the small diagnostics window or press Ctrl+C to finish.
+    echo.
+    "%~dp0HardDaysEngine.exe" --input-diagnostics --output "%~dp0input-diagnostics.jsonl"
+    set "EXIT_CODE=%ERRORLEVEL%"
+    echo.
+    echo Diagnostics finished ^(exit code %EXIT_CODE%^).
+    echo Report saved to: "%~dp0input-diagnostics.jsonl"
+    pause
+    exit /b %EXIT_CODE%
+)
+"%~dp0HardDaysEngine.exe" --input-diagnostics %*
+exit /b %ERRORLEVEL%
+"""
 HARDDAYSENGINE_SOURCE_URL = "https://github.com/krj29b/HardDaysEngine"
 PYGAME_CE_SOURCE_URL = "https://github.com/pygame-community/pygame-ce"
 _SECTION_SEP = "=" * 78
@@ -1217,13 +1237,28 @@ def freeze(stage: Path) -> Path:
     (bundle / "THIRD_PARTY_LICENSES.txt").write_text(
         build_third_party_licenses(bundle=bundle), encoding="utf-8", newline="\n"
     )
+    (bundle / INPUT_DIAGNOSTICS_WRAPPER).write_text(
+        INPUT_DIAGNOSTICS_WRAPPER_TEXT,
+        encoding="utf-8",
+        newline="\r\n",
+    )
     (bundle / "Start here.txt").write_text(
         "Copy your three original Moonstone Amiga disk images into the disks folder.\n"
         "Double-click HardDaysEngine.exe to play. Requires OpenGL 3.3.\n"
+        "For controller troubleshooting, run input-diagnostics.bat (or\n"
+        "HardDaysEngine.exe --input-diagnostics --help).\n"
         "See LICENSE.txt, NOTICE.txt, and THIRD_PARTY_LICENSES.txt for license notices.\n",
         encoding="utf-8",
     )
     return bundle
+
+
+def _verify_input_diagnostics_wrapper(zipped: ZipFile, names: set[str]) -> None:
+    if INPUT_DIAGNOSTICS_WRAPPER not in names:
+        raise ValueError(f"Missing wrapper script {INPUT_DIAGNOSTICS_WRAPPER}")
+    wrapper_text = zipped.read(INPUT_DIAGNOSTICS_WRAPPER).decode("utf-8")
+    if "HardDaysEngine.exe" not in wrapper_text or "--input-diagnostics" not in wrapper_text:
+        raise ValueError(f"Invalid wrapper script {INPUT_DIAGNOSTICS_WRAPPER}")
 
 
 def verify_archive_contents(archive: Path) -> None:
@@ -1246,6 +1281,7 @@ def verify_archive_contents(archive: Path) -> None:
             raise ValueError("LICENSE.txt does not match repository LICENSE")
         if zipped.read("NOTICE.txt") != (ROOT / "NOTICE").read_bytes():
             raise ValueError("NOTICE.txt does not match repository NOTICE")
+        _verify_input_diagnostics_wrapper(zipped, names)
         third_party = zipped.read("THIRD_PARTY_LICENSES.txt").decode("utf-8")
         verify_third_party_licenses(third_party, archive_names=names)
         for shader in (ROOT / "src" / SHADERS).glob("*"):
@@ -1253,30 +1289,67 @@ def verify_archive_contents(archive: Path) -> None:
                 raise ValueError(f"Missing shader {shader.name}")
 
 
+def _run_smoke_check(
+    command: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    expected_code: int,
+    expected_output: str,
+) -> None:
+    run = subprocess.run(
+        command,
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=90,
+        check=False,
+    )
+    if run.returncode != expected_code or expected_output not in run.stdout:
+        raise RuntimeError(f"{command} returned {run.returncode}\n{run.stdout}\n{run.stderr}")
+
+
 def verify_archive(archive: Path, extracted: Path) -> None:
     verify_archive_contents(archive)
     with ZipFile(archive) as zipped:
         zipped.extractall(extracted)
     env = os.environ.copy()
-    env["PATH"] = str(Path(os.environ["SYSTEMROOT"]) / "System32")
+    system32 = Path(os.environ["SYSTEMROOT"]) / "System32"
+    env["PATH"] = str(system32)
     for key in ("PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV", "HARDDAYSENGINE_ADF_DIR"):
         env.pop(key, None)
-    for args, code, expected in (
-        (["--version"], 0, f"HardDaysEngine {__version__}"),
-        (["--list-disks"], 1, "0 image(s) found"),
-        (["--headless-ticks", "10"], 0, "ticks=10"),
+    exe = str(extracted / "HardDaysEngine.exe")
+    diag_report = extracted / "smoke-input-diagnostics.jsonl"
+    for command, code, expected in (
+        ([exe, "--version"], 0, f"HardDaysEngine {__version__}"),
+        ([exe, "--list-disks"], 1, "0 image(s) found"),
+        ([exe, "--headless-ticks", "10"], 0, "ticks=10"),
+        ([exe, "--input-diagnostics", "--version"], 0, f"HardDaysEngine {__version__}"),
+        (
+            [
+                exe,
+                "--input-diagnostics",
+                "--no-window",
+                "--duration",
+                "0",
+                "--output",
+                str(diag_report),
+            ],
+            0,
+            "SESSION END",
+        ),
+        (
+            [str(system32 / "cmd.exe"), "/c", INPUT_DIAGNOSTICS_WRAPPER, "--version"],
+            0,
+            f"HardDaysEngine {__version__}",
+        ),
     ):
-        run = subprocess.run(
-            [str(extracted / "HardDaysEngine.exe"), *args],
-            cwd=extracted,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=90,
-            check=False,
+        _run_smoke_check(
+            command, cwd=extracted, env=env, expected_code=code, expected_output=expected
         )
-        if run.returncode != code or expected not in run.stdout:
-            raise RuntimeError(f"{args} returned {run.returncode}\n{run.stdout}\n{run.stderr}")
+    if not diag_report.is_file() or '"session_end"' not in diag_report.read_text(encoding="utf-8"):
+        raise RuntimeError(f"Missing or incomplete diagnostics report at {diag_report}")
 
 
 def main() -> None:

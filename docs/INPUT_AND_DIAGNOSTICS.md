@@ -176,6 +176,16 @@ available) plus optional `pygame._sdl2.touch` devices:
 uv run harddaysengine-input-diagnostics [options]
 ```
 
+In the **portable Windows ZIP** (`HardDaysEngine-Windows-x64.zip` / `x86.zip`), run the bundled
+wrapper or invoke `HardDaysEngine.exe` directly — no Python installation required:
+
+```powershell
+# Double-click input-diagnostics.bat to write input-diagnostics.jsonl beside the exe,
+# or pass any diagnostics flags from PowerShell / Command Prompt:
+.\input-diagnostics.bat --no-window --output xbox_usb.jsonl
+.\HardDaysEngine.exe --input-diagnostics --help
+```
+
 | Flag | Default | Description |
 |---|---|---|
 | `--version` | — | Print `HardDaysEngine <version>` and exit `0`. |
