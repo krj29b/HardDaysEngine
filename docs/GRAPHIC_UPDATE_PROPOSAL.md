@@ -1,6 +1,6 @@
 # Graphic Update Proposal: Upscaled & Recreated HD Graphics
 
-**Status:** Phase A ACCEPTED as **Phase 18** (`T18.1`–`T18.3`, **ADR-069** in `docs/DECISIONS.md`). Phases B–D remain exploratory proposals awaiting a separate future ADR.
+**Status:** Phase A ACCEPTED & DONE as **Phase 18** (`T18.1`–`T18.3`, **ADR-069**). Phases B + C ACCEPTED as **Phase 19** (`T19.1`–`T19.7`, **ADR-071** in `docs/DECISIONS.md`). Phase D remains an exploratory proposal awaiting a separate future ADR.
 
 ## 1. Purpose & Guiding Constraints
 

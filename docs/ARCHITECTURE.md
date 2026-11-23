@@ -6002,3 +6002,298 @@ in `config.toml` or `--control-mode` on `harddaysengine` (CLI overrides config; 
 
 All routing occurs before `InputFrame` emission; `sim/`, replay recordings, and state hashes
 are unchanged.
+
+---
+
+## 14. External HD Asset Packs & GPU HD Compositor (not original; Phase 19, ADR-071)
+
+This section specifies the opt-in external HD asset pack format (`assets/hd_pack.py`), the
+template exporter (`harddaysengine-extract --hd-template`), and the parallel OpenGL 3.3 GPU HD
+compositor (`render/hd_compositor.py`). Nothing in this section is original Amiga behaviour.
+
+### 14.1 Architectural invariants
+
+1. **Zero simulation impact:** `sim/`, 50 Hz PAL timing, `320×200` logical playfield coordinates,
+   `collide.hit` collision boxes, PRNG draws, and replay/checkpoint state hashes are completely
+   unchanged. Running an identical input stream in Classic mode, HD mode, or with live Classic ↔ HD
+   toggles MUST produce byte-identical simulation state hashes on every tick.
+2. **Layering (`.importlinter`):**
+   - `assets/hd_pack.py` is strictly headless (imports only stdlib, `tomllib`, `PIL`, `numpy`,
+     and `assets/` helpers — never `pygame` or `moderngl`).
+   - `render/hd_compositor.py` and `render/shaders/hd_*` live in `render/` (never `pygame`).
+   - Configuration, host toggles (`F7`/`F10`), and scene wiring live in `app/` and `cli/`.
+3. **Clean-room BYOA (ADR-001):** Neither original Amiga assets nor upscaled/remastered derivative
+   artwork may ever be committed to the repository. Packs are external user-supplied directories;
+   tests use synthetic in-memory PNG packs (and `@pytest.mark.adf` tests generate temporary packs
+   under pytest `tmp_path` or ignored `build/`).
+4. **Render purity (ADR-014):** Rendering never advances or mutates simulation or stamp state.
+   Permanent fight stamps (`draw.stamp == True`) are committed to the retained GPU background FBO
+   once per `accept(draws)` call, never during repeated `render()` calls.
+
+### 14.2 Canonical asset keys and pack directory layout
+
+An HD pack is a local directory containing `pack.toml` at its root and optional asset override
+trees keyed by **normalized lowercase disk filename including its original extension** (trimmed of
+leading/trailing whitespace and case-folded, matching §1.2):
+
+```text
+<pack_root>/
+├── pack.toml                           # required root manifest
+├── pictures/
+│   ├── <name>.png                      # e.g. highwood.piv.png, test_8.png, ch.piv.png
+│   ├── <name>.mask.png                 # optional 8-bit palette-slot mask
+│   ├── <name>__<variant>.png           # optional exact variant override
+│   └── <name>.meta.toml                # optional per-picture metadata (mode, cycle_frames, padding)
+├── arenas/
+│   ├── <arena_name>.png                # e.g. fol1.t.png, gll1.t.png, swl1.t.png
+│   ├── <arena_name>.mask.png           # optional 8-bit region palette mask
+│   ├── <arena_name>__<variant>.png     # optional exact region variant (e.g. fol1.t__swamp.png)
+│   └── <arena_name>.meta.toml          # optional per-arena metadata
+└── cels/
+    ├── <cel_name>/                     # e.g. kn1.ob/, troggaxe1.cel/, mi.c/, ki.cel/
+    │   ├── frame_000.png               # 3-digit zero-padded frame index (000..999)
+    │   ├── frame_000.mask.png          # optional 8-bit palette-slot mask
+    │   └── meta.toml                   # optional per-cel and per-frame overrides
+    └── <cel_name>__<variant>/          # optional exact variant cel directory (e.g. kn1.ob__red/)
+        ├── frame_000.png
+        └── meta.toml
+```
+
+- **Canonical key rules:**
+  - Pictures: `name.strip().casefold()` (e.g., `"HighWood.PIV"` → `"highwood.piv"`, `test` sub-picture
+    `8` → `"test_8"`).
+  - Arenas: `arena_name.strip().casefold()` (e.g., `"fol1.t"`).
+  - Cels: `cel_name.strip().casefold()` (e.g., `"KN1.ob"` → `"kn1.ob"`, `" drag.cel"` → `"drag.cel"`),
+    with frames named `frame_{index:03d}.png` (optional mask `frame_{index:03d}.mask.png`).
+  - Variant separator: double underscore `__` followed by a lowercase ASCII identifier
+    (`[a-z0-9_-]+`). Standard runtime variant names emitted by the host are:
+    - Knight classes: `blue` (kind 0), `yellow` (kind 1), `green` (kind 2), `red` (kind 3), `black`
+      (duel / other class).
+    - Arena regions: `glen` (`0x0`), `forest` (`0x4`), `swamp` (`0x8`), `wasteland` (`0xC`).
+    - Ratmen moon variants: `moon_0`..`moon_7` (optional).
+  - Path traversal (`..`, absolute paths, symlinks escaping `<pack_root>`) is rejected with
+    `HdPackError`.
+
+### 14.3 Manifest schemas (`pack.toml` and `meta.toml`)
+
+#### 14.3.1 Root `pack.toml` (strict)
+
+```toml
+schema_version = 1
+name = "My Moonstone HD Pack"          # required non-empty string
+version = "1.0.0"                      # optional string, default "0.0.0"
+author = "..."                         # optional string, default ""
+scale = 4                              # required integer in 2..8 (HD FBO scale factor)
+default_mode = "rgba"                  # optional: "indexed" | "rgba" | "masked", default "rgba"
+fallback_filter = "nearest"            # optional: "nearest" | "smooth", default "nearest"
+```
+
+- Unknown keys, unsupported `schema_version` (only `1` is accepted), non-integer or out-of-range
+  `scale` (must be `2 <= scale <= 8`), or invalid enum values raise `HdPackError`.
+- `default_mode` applies to assets without an explicit `mode` in their `meta.toml`. When an asset
+  has `default_mode = "rgba"` (or `"masked"`) and a matching `.mask.png` exists on disk, the loader
+  automatically promotes that asset to `masked` unless `meta.toml` explicitly sets `mode = "rgba"`
+  or `mode = "indexed"`.
+
+#### 14.3.2 Per-asset `meta.toml` (optional, strict)
+
+For a cel directory (`cels/<cel_name>/meta.toml`):
+```toml
+mode = "masked"                        # optional: "indexed" | "rgba" | "masked"
+scale = 4                              # optional integer override (1..8) for this cel
+
+[frames.0]                             # optional per-frame overrides keyed by decimal frame index
+mode = "rgba"                          # optional override
+scale = 4                              # optional override
+padding = [0, 0, 0, 0]                 # optional [left, top, right, bottom] in HD pixels
+anchor_offset = [0, 0]                 # optional [dx, dy] in HD pixels (after mirroring rules)
+```
+
+For a picture or arena (`pictures/<name>.meta.toml` or `arenas/<name>.meta.toml`):
+```toml
+mode = "masked"                        # optional: "indexed" | "rgba" | "masked"
+scale = 4                              # optional integer override (1..8)
+padding = [0, 0, 0, 0]                 # optional [left, top, right, bottom] in HD pixels
+cycle_frames = [                       # optional multi-frame backdrop cycle sequence (e.g. test_8)
+  "test_8__cycle_00.png",
+  "test_8__cycle_01.png",
+  "test_8__cycle_02.png",
+  "test_8__cycle_03.png",
+]
+```
+
+- **`cycle_frames` (overworld map / animated backdrops):** Each listed filename resolves relative
+  to the parent directory (`pictures/` or `arenas/`), must stay inside `<pack_root>`, must exist,
+  and must satisfy the same dimension rules as the base picture. During overworld rendering, the
+  active frame index is `cycle_tick % len(cycle_frames)` stepped by the existing `MapColors` cycle
+  counter (`MapRules.cycle_period` VBLs, §11.18) with zero extra simulation state.
+
+### 14.4 Lookup precedence, dimension validation, and error policy
+
+1. **Resolution priority** for `(kind, canonical_name, frame_index, variant)`:
+   1. Exact variant match (`<name>__<variant>`): e.g., `cels/kn1.ob__red/frame_000.png` or
+      `arenas/fol1.t__swamp.png`.
+   2. Base asset match (`<name>`): e.g., `cels/kn1.ob/frame_000.png` (plus optional
+      `frame_000.mask.png` if present and not overridden to `indexed`/`rgba`).
+   3. `None` — clean fallback to the original 1× Amiga disk asset rendered through the live LUT.
+2. **Dimension and mode validation (fail-fast `HdPackError`):**
+   - Given original Amiga asset dimensions `(orig_w, orig_h)` (for pictures/arenas: `320×200`; for
+     cel frames: `(frame.meta.width, frame.meta.height)`):
+   - Let `[pad_l, pad_t, pad_r, pad_b]` be the declared `padding` (default `[0, 0, 0, 0]`, all `>= 0`).
+   - The effective unpadded dimensions `(eff_w, eff_h) = (png_w - pad_l - pad_r, png_h - pad_t - pad_b)`
+     MUST satisfy `eff_w > 0`, `eff_h > 0`, `eff_w % orig_w == 0`, `eff_h % orig_h == 0`, and
+     `eff_w // orig_w == eff_h // orig_h == k` where `k` is an integer in `1..8` (and equals the
+     declared per-asset/frame `scale` if one was explicitly specified).
+   - If a `.mask.png` accompanies a diffuse PNG, its dimensions MUST exactly equal `(png_w, png_h)`,
+     it MUST decode to a single-channel 8-bit (`L` or `P`) image, and every pixel value MUST be in
+     `0..31` (values `> 31` raise `HdPackError`).
+   - If `mode == "indexed"`, the PNG MUST be palettized (`mode == "P"`) or 8-bit grayscale (`L`)
+     with all pixel indices in `0..31` (`0` = transparent for sprites, opaque index 0 for full
+     backgrounds).
+   - Malformed TOML, unreadable/corrupt PNGs, illegal paths, or dimension/mode violations raise
+     `HdPackError` immediately during pack loading or `--validate-hd-pack`.
+3. **Standalone validation CLI (`--validate-hd-pack <dir>`):**
+   - Validates `pack.toml`, every `meta.toml`, and every PNG / `.mask.png` in `<dir>` (cross-checking
+     against original ADF asset dimensions when disks are available, or checking structural/format
+     validity and self-consistency when disks are absent).
+   - Prints a concise summary (override counts by kind/mode, warnings for unrecognized asset names)
+     and exits `0` on success or non-zero with exact file paths and `HdPackError` reasons on failure.
+
+### 14.5 HD template exporter (`harddaysengine-extract --hd-template`)
+
+Running `harddaysengine-extract --hd-template` (with `--output <dir>` / `--adf-dir <dir>`) exports
+a ready-to-edit HD pack skeleton from the user's own `.adf` disks:
+
+1. **Canonical file layout:** Writes `pack.toml` (`schema_version = 1`, `scale = 4`,
+   `default_mode = "rgba"`, `fallback_filter = "nearest"`), `pictures/<name>.png` (including
+   `test_0.png`..`test_8.png`), `arenas/<name>.png`, and `cels/<name>/frame_NNN.png` at native 1×
+   dimensions so the user can batch-upscale the tree directly with Real-ESRGAN, Waifu2x, or xBRZ
+   (and nearest-upscale `.mask.png` files to matching `scale×`).
+2. **True runtime scene palettes (from `mog`):** Instead of using a single generic fallback palette,
+   each exported cel uses its true decoded Amiga palette from the user's `mog` / scene picture:
+   - Knight cels (`kn*.ob`, `he*.ob`, `blo.cel`): default knight fight palette (`assemble_fight_palette`
+     with class 0 / glen region).
+   - Creature cels: their decoded scene fight palette from `assets/fight_palette.py` (`FightDefs`).
+   - Map / UI / town / service cels (`mi.c`, `ki.cel`, `po.cel`, `dice.cel`, `mys.cel`, `hen1.c`,
+     `wi1.c`, etc.): their matching screen picture palette (`test_8`, `sheet_data`, `dice.piv`,
+     `mys.piv`, `hen1.p`, `wi1.p`).
+3. **Auto-generated 8-bit `.mask.png` files:**
+   - **Knight cels (`kn*.ob`, `he*.ob`):** pixels whose original Amiga index lies in the knight
+     class row (`6..8`, §10.13) write that exact index (`6..8`) into `.mask.png`; all other pixels
+     write `0`.
+   - **Arenas (`*.t`):** pixels whose original Amiga index lies in the region palette range
+     (`16..28` and low-tweak `1..4`, §10.13) write that exact index into `.mask.png`; all other
+     pixels write `0`.
+   - **Overworld map (`pictures/test_8.png`):** reads `MapRules` from `mog` (§11.18) and writes the
+     exact original index for every pixel in `{ramp_index} | range(cycle_start, cycle_end + 1)`
+     into `pictures/test_8.mask.png`; all other pixels write `0`.
+4. **Per-cel `meta.toml`:** Exports original `width`, `height`, `hot_x`, `hurt_tight_box`, and
+   `collide.hit` attack points as documented reference comments / metadata so artists can align
+   new frames to exact combat reach.
+
+### 14.6 GPU HD compositor (`render/hd_compositor.py`)
+
+The GPU HD compositor runs in OpenGL 3.3 core inside `render/` and renders an entire frame into an
+HD RGBA8 framebuffer `hd_frame_fbo` sized `(320 * S, 256 * S)` (playfield `320 * S × 200 * S` at
+vertical offset `28 * S`, matching §13.1), where `S = pack.scale` (`2..8`):
+
+#### 14.6.1 Three asset modes + 1× fallback shader rules
+
+Every draw command supplies:
+- `u_live_palette` (`32×1` RGBA8 texture): current tick's active 32-entry Amiga palette (including
+  fades, low-health pulses, hit flashes, and map cycling).
+- `u_base_palette` (`32×1` RGBA8 texture): the scene's un-faded reference 32-entry palette.
+- `u_fade_tint` (`vec3` RGB multiplier) & `u_flash_mix` (`vec4` RGB + mix factor): computed on CPU
+  from `(live_palette, base_palette)` over non-black reference entries:
+  - Per-channel scale `ratio_c = mean(live_c) / max(mean(base_c), eps)` clamped to `[0.0, 1.0]`
+    for fades toward black.
+  - When `live` brightens above `base` (e.g., white flash / lightning / low-health red pulse), an
+    additive/mix term `flash_rgb = clamp(mean(max(live - base, 0)), 0, 1)` drives `mix(col, target, t)`
+    smoothly across RGBA textures without crushing detail.
+- **Shader paths by mode:**
+  1. **`indexed` (HD PNG `0..31`):** Sample `idx = int(texel.r * 255.0 + 0.5) & 31` (`NEAREST`).
+     For sprites, `idx == 0` discards; otherwise output `texelFetch(u_live_palette, ivec2(idx, 0), 0)`.
+     All fades, pulses, class swaps, and cycling work identically to Classic.
+  2. **`rgba` (true-color HD PNG):** Sample diffuse RGBA (`LINEAR` or `NEAREST` when 1:1 with FBO).
+     Apply `u_fade_tint` and `u_flash_mix` to `rgb`; preserve `alpha` with standard
+     `SRC_ALPHA, ONE_MINUS_SRC_ALPHA` blending.
+  3. **`masked` (diffuse RGBA + 8-bit `.mask.png`):**
+     - Sample diffuse `d = texture(u_diffuse_tex, uv)` and mask slot
+       `slot = int(texture(u_mask_tex, uv).r * 255.0 + 0.5)` (`NEAREST`).
+     - If `slot == 0` (unmasked): treat identically to `rgba` (apply `u_fade_tint` / `u_flash_mix`).
+     - If `1 <= slot <= 31` (masked): fetch `base_col = texelFetch(u_base_palette, ivec2(slot, 0), 0).rgb`
+       and `live_col = texelFetch(u_live_palette, ivec2(slot, 0), 0).rgb`. Compute perceptual
+       luminance `Y(c) = dot(c, vec3(0.2126, 0.7152, 0.0722))`. Compute relative shading factor
+       `shade = clamp(Y(d.rgb) / max(Y(base_col), 0.04), 0.0, 2.0)` and output
+       `rgb = clamp(live_col * shade, 0.0, 1.0)` with diffuse `d.a`.
+       This preserves HD lighting, anti-aliasing, and shading on knight tunics, region foliage, and
+       cycling map water while following the live 50 Hz Amiga palette exactly.
+  4. **Unreplaced 1× Amiga fallback (`fallback_filter`):**
+     - Upload the original 1× `uint8` indexed buffer (`0..31`) as an `R8` texture (cached by object
+       identity / key).
+     - `fallback_filter == "nearest"`: sample with `NEAREST` through `u_live_palette` (`idx == 0`
+       transparent for sprites).
+     - `fallback_filter == "smooth"`: run a single-pass edge-directed colour-smoothing lookup over
+       the 3×3 / 5×5 local palette-resolved neighbourhood directly in the HD sprite fragment shader,
+       respecting `idx == 0` transparency so unreplaced 1× sprites blend smoothly into HD scenes
+       while keeping exact 2.5D draw order.
+
+#### 14.6.2 Coordinates, mirroring, padding, and permanent fight stamps
+
+- **Logical coordinate mapping:** Every draw places its unpadded logical rectangle `(orig_w, orig_h)`
+  at the exact Amiga playfield origin `(x, y)` (for fights: `shift = 0 if draw.mirrored else frame.meta.hot_x`,
+  `draw_x = s16(draw.x) - shift`, `draw_y = s16(draw.y)`, matching §10.17).
+- **Padding & anchor offset:** If a frame declares `padding = [pad_l, pad_t, pad_r, pad_b]` and
+  `anchor_offset = [off_x, off_y]` at asset scale `k`, the rendered quad expands outward by
+  `(pad_l / k, pad_t / k, pad_r / k, pad_b / k)` in logical units (with `pad_l`/`pad_r` and `off_x`
+  swapped horizontally when `mirrored == True`), clipped to the playfield `[0, 320] × [0, 200]`.
+- **Permanent fight stamps (`hd_bg_fbo` + `hd_frame_fbo`):**
+  - Each active HD fight maintains two GPU FBOs sized `(320 * S, 200 * S)`: `hd_bg_fbo` (initialized
+    once from the HD or fallback arena background) and `hd_frame_fbo`.
+  - On `accept(draws)` (once per simulation fight step):
+    1. Any draw with `draw.stamp == True` is rendered into `hd_bg_fbo` (with its active palette/mode).
+    2. `hd_bg_fbo` is blitted into `hd_frame_fbo`, followed by all `draws` in exact emitted order.
+  - On `render()` (called 0, 1, or N times per tick): `hd_frame_fbo` is copied into the compositor's
+    `320*S × 256*S` output FBO with `background_y_offset * S` screen-shake offset, without mutating
+    either `hd_bg_fbo` or `hd_frame_fbo`.
+- **GPU texture cache:** Bounded LRU cache (default cap `256` textures or `256 MiB` estimated VRAM)
+  keyed by `(asset_key, variant, frame_index, fallback_flag)`. All FBOs and textures are released
+  deterministically on pack switch, Classic toggle (`F7`), or renderer shutdown (verified by a
+  100-toggle zero-leak GL test).
+
+### 14.7 Scene coverage and presentation integration
+
+- **Gameplay scenes covered in v1:**
+  - `FightScene` and all `FightCanvas`-backed screens (`DiceScreen`, `StonehengeScreen`,
+    `WizardScreen`).
+  - Overworld map (`map_scene`: `test_8` with cycling mask or `cycle_frames`, ordered `mi.c`
+    sprites, node menu panel/portraits, `Small.font` / `bold.f` text).
+  - Towns (`TownScreen`: welcome message, painted town backdrops, hardware-sprite pointer with
+    `+16` palette offset), shared sheets (`SheetScreen`: panels, `ki.cel` icons, `po.cel` pointer),
+    services (`ServiceScreen`: healer/mystic), Valley (`ValleyScreen`), meetings (`MeetingScreen`),
+    and menus / Next Day (`ch.piv`) / farewell (`message.piv`).
+- **Intro & Ending fallback:** Multi-buffer `program` intro (`IntroCinematicPlayer`) and ending
+  (`EndingScreen`) run on their existing Classic `320×256` canvas and present through the standard
+  §13 pipeline (including user-selected pixel upscalers).
+- **Presentation chain interaction (`HardDaysRenderer.present_to_framebuffer`):**
+  - When HD mode is active for the current scene, `HardDaysRenderer` presents directly from the
+    HD compositor's `(320*S, 256*S)` RGBA texture instead of `canvas_fbo`.
+  - Pixel-art upscalers (`FilterPreset.SMOOTH`, `FilterPreset.SCALEFX`) are **bypassed** (treated
+    as `faithful` scaling) so HD artwork is never double-upscaled.
+  - Aspect-correct letterbox (`integer`, `sharp-bilinear`, `fit`; `square` / `pal`; `full` /
+    `playfield` crop), widescreen `surround` (`off` / `blur` / `solid`), and optional `scanlines`
+    and `crt` presets remain active and operate on the HD source texture.
+- **Configuration, CLI, and hotkeys:**
+  - Precedence for HD pack path: `--hd-pack <dir>` > `HARDDAYSENGINE_HD_PACK_DIR` >
+    `[display] hd_pack_dir` in `config.toml` > `None`.
+  - `[display] hd_mode` / `--hd-mode`: `"off"` | `"auto"` (default: enabled whenever a valid
+    `hd_pack_dir` is configured) | `"on"` (requires a valid `hd_pack_dir`; raises `ConfigError`
+    if none is configured).
+  - **`F7` hotkey** and an **HD Mode row in the `F10` display preview panel** toggle Classic ↔ HD
+    live when a pack is loaded. Both are consumed in `WindowController` before `InputRouter` so
+    they never confirm menus or enter replay recordings.
+  - **`--inspect-assets` (`harddaysengine-inspect`)** accepts `--hd-pack <dir>` and `F7` Classic ↔ HD
+    toggling, drawing the scaled `collide.hit` hitbox wireframe overlay directly over the HD canvas
+    for artist alignment QA.
+  - **`scripts/audit_shots.py --hd-pack <dir>`** writes side-by-side Classic vs. HD contact sheets
+    (with optional `--hitboxes`) under ignored `build/audit/`.

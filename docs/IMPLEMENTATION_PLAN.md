@@ -608,6 +608,85 @@ to `sim/`, `assets/`, or replay hashes.
   timing is recorded in `docs/PROGRESS.md`, and reviewed contact sheets remain under ignored
   `build/`.
 
+### Phase 19: External HD asset packs & GPU HD compositor
+
+Implement Phases B + C of `docs/GRAPHIC_UPDATE_PROPOSAL.md` under **ADR-071 (ACCEPTED)**.
+Classic mode remains the default; `sim/`, 50 Hz timing, collision boxes, and replay hashes are
+completely unchanged. Layering stays strictly `cli -> app -> render -> assets -> sim`.
+
+- **T19.1 Spec: HD pack format & GPU HD compositor (`docs/ARCHITECTURE.md` §14):**
+  document the pack directory structure, `pack.toml` / `meta.toml` schemas, canonical lowercase
+  asset keys (`pictures/<name>.png`, `arenas/<name>.png`, `cels/<name>/frame_NNN.png`), the three
+  color modes (`indexed`, `rgba` + `__<variant>`, `masked` 8-bit palette-slot `.mask.png` with
+  luminance-preserving shader math), overworld cycling masks and multi-frame sequences,
+  integer-multiple + explicit `padding`/`offset` validation (`HdPackError`), mixed-scene
+  `fallback_filter` (`nearest` | `smooth`), GPU HD FBO stamping (`hd_bg_fbo` / `hd_frame_fbo`),
+  presentation interaction (bypassing `smooth`/`scalefx` while retaining viewport/surround/CRT),
+  config/CLI precedence, and `F7` / `F10` Classic ↔ HD toggling.
+  *Accept:* §14 is complete, unambiguous, and consistent with ADR-071 and `.importlinter`.
+
+- **T19.2 Headless HD pack loader & validator (`assets/hd_pack.py`, `cli/main.py`):**
+  implement strict `pack.toml` / `meta.toml` parsing, canonical key normalization, lazy PNG
+  decoding via Pillow into frozen `dataclass(slots=True, frozen=True)` records, exact variant
+  lookup priority (`__<variant>` → base + optional `.mask.png` → fallback), integer-multiple and
+  explicit padding/offset validation (`HdPackError`), and `--validate-hd-pack <dir>` CLI command.
+  *Accept:* `assets/` stays free of `pygame`/`moderngl` (`lint-imports` clean); synthetic PNG
+  pack unit tests cover all three color modes, variant precedence, cycle sequences, mixed scales,
+  padding, malformed inputs (`HdPackError`), and CLI validator exit codes.
+
+- **T19.3 HD template exporter (`assets/extract.py`, `cli/extract.py`):**
+  add `--hd-template` to `harddaysengine-extract` exporting canonical paths rendered with true
+  runtime scene palettes decoded from `mog`, a starter `pack.toml`, per-cel `meta.toml`
+  (dimensions, `hot_x`, `hurt_tight_box`, `hit_points`), and auto-generated 8-bit `.mask.png`
+  files for knight tunic/armor indices, regional arena palettes, and overworld `test_8` cycling
+  indices.
+  *Accept:* synthetic and `@pytest.mark.adf` real-disk tests verify deterministic export,
+  clean round-trip validation via `HdPack`, non-empty auto-masks, and zero committed game data.
+
+- **T19.4 GPU HD compositor core & shaders (`render/hd_compositor.py`, `render/shaders/hd_*`,
+  `render/renderer.py`):**
+  build the OpenGL 3.3 GPU HD compositor targeting a `320*S × 256*S` RGBA FBO (`S` in `2..8`),
+  implementing `indexed`, `rgba` (live fade/pulse tint), `masked` (luminance-preserving
+  palette-slot recoloring), unreplaced 1× live-LUT fallback (`nearest` | `smooth`), bounded LRU
+  GPU texture cache with explicit release, permanent fight stamping (`hd_bg_fbo` → `hd_frame_fbo`,
+  ADR-014), and HD-source integration in `HardDaysRenderer.present_to_framebuffer` (bypassing
+  `smooth`/`scalefx` while preserving viewport, `surround`, `scanlines`, and `crt`).
+  *Accept:* standalone GL 3.3 tests verify all 3 modes, luminance-preserving class recoloring,
+  fade/pulse math, 2.5D draw order, mirroring/padding alignment vs. `FightCanvas`, stamp purity
+  across repeated redraws, fallback filters, and zero leaked textures across 100 toggles.
+
+- **T19.5 Host config, `F7` / `F10` hot-toggle & FightScene HD wiring (`app/config.py`,
+  `app/window.py`, `app/display_preview.py`, `app/fight_scene.py`, `app/game.py`, `cli/main.py`):**
+  add `[display] hd_pack_dir` / `hd_mode` (`off` | `auto` | `on`), `HARDDAYSENGINE_HD_PACK_DIR`,
+  and `--hd-pack` / `--hd-mode` flags; wire pre-router `F7` and `F10` Classic ↔ HD toggles;
+  integrate `FightScene` (and `FightCanvas`-based `DiceScreen`, `StonehengeScreen`,
+  `WizardScreen`) with `HdCompositor` passing class/region/arena context.
+  *Accept:* unit + GL tests verify config precedence, `F7`/`F10` pre-router consumption, HD
+  fight rendering on partial/full synthetic packs, and identical replay state hashes across
+  Classic, HD, and mid-fight toggle runs.
+
+- **T19.6 Remaining gameplay scenes HD integration (`app/map_scene.py`, `app/town_screen.py`,
+  `app/sheet_screen.py`, `app/service_screen.py`, `app/valley_screen.py`,
+  `app/meeting_screen.py`, `app/game.py`):**
+  wire the overworld map (with live `test_8` cycling mask + optional multi-frame cycle sequences
+  and ordered `mi.c`/menu sprites), towns (including hardware-sprite pointer palette shift),
+  shared sheets, services, Valley, meetings, and menus/Next Day/farewell into `HdCompositor`,
+  while multi-buffer `program` intro and ending cleanly fall back to Classic / GPU-scaler.
+  *Accept:* unit + GL tests verify map cycling (mask and multi-frame), town/sheet/service
+  rendering, partial fallback across every gameplay scene, and byte-identical campaign replay
+  hashes.
+
+- **T19.7 Artist QA tooling, Inspector HD preview, audit sheets & docs (`app/inspector.py`,
+  `app/audit.py`, `scripts/audit_shots.py`, `README.md`):**
+  wire `--hd-pack` and `F7` Classic ↔ HD toggle into `--inspect-assets` with scaled `collide.hit`
+  hitbox wireframes; extend `scripts/audit_shots.py --hd-pack <dir>` to emit side-by-side Classic
+  vs. HD contact sheets (with/without hitbox overlays) under ignored `build/audit/`; run full
+  1,952-tick real-disk campaign replay invariance checks with a template-derived HD pack; review
+  contact sheets and document HD packs, `--hd-template`, `--validate-hd-pack`, `F7`, and config
+  keys in `README.md`.
+  *Accept:* full quality gate green, full GL suite green, real-disk Classic vs. HD replay hashes
+  identical, contact sheets reviewed, and zero game data committed.
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:

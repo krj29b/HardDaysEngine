@@ -1391,3 +1391,63 @@ FreeType (FTL), IJG, and LGPL-2.1 source/relinking notices were missing, and
 **Consequences:** Portable Windows builds are self-auditing against license regressions and
 dependency updates without relaxing any quality gate. No game data or simulation code is
 affected.
+
+## ADR-071: External HD asset packs and GPU HD compositor (Phase 19)
+
+**Status:** ACCEPTED (2026-11-23; accepted by the user; scopes Phases B + C of `docs/GRAPHIC_UPDATE_PROPOSAL.md`; extends ADR-001, ADR-014, ADR-053)
+
+**Context:** Phase 18 (ADR-069) delivered multi-pass GPU pixel-art upscaling (`scalefx`) after
+the 320×256 palette lookup. True higher-resolution graphics — whether user-generated via offline
+upscalers (e.g., Real-ESRGAN, Waifu2x, xBRZ) or hand-recreated remaster packs — cannot be driven
+through the 320×256 `uint8` CPU buffer without losing alpha blending, resolution, and Amiga
+32-color palette semantics (4 knight classes sharing `KN*.ob`, 4 arena regions, live 50 Hz
+fades/pulses, overworld water/fire color cycling, and permanent fight stamps).
+
+**Decision:**
+1. **Scope (Phases B + C together):** Implement an external, opt-in HD asset pack pipeline
+   (`assets/hd_pack.py`), a template exporter (`harddaysengine-extract --hd-template`), a
+   parallel OpenGL 3.3 GPU HD compositor (`render/hd_compositor.py`), and artist QA tooling
+   (`--inspect-assets` HD preview with scaled hitbox wireframes, CLI pack validation, and
+   side-by-side Classic vs. HD audit sheets). Defer Phase D (HD/TTF typography and widescreen
+   backdrop art beyond `320×200`) to a future ADR.
+2. **Invariants:** Classic mode remains the default. `sim/`, 50 Hz PAL timing, `collide.hit`
+   collision checks, PRNG draws, and replay state hashes are completely untouched and must match
+   byte-for-byte between Classic and HD modes (including live Classic ↔ HD toggles). No original
+   or upscaled/remastered copyrighted art is ever committed to the repository (ADR-001).
+3. **Canonical pack layout & `--hd-template`:** Key overrides by normalized lowercase disk
+   filename with extension (`pictures/<name>.png`, `pictures/test_<n>.png`, `arenas/<name>.png`,
+   `cels/<name>/frame_NNN.png`). `--hd-template` exports assets with true runtime scene palettes
+   decoded from `mog`, a starter `pack.toml`, per-cel `meta.toml` (dimensions, `hot_x`,
+   hitboxes), and auto-generated 8-bit `.mask.png` files (knight tunic/armor slots, arena region
+   slots, and overworld `test_8` cycling slots).
+4. **Scaling & validation:** `pack.toml` declares the HD FBO integer scale (`2..8`). Individual
+   PNGs default to requiring exact integer multiples (`k*w × k*h`) of original dimensions, with
+   optional explicit `padding`/`offset` in `meta.toml` for glow/shadow extensions. Malformed
+   manifests or mismatched dimensions fail fast with `HdPackError`.
+5. **Palette & color modes (v1):** Support three coexisting modes per pack/asset:
+   - `indexed`: HD PNG storing Amiga indices `0..31`, shaded via the live 32-entry LUT.
+   - `rgba`: True-color HD PNG with live GPU fade/flash/pulse tint derived from active vs. base
+     palette, plus exact variant overrides (`<asset>__<variant>`) taking highest lookup priority.
+   - `masked`: Diffuse RGBA paired with an 8-bit `.mask.png` (`0` = unmasked, `1..31` = exact
+     Amiga palette slot) using luminance-preserving GPU recoloring so HD shading/highlights are
+     retained across knight classes, arena regions, and palette cycling.
+   Overworld `test_8` color cycling works both via auto-generated `.mask.png` and optional
+   multi-frame cycle sequences declared in `meta.toml`.
+6. **Mixed-scene fallback & stamping:** Unreplaced 1× Amiga assets render directly into the HD
+   FBO via the live LUT in exact 2.5D draw order using `pack.toml`'s `fallback_filter`
+   (`nearest` | `smooth`, default `nearest`). Permanent fight stamps (`draw.stamp == True`)
+   render once per `accept(draws)` into a retained `hd_bg_fbo` blitted to `hd_frame_fbo`
+   (preserving ADR-014 render purity).
+7. **Scene coverage & presentation integration:** Cover all playable gameplay scenes (fights,
+   overworld map, towns, sheets, services/dice, Stonehenge, Wizard's tower, Valley, meetings,
+   menus/Next Day/farewell). Multi-buffer `program` intro and ending cleanly fall back to
+   Classic / GPU-scaler. In HD mode, pixel upscalers (`smooth`, `scalefx`) are bypassed while
+   aspect/crop/scale viewport, `surround`, and optional `scanlines`/`crt` remain active.
+   `F7` and the `F10` display preview panel toggle Classic ↔ HD live (consumed before
+   `InputRouter`).
+
+**Consequences:** Users can immediately run offline AI upscalers on `--hd-template` exports and
+play with working knight class colors, fades, and animated map water, while artists gain an
+incremental remaster workflow with hitbox-verified QA tools. GPU VRAM usage stays bounded via a
+lazy LRU texture cache released cleanly on pack toggle or shutdown. No new runtime dependencies
+are required (`Pillow`, `numpy`, `moderngl` are already in the stack).
