@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,9 @@ from harddaysengine.app.config import (
 )
 from harddaysengine.app.game import run_game_window, run_headless_session
 from harddaysengine.app.input import ControlMode
+from harddaysengine.assets.adf import ADFFormatError, DiskSet
+from harddaysengine.assets.hd_pack import HdPack
+from harddaysengine.assets.hd_pack_schema import HdPackError
 from harddaysengine.cli.extract import run_extraction
 from harddaysengine.cli.inspect_assets import run_inspector_cli
 from harddaysengine.render.presentation import (
@@ -32,6 +36,8 @@ from harddaysengine.sim.rng import DEFAULT_SEED
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from harddaysengine.render.presentation import DisplaySettings
 
 REQUIRED_DISK_COUNT = 3
 
@@ -175,6 +181,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="host control mode: auto, standard, or shared-pad (default: [input] mode or auto)",
     )
+    parser.add_argument(
+        "--validate-hd-pack",
+        default=None,
+        metavar="DIR",
+        help="validate an external HD asset pack directory and exit",
+    )
     return parser
 
 
@@ -185,6 +197,45 @@ def _list_disks(adf_dir: Path) -> int:
         print(f"  {image.name}")
     print(f"{len(images)} image(s) found; Moonstone needs {REQUIRED_DISK_COUNT}.")
     return 0 if len(images) >= REQUIRED_DISK_COUNT else 1
+
+
+def _try_load_disks_for_validation(adf_dir: Path) -> DiskSet | None:
+    if len(find_adf_images(adf_dir)) < REQUIRED_DISK_COUNT:
+        return None
+    try:
+        return DiskSet.from_directory(adf_dir)
+    except ADFFormatError:
+        return None
+
+
+def _validate_hd_pack(pack_dir: Path, adf_dir: Path) -> int:
+    disk_set = _try_load_disks_for_validation(adf_dir)
+    try:
+        pack = HdPack.load(pack_dir)
+        report = pack.validate(disk_set=disk_set)
+    except HdPackError as exc:
+        print(f"HD pack validation failed: {exc}", file=sys.stderr)
+        return 1
+
+    cfg = report.config
+    disk_note = "yes" if report.checked_against_disks else "no"
+    print(
+        f"HD pack valid: {cfg.name} v{cfg.version} "
+        f"(scale={cfg.scale}x, default_mode={cfg.default_mode.value}, "
+        f"fallback={cfg.fallback_filter.value}, disks_checked={disk_note})"
+    )
+    print(
+        f"  overrides: {report.picture_count} picture(s), {report.arena_count} arena(s), "
+        f"{report.cel_count} cel(s) ({report.cel_frame_count} frame(s)), "
+        f"{report.cycle_frame_count} cycle frame(s)"
+    )
+    print(
+        f"  modes: indexed={report.indexed_count}, rgba={report.rgba_count}, "
+        f"masked={report.masked_count}"
+    )
+    for warning in report.warnings:
+        print(f"  warning: {warning}")
+    return 0
 
 
 def _should_launch_game(argv: Sequence[str] | None, args: argparse.Namespace) -> bool:
@@ -204,6 +255,29 @@ def _parse_args(parser: argparse.ArgumentParser, argv: Sequence[str] | None) -> 
     if args.headless_frames is not None and not args.inspect_assets:
         parser.error("--headless-frames requires --inspect-assets (gameplay uses --headless-ticks)")
     return args
+
+
+def _dispatch_utility_command(
+    args: argparse.Namespace,
+    adf_dir: Path,
+    display: DisplaySettings,
+) -> int | None:
+    if args.list_disks:
+        return _list_disks(adf_dir)
+    if args.validate_hd_pack is not None:
+        return _validate_hd_pack(Path(args.validate_hd_pack), adf_dir)
+    if args.extract_assets:
+        return run_extraction(adf_dir, Path(args.output_dir))
+    if args.inspect_assets:
+        return run_inspector_cli(
+            adf_dir,
+            cel_name=args.cel,
+            background_name=args.background,
+            display=display,
+            headless_frames=args.headless_frames,
+            screenshot=args.screenshot,
+        )
+    return None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -232,19 +306,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         control_mode = resolve_control_mode(Path(args.config), cli_mode=args.control_mode)
     except ConfigError as exc:
         parser.error(str(exc))
-    if args.list_disks:
-        return _list_disks(adf_dir)
-    if args.extract_assets:
-        return run_extraction(adf_dir, Path(args.output_dir))
-    if args.inspect_assets:
-        return run_inspector_cli(
-            adf_dir,
-            cel_name=args.cel,
-            background_name=args.background,
-            display=display,
-            headless_frames=args.headless_frames,
-            screenshot=args.screenshot,
-        )
+    utility_rc = _dispatch_utility_command(args, adf_dir, display)
+    if utility_rc is not None:
+        return utility_rc
     if not _should_launch_game(argv, args):
         parser.print_help()
         return 0
