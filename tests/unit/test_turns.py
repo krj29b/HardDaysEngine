@@ -98,10 +98,11 @@ def test_dead_and_frogged_records_skip_but_signed_ff_frog_does_not() -> None:
         (250, 0, 40, 40, 0, 0, 40),
         (130, 0, 40, 40, 120, 0, 40),
         (0, 0, 45, 40, 0, 0, 40),
+        (0, 0, 20000, 40, 0, 0, 40),
         (0, 0, 65535, 40, 0, 0, 10),
     ],
 )
-def test_overnight_byte_and_word_quirks(
+def test_overnight_decay_and_guarded_regeneration(
     recency: int,
     frog: int,
     hp: int,

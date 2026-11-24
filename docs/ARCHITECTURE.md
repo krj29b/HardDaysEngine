@@ -2998,15 +2998,12 @@ sheet or turn change):
 2. Build the background: the map picture, then the lair markers (§11.15), then the other
    knights. Copy it to both screens.
 3. Set up the turn (§11.11). This recomputes `budget` but leaves `spent` alone.
-4. Run the move step (§11.5) with whatever the `move` word still holds.
+4. Clear `move = 0` and run the move step (§11.5) to refresh `tile` and the proximity scan without moving.
 5. Draw the current knight and run the map jobs (the dragon), flip.
 6. Start the map colours if they are not running: fade to the map palette, one colour ramp and
    one colour cycle (§11.15). Then, if the dragon is not active, try to spawn it (§11.10). The
    entry palette fade blocks before human map input is polled, so keys, movement and fire are
    ignored while the map fades in.
-
-Quirk kept: step 4 uses the stale move word, so a direction held when fire opened the menu
-moves the knight one more pixel on re-entry.
 
 **Each frame**, in this order:
 
@@ -3085,8 +3082,7 @@ starting exactly at A's far edge does not count, B ending exactly at A's near ed
 interval runs from the position to the position plus the width (or height) of a frame of the
 map sprite set.
 
-**Order.** The first five rows of the list are cleared (rows beyond stay as they were; quirk
-kept), then rows are appended:
+**Order.** All ten rows of the arrival list are cleared, then rows are appended:
 
 1. **Places** (skipped in travel mode): each map node (§9.5) in table order. A = the node at
    its position with the size of the frame whose number is the node id; B = the knight with
@@ -3113,9 +3109,8 @@ Fire on the map runs the menu routine on the arrival list:
 
 - **No row:** nothing happens, result 0.
 - **One row:** it is dispatched at once.
-- **Travel mode:** the first row of kind 2 (a lair) is dispatched; if there is none, result 0.
-  (The search tests the kind before the end marker, so a stale kind 2 in the terminating row
-  counts; quirk kept.)
+- **Travel mode:** scan the arrival list until the first zero key; dispatch the first row of
+  kind 2 (a lair), or return 0 if none precedes the zero key.
 - **Otherwise the menu:** the key state is cleared and a panel is drawn at (50, 100): frame
   `$20` of the map sprite set as the panel, the knight's own frame (`kind`) at (55, 105), the
   headline (the knight's name followed by the " may ..." string) at (65, 105), then one line
@@ -3268,9 +3263,8 @@ named here happens whether or not its result is used.
 
 1. **Roam list** (once per turn): for each of the 24 lairs, the Manhattan distance from the
    knight (`|dx| + |dy|` on map positions, 16-bit), or `$FFFF` for a hidden lair. The list is
-   sorted by a bubble sort of 23 passes (pass *k* compares rows 0..22-*k* with their
-   successor) in which a row stays only if it is strictly smaller (unsigned) than the next
-   and its top bit is clear; equal rows swap.
+   sorted cleanly by `(hidden_flag, distance, index)` so visible lairs come first in ascending
+   distance order (ties broken by ascending lair index) and hidden lairs come last.
 2. **Roam target** (every frame): the low 2 bits of a draw, redrawn while zero, pick row 1, 2
    or 3 of the list (the second to fourth nearest). That lair is the roam target; a flag
    records whether it is hidden.
@@ -3279,8 +3273,7 @@ named here happens whether or not its result is used.
 4. **Rest item:** if `lives <= 3`, or `hp` is below a quarter of `hp_max`, and the knight owns
    a piece of slot `$00`: one is used and its rest effect applies (§9.4).
 5. **Opponent:** the other three knights are sorted by Manhattan distance, nearest first
-   (stable). If the knight has no `engaged_with` yet, they are tried in that order, followed
-   by one empty fourth entry (quirk kept: it costs one more draw and engages nobody). A
+   (stable). If the knight has no `engaged_with` yet, those three neighbors are tried in order. A
    candidate that is itself a computer knight is skipped without a draw. If the roam target
    is hidden the first candidate is engaged at once; otherwise one draw decides: low 7 bits
    of 25 or less engage, anything else moves on. Computer knights never pick each other;
@@ -3292,19 +3285,17 @@ named here happens whether or not its result is used.
    Manhattan distance of at least `derived_endurance << 4`: the jingle plays, one piece is
    used and `budget` doubles.
 8. **Shop wish** (the town target is cleared first). No wish with `gold <= 10`. Otherwise the
-   first of these that applies:
-   - a life (cost 25) when `gold > 25` and `lives <= 2`;
+   first of these that applies (clearing `wish.item = 0` for non-item wishes):
+   - a life (cost 25, `item = 0`) when `gold > 25` and `lives <= 2`;
    - armour, best first, at the smith's prices (battle 75, plate 50, mail 30): the first one
      the gold pays for decides. It is wanted if the worn armour is worse (battle: if the worn
      one is not exactly battle armour); if it is not wanted, the armour step ends without a
      wish;
-   - a sword. With gold for the claymore (25): a knight that wears the claymore goes on to
-     the daggers; any other gets cost, kind and item set to the claymore, but the step does
-     not end there (quirk kept). Then, with gold for the broad sword (10) and a sword below
-     the broad sword, the cost becomes 10 and the wish stands, the item still naming the
-     claymore when the first half ran. So a knight with the starting sword and 25 or more
-     gold gets the claymore for 10, and a knight with the broad sword never gets one;
-   - daggers (cost 2) when it carries 5 or fewer.
+   - a sword: with gold for the claymore (25) and a worn sword below claymore (`< 24`, including
+     the broad sword), set cost 25, kind sword and item claymore (`24`) and return immediately;
+     otherwise with gold for the broad sword (10) and a worn sword below broad sword (`< 23`),
+     set cost 10, kind sword and item broad sword (`23`);
+   - daggers (cost 2, `item = 0`) when it carries 5 or fewer.
 
    When a wish stands, the **town target** is chosen: from the knight's tile, the Manhattan
    distances to tiles (12, 7) and (37, 20); the second town if strictly nearer, with walk
@@ -3338,10 +3329,9 @@ target it keeps stepping along x.
 the worn one (armour also recalculates `hp_max` and derived endurance); a life sets
 `hp = hp_max` and `lives += 1`; daggers run the loop below.
 
-Dagger loop (quirks kept): add one dagger; stop if `gold < 2`; stop if the 16-bit word made of
-the `daggers` byte and the `type` byte equals 10 (in practice never); else subtract 2 from the
-**high byte** of `gold` (512 gold) and repeat. The loop ends once the gold word is negative,
-usually after two daggers; the day turnover later resets negative gold to 0.
+Dagger loop: add one dagger (paid for by the initial `gold -= cost`), stop once `daggers >= 10`
+(the decoded `dagger_cap`) or `gold < dagger_price`, otherwise deduct `dagger_price` from `gold`
+(`u16(gold - dagger_price)`) and repeat.
 
 A human knight's turn has none of this: the joystick word is the only input.
 
@@ -3349,7 +3339,7 @@ A human knight's turn has none of this: the joystick word is the only input.
 
 For a deterministic replay the draws must happen in exactly this order. Per frame of a
 computer knight's turn: the roam target (one or more draws), the stat purchase (only when it
-has the points), the opponent draws (zero to four), then whatever the arrival triggers (a
+has the points), the opponent draws (zero to three), then whatever the arrival triggers (a
 meeting draws, a purchase does not). Per screen entry: the dragon's target draws, only when it
 spawns. Per round: the wizard's gift rolls of the day turnover, only on a day change, for
 records 0..3 in order. A human knight's frame draws nothing by itself.
@@ -3446,7 +3436,7 @@ state belong to simulation/host updates, never to render calls. Stop/restart
 on screen transitions discards jobs and starts from the map palette again.
 
 Rows retain raw keys: handles1..4 for knights; lair keys are disjoint handles
-starting at6; place keys pack x/y. Only the first five arrival rows are cleared;
+starting at6; place keys pack x/y. All ten arrival rows are cleared on each scan;
 a full ten-row list and table reads outside loaded data raise rather than
 corrupting adjoining memory. Travel skips places, knights and dragon touches
 and leaves the old touch list unchanged. The scan's interval test is performed
@@ -3454,7 +3444,7 @@ on zero-extended wrapped word endpoints, preserving its asymmetric edges.
 Menu key input is serialized in the input frame; digits select rows directly.
 A menu freezes map movement until a valid digit arrives; no cancel is added.
 The map frame decides status/end-turn/fire before moving, and charges before
-edge clipping. Screen re-entry applies stale move without charging again.
+edge clipping. Screen re-entry clears `move` to zero before refreshing tile and proximity.
 
 T11.12 owns movement, terrain, scanning, menus, visibility and the turn-budget
 exhausted event. The original scheduler/clock/dragon jobs consume that event
@@ -3479,18 +3469,18 @@ once, then advances records until play,
 farewell, or a round boundary. At a round boundary it suspends before setting up
 record0, runs upkeep once, and resumes only after the Next Day press/release.
 Skipping continues with the same skipped count across that suspension. Setup
-recomputes tile/region/budget without moving; screen entry applies the stale move.
-The active record's engagement is cleared on turn changes. AI goal/walk/roam cells
+recomputes tile/region/budget without moving; screen entry clears `move` and refreshes
+tile/proximity without moving. The active record's engagement is cleared on turn changes. AI goal/walk/roam cells
 are reset by the same boundary when T11.14 installs them. Until that task, a
 computer turn is exposed as unavailable, without consuming invented moves/draws.
 All-human rule/host tests exercise complete rounds independently of map AI.
 
 **Overnight correction to §9.3:** recency subtraction is byte-wrapped; a negative
 byte result becomes zero. Recency FF skips both recency and frog decay. A nonzero
-frog byte decrements once. Regeneration always computes a wrapped word difference
-(max minus hp), logically shifts it right2 and ORs1 when nonzero, adds it to hp,
-then caps with a signed comparison. This also preserves above-maximum/overflow
-cases; it is not guarded by hp < hp_max. Day turnover runs before overnight.
+frog byte decrements once. Regeneration runs only when `s16(hp) < s16(hp_max)`,
+computing `difference = u16(hp_max - hp)`, adding `(difference >> 2) | 1`, and then
+clamping `hp` to `hp_max` when `s16(hp) >= s16(hp_max)`. Above-max HP is clamped
+directly without unsigned wraparound healing. Day turnover runs before overnight.
 Computer gifts use the shared rules of §12.9/12, including the shared last-item
 memory and message cycles. Retries in random selection are bounded at4096 and
 raise when exhausted. Gold halves use logical word shifts: both winner's increment
@@ -3548,13 +3538,13 @@ when classifying each new turn, including record0 after the round screen.
 Screen re-entry does not clear the line. All cells participate in replay hashes.
 
 Distances subtract, take absolute values, add and wrap as words. Opponent distances
-are sign-extended to unsigned longs for their stable comparison. Roam sorting uses
-unsigned words but always swaps a leading negative word. Retry loops raise after
+are sign-extended to unsigned longs for their stable comparison. Roam sorting orders
+lairs by `(hidden_flag, distance, index)`. Retry loops raise after
 4096 failed draws rather than hanging on an invalid seed. Town distance comparisons,
 walk-axis comparisons and the speed threshold use signed words. Shopping compares
-signed gold and signed equipment longs. The sword's lost absolute store does not
-update the item cell; the dagger store clears only that cell's high word. Dagger
-debits subtract from gold's high byte, preserving its low byte.
+signed gold and signed equipment longs, sets `wish.item` explicitly for sword choices
+and clears `wish.item = 0` for non-item wishes. Dagger debits deduct `dagger_price`
+from full word `gold` and stop once `daggers >= dagger_cap` (10) or `gold < dagger_price`.
 
 Rest clears life_loss, restores HP, and when HP was already full increments lives;
 a signed result of six or more is forced to five. Stat purchase changes the byte

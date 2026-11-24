@@ -27,12 +27,13 @@ def _world() -> OverworldState:
     return world
 
 
-def test_roam_equal_rows_reverse_and_cache_until_turn_change() -> None:
+def test_roam_sorts_by_hidden_distance_and_index_and_caches_until_turn_change() -> None:
     world = _world()
     for lair in world.lairs:
         lair.map_x, lair.map_y = 100, 100
+    world.lairs[0].map_x = 65535
     build_roam(world)
-    assert [row[1] for row in world.ai.roam] == list(reversed(range(24)))
+    assert [row[1] for row in world.ai.roam] == [*range(1, 24), 0]
     saved = world.ai.roam.copy()
     world.lairs[0].map_x = 0
     build_roam(world)
@@ -56,11 +57,11 @@ def test_hidden_lairs_sort_last_and_hidden_pick_engages_without_draw() -> None:
     assert world.current_actor.engaged_with == 1
 
 
-def test_opponent_skips_computers_and_draws_for_null_candidate() -> None:
+def test_opponent_skips_computers_without_extra_null_draw() -> None:
     world = _world()
     with patch.object(Rng, "draw", return_value=126) as draw:
         pick_opponent(world, AI_RULES)
-    assert draw.call_count == 2 and world.current_actor.engaged_with == 0
+    assert draw.call_count == 1 and world.current_actor.engaged_with == 0
     world.actors[0].lives = 0
     with patch.object(Rng, "draw", return_value=25) as draw:
         pick_opponent(world, AI_RULES)
@@ -99,16 +100,16 @@ def test_frame_draws_roam_then_stat_then_opponent_before_terrain() -> None:
     world.current_actor.progress = 3
     world.current_actor.gold = 0
     world.current_actor.daggers = 10
-    # Two rejected roam zeros; row2; stat row0; failed human; failed null.
-    with patch.object(Rng, "draw", side_effect=[0, 0, 2, 0, 126, 126]) as draw:
+    # Two rejected roam zeros; row2; stat row0; failed human.
+    with patch.object(Rng, "draw", side_effect=[0, 0, 2, 0, 126]) as draw:
         computer_frame(world, AI_RULES)
-    assert draw.call_count == 6 and world.spent == 1
+    assert draw.call_count == 5 and world.spent == 1
     assert world.current_actor.strength == 3 and world.current_actor.progress == 0
     assert world.current_actor.derived_endurance == 8
     line = asdict(world.ai.walk)
-    with patch.object(Rng, "draw", side_effect=[3, 126, 126]) as draw:
+    with patch.object(Rng, "draw", side_effect=[3, 126]) as draw:
         computer_frame(world, AI_RULES)
-    assert draw.call_count == 3
+    assert draw.call_count == 2
     assert world.ai.walk.dx == line["dx"]
 
 
@@ -116,7 +117,7 @@ def test_terrain_block_costs_ai_budget_but_does_not_initialize_walk() -> None:
     world = _world()
     world.rules = replace(world.data(), terrain=bytes([255]) * 1000)
     position = world.current_actor.map_x, world.current_actor.map_y
-    with patch.object(Rng, "draw", side_effect=[1, 126, 126]):
+    with patch.object(Rng, "draw", side_effect=[1, 126]):
         computer_frame(world, AI_RULES)
     assert world.blocked and world.spent == 1 and world.move == 0
     assert not world.ai.walk.initialized
@@ -129,7 +130,7 @@ def test_rest_uses_lives_or_strict_quarter_threshold(lives: int, hp: int, expect
     actor = world.current_actor
     actor.lives, actor.hp, actor.hp_max, actor.life_loss = lives, hp, 40, 1
     world.inventories[actor.inventory].counts[0] = 1
-    with patch.object(Rng, "draw", side_effect=[1, 126, 126]):
+    with patch.object(Rng, "draw", side_effect=[1, 126]):
         computer_frame(world, AI_RULES)
     used = lives <= 3 or hp < 10
     assert actor.lives == expected
@@ -188,17 +189,18 @@ def test_arrival_stops_at_zero_or_seventh_row_and_duel_continuation_draws_nothin
     ("gold", "lives", "armour", "sword", "daggers", "expected"),
     [
         (10, 1, 27, 22, 0, None),
-        (27, 2, 27, 22, 0, (26, LIFE, 99)),
+        (27, 2, 27, 22, 0, (26, LIFE, 0)),
         (77, 4, 27, 22, 0, (77, ARMOUR, 30)),
         (51, 4, 27, 22, 0, (51, ARMOUR, 29)),
         (31, 4, 27, 22, 0, (31, ARMOUR, 28)),
-        (30, 4, 30, 22, 9, (11, SWORD, 24)),
-        (26, 4, 30, 22, 9, (11, SWORD, 99)),
-        (30, 4, 30, 23, 9, None),
-        (30, 4, 30, 24, 5, (2, DAGGERS, 99)),
+        (30, 4, 30, 22, 9, (27, SWORD, 24)),
+        (26, 4, 30, 22, 9, (11, SWORD, 23)),
+        (30, 4, 30, 23, 9, (27, SWORD, 24)),
+        (30, 4, 30, 25, 9, None),
+        (30, 4, 30, 24, 5, (2, DAGGERS, 0)),
     ],
 )
-def test_shop_priorities_and_stale_sword_item(
+def test_shop_priorities_sword_upgrades_and_clean_item_field(
     gold: int,
     lives: int,
     armour: int,
@@ -213,11 +215,13 @@ def test_shop_priorities_and_stale_sword_item(
         assert (wish.cost, wish.kind, wish.item) == expected
 
 
-def test_dagger_purchase_subtracts_high_byte_and_word_cap_is_ineffective() -> None:
-    actor = Actor(gold=32, daggers=9, type=16)
+def test_dagger_purchase_deducts_full_gold_and_stops_at_cap() -> None:
+    actor = Actor(gold=32, daggers=8, type=16)
     purchase(actor, Inventory(), ShopWish(2, DAGGERS), AI_RULES)
-    assert actor.daggers == 11 and s16(actor.gold) == -482
-    assert actor.gold & 255 == 30
+    assert actor.daggers == 10 and s16(actor.gold) == 28
+    low_gold = Actor(gold=5, daggers=5, type=16)
+    purchase(low_gold, Inventory(), ShopWish(2, DAGGERS), AI_RULES)
+    assert low_gold.daggers == 7 and s16(low_gold.gold) == 1
 
 
 def test_distance_uses_signed_word_subtraction_and_wrapped_sum() -> None:
@@ -258,9 +262,9 @@ def test_capped_stats_spend_no_points_and_consume_no_stat_draw() -> None:
     actor = world.current_actor
     actor.strength = actor.constitution = actor.endurance = 5
     actor.progress = 6
-    with patch.object(Rng, "draw", side_effect=[1, 126, 126]) as draw:
+    with patch.object(Rng, "draw", side_effect=[1, 126]) as draw:
         computer_frame(world, AI_RULES)
-    assert draw.call_count == 3 and actor.progress == 6
+    assert draw.call_count == 2 and actor.progress == 6
 
 
 def test_nearer_town_uses_tile_distance_but_engaged_opponent_remains_walk_target() -> None:

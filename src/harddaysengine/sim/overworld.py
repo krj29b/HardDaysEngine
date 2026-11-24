@@ -322,10 +322,11 @@ class OverworldState:
         self.region_code = self.grid_byte(self.data().regions)
 
     def enter(self) -> None:
-        """Recompute turn cells and apply stale move without charging (§11.4)."""
+        """Recompute turn cells, tile and proximity without moving (§11.4)."""
         self.setup_turn()
         self.menu = False
         self.colors.active = False
+        self.move = 0
         self.move_step()
 
     def terrain(self) -> None:
@@ -472,8 +473,8 @@ def _scan_knights(world: OverworldState) -> list[Arrival]:
 
 
 def scan(world: OverworldState) -> None:
-    """Clear five rows, append places/knights/lairs in order, retain trailing rows (§11.7)."""
-    world.arrivals[:5] = [Arrival() for _ in range(5)]
+    """Clear all arrival rows and append places, knights and lairs in order (§11.7)."""
+    world.arrivals[:] = [Arrival() for _ in range(len(world.arrivals))]
     world.highlights.clear()
     rows = [] if world.travel else [*_scan_places(world), *_scan_knights(world)]
     actor, rules = world.current_actor, world.data()
@@ -507,10 +508,10 @@ def open_menu(world: OverworldState) -> Arrival | None:
         return rows[0]
     if world.travel:
         for row in world.arrivals:
-            if row.kind == 2:
-                return row
             if row.key == 0:
                 return None
+            if row.kind == 2:
+                return row
         return None
     world.menu = True
     return None

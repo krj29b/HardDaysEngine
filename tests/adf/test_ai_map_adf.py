@@ -118,10 +118,8 @@ def test_original_frame_draw_order_matches_independent_oracle_across_turns(adf_d
             # No progress is earned in this direct map-only fixture.
             assert actor.progress < _rules(session).stat_price
             if not actor.engaged_with:
-                # Three peers, only the one human may draw; then the null row.
+                # Three peers; only the one human neighbor draws.
                 state = _draw(state)
-                if state & 127 > _rules(session).engage:
-                    state = _draw(state)
             computer_frame(world, _rules(session))
             assert world.prng.state == state
             count += 1
@@ -130,20 +128,20 @@ def test_original_frame_draw_order_matches_independent_oracle_across_turns(adf_d
     assert count > 200 and world.day >= 1
 
 
-def test_real_shopping_preserves_sword_fallthrough_and_high_byte_debit(adf_dir: Path) -> None:
+def test_real_shopping_upgrades_sword_and_deducts_full_dagger_gold(adf_dir: Path) -> None:
     session = _session(adf_dir)
     world, rules = session.overworld, _rules(session)
     actor = world.actors[1]
-    actor.gold, actor.lives, actor.armour, actor.sword, actor.daggers = 25, 4, 30, 22, 9
+    actor.gold, actor.lives, actor.armour, actor.sword, actor.daggers = 25, 4, 30, 23, 9
     assert shop_wish(actor, world.ai.wish, rules)
-    assert world.ai.wish.kind == SWORD and world.ai.wish.cost == 10
+    assert world.ai.wish.kind == SWORD and world.ai.wish.cost == 25 and world.ai.wish.item == 24
     purchase(actor, world.inventories[actor.inventory], world.ai.wish, rules)
-    assert actor.gold == 15 and actor.sword == 24
+    assert actor.gold == 0 and actor.sword == 24
     actor.sword, actor.gold, actor.daggers = 24, 30, 5
     assert shop_wish(actor, world.ai.wish, rules)
-    assert world.ai.wish.kind == DAGGERS
+    assert world.ai.wish.kind == DAGGERS and world.ai.wish.item == 0
     purchase(actor, world.inventories[actor.inventory], world.ai.wish, rules)
-    assert actor.daggers == 7 and s16(actor.gold) == -484
+    assert actor.daggers == 10 and s16(actor.gold) == 20
 
 
 def _multi_day(adf_dir: Path) -> tuple[list[str], set[int], int]:

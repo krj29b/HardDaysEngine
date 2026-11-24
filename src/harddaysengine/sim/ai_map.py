@@ -22,14 +22,14 @@ def distance(x: int, y: int, target_x: int, target_y: int) -> int:
 
 
 def build_roam(world: OverworldState) -> None:
-    """Build once per turn, swapping equal and leading-negative rows (§11.13)."""
+    """Build once per turn, sorting lairs by (hidden, distance, index) (§11.13)."""
     cells, actor = world.ai, world.current_actor
     if cells.built:
         return
     if len(world.lairs) != 24:
         raise ValueError("computer roaming requires 24 original lairs")
     cells.built = True
-    cells.roam = [
+    rows = [
         (
             65535
             if s16(lair.map_x) < 0
@@ -38,11 +38,7 @@ def build_roam(world: OverworldState) -> None:
         )
         for i, lair in enumerate(world.lairs)
     ]
-    for end in range(23, 0, -1):
-        for i in range(end):
-            first, second = cells.roam[i], cells.roam[i + 1]
-            if first[0] & 32768 or first[0] >= second[0]:
-                cells.roam[i], cells.roam[i + 1] = second, first
+    cells.roam = sorted(rows, key=lambda row: (s16(world.lairs[row[1]].map_x) < 0, row[0], row[1]))
 
 
 def pick_roam(world: OverworldState) -> None:
@@ -57,7 +53,7 @@ def pick_roam(world: OverworldState) -> None:
 
 
 def pick_opponent(world: OverworldState, rules: MapAiRules) -> None:
-    """Stable neighbor ordering and a fourth null candidate (§11.13)."""
+    """Stable neighbor ordering over the other knights (§11.13)."""
     actor, cells = world.current_actor, world.ai
     cells.neighbors = sorted(
         (
@@ -69,8 +65,8 @@ def pick_opponent(world: OverworldState, rules: MapAiRules) -> None:
     )
     if actor.engaged_with:
         return
-    for _, handle in (*cells.neighbors, (0, 0)):
-        if handle and world.actors[handle - 1].kind == 4:
+    for _, handle in cells.neighbors:
+        if world.actors[handle - 1].kind == 4:
             continue
         if cells.hidden or world.prng.draw() & 127 <= rules.engage:
             actor.engaged_with = handle

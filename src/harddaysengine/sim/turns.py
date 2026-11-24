@@ -41,14 +41,14 @@ class TurnCells:
 
 
 def overnight(actor: Actor) -> None:
-    """Wrapped curse decay and regeneration, including above-max HP (§11.19)."""
+    """Curse decay and guarded regeneration (§11.19)."""
     if actor.recency != 255:
         value = u8(actor.recency - 10)
         actor.recency = 0 if s8(value) < 0 else value
         if actor.frog_days:
             actor.frog_days = u8(actor.frog_days - 1)
-    difference = u16(actor.hp_max - actor.hp)
-    if difference:
+    if s16(actor.hp) < s16(actor.hp_max):
+        difference = u16(actor.hp_max - actor.hp)
         actor.hp = u16(actor.hp + ((difference >> 2) | 1))
     if s16(actor.hp) >= s16(actor.hp_max):
         actor.hp = actor.hp_max

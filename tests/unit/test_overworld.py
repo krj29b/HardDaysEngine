@@ -98,14 +98,14 @@ def test_modes_bypass_terrain_and_budget(mode: str) -> None:
     assert world.current_actor.map_x == 289
 
 
-def test_budget_ends_before_final_pixel_and_entry_uses_stale_move() -> None:
+def test_budget_ends_before_final_pixel_and_entry_clears_stale_move() -> None:
     world = make_world()
     world.budget = 2
     world.frame(LEFT)
     world.frame(LEFT)
     assert world.turn_over and world.current_actor.map_x == 289
     world.enter()
-    assert world.current_actor.map_x == 288 and world.spent == 2
+    assert world.current_actor.map_x == 289 and world.move == 0 and world.spent == 2
 
 
 def test_end_key_and_status_order() -> None:
@@ -169,12 +169,18 @@ def test_home_castles_are_kind_filtered_and_dead_knights_use_graves() -> None:
     assert MapSprite(42, 10, 10) in world.highlights
 
 
-def test_five_row_clear_retains_original_trailing_stale_row() -> None:
+def test_scan_clears_all_ten_arrival_rows_and_travel_stops_at_zero_key() -> None:
     world = make_world()
     world.arrivals[5] = Arrival(99, 33)
+    world.arrivals[9] = Arrival(88, 2)
     scan(world)
-    assert world.arrivals[5] == Arrival(99, 33)
+    assert world.arrivals == [Arrival() for _ in range(10)]
     assert list_rows(world) == ()
+    world.travel = True
+    world.arrivals[:4] = [Arrival(10, 25), Arrival(11, 26), Arrival(0, 2), Arrival(6, 2)]
+    assert open_menu(world) is None
+    world.arrivals[:3] = [Arrival(10, 25), Arrival(6, 2), Arrival(0, 0)]
+    assert open_menu(world) == Arrival(6, 2)
 
 
 def test_full_arrival_list_fails_instead_of_truncating() -> None:
