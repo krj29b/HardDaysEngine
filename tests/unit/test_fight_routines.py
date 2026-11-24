@@ -64,8 +64,10 @@ def _flying(result: HandlerResult) -> bool:
         (300, 1, False),
         (1, 3, True),
         (0, 3, False),
+        (-1, 3, False),
         (-8, 3, False),
-        (-9, 3, True),
+        (-9, 3, False),
+        (-100, 3, False),
     ],
 )
 def test_a_dagger_flies_until_the_edge(x: int, facing: int, flying: bool) -> None:

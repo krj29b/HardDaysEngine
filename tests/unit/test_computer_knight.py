@@ -74,15 +74,17 @@ def test_guard_consumes_only_one_draw_and_does_not_reset_cooldown(
     assert fight.rng.state == expected.state and actor.cooldown == 0x1234
 
 
-@pytest.mark.parametrize("left", [True, False])
-def test_failed_guard_uses_side_boolean_as_attack_distance(left: bool) -> None:
+@pytest.mark.parametrize(("left", "daggers", "expected"), [(True, 1, 12), (False, 0, 0)])
+def test_failed_guard_preserves_true_distance_for_attack_selection(
+    left: bool, daggers: int, expected: int
+) -> None:
     fight, actor, target = _fight()
-    actor.reach_x = 200
+    actor.reach_x, actor.daggers = 200, daggers
     target.x = actor.x + (-150 if left else 150)
     target.facing = 1 if left else 3
     target.action = 8
     _think(fight)
-    assert actor.action == 8
+    assert actor.action == expected
 
 
 def test_latched_block_skips_guard_draw_and_walk_releases_latch() -> None:
@@ -195,9 +197,10 @@ def test_day_is_clamped_to_odds_bounds_and_signed_odds_are_used() -> None:
         replace(RULES, odds=b"")
 
 
-@pytest.mark.parametrize(("distance", "action"), [(111, 16), (112, 8)])
+@pytest.mark.parametrize(("distance", "action"), [(111, 16), (112, 12)])
 def test_guard_range_is_inclusive_and_equal_odds_can_guard(distance: int, action: int) -> None:
     fight, actor, target = _fight()
+    actor.daggers = 1
     target.x, target.action = actor.x - distance, 8
     rules = replace(RULES, odds=bytes([44]))
     _think(fight, rules)

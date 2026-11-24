@@ -144,7 +144,6 @@ def aim_flight(
     owner: int,
     actor: Actor,
     target: Actor,
-    map_y_actor: Actor | None = None,
     *,
     reach_x: int | None = None,
 ) -> tuple[int, int, int]:
@@ -157,7 +156,7 @@ def aim_flight(
     request.target_x = u16(target.x + offset)
     request.target_depth, request.target_height = target.y, target.height
     actor.map_x = request.target_x
-    (actor if map_y_actor is None else map_y_actor).map_y = target.y
+    actor.map_y = target.y
     dx, dy = s16(u16(request.target_x - actor.x)), s16(u16(target.y - actor.y))
     ax, ay = u16(-dx) if dx < 0 else dx, u16(-dy) if dy < 0 else dy
     distance = ay if s16(ay) >= s16(ax) else ax

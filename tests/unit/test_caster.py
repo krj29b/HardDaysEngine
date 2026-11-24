@@ -97,13 +97,13 @@ def test_special_knight_actions_select_death_without_direct_accounting(
     assert fight.alive_now == fight.total == 0
 
 
-def test_other_attacker_enters_think_and_clears_the_other_records_action() -> None:
+def test_other_attacker_enters_think_and_clears_self_action() -> None:
     fight, handle = make_caster()
     me, other = fight.actor(handle), fight.actor(fight.second)
     other.action, me.action, me.attacker = 20, 12, fight.second
     fight.caster.wait = 2
     assert _script(_handle(fight, handle)) == me.idle_script
-    assert (other.action, me.action, fight.caster.wait) == (0, 12, 1)
+    assert (other.action, me.action, fight.caster.wait) == (20, 0, 1)
 
 
 def test_catch_sign_extends_endurance_byte_and_pauses_victim() -> None:
@@ -174,14 +174,14 @@ def test_normal_hit_keeps_job_or_counters_and_sets_shared_wait() -> None:
     assert _script(_handle(fight, handle)) == SCRIPTS.counter8
 
 
-def test_damage_and_hurt_script_are_taken_from_first_not_attacker() -> None:
+def test_damage_and_hurt_script_come_from_attacker() -> None:
     fight, handle = make_caster()
     me, first, attacker = fight.actor(handle), fight.actor(1), fight.actor(2)
-    first.action, first.strength, attacker.action = 4, 3, 8
+    first.action, first.strength, attacker.action, attacker.strength = 4, 3, 8, 5
     me.attacker = 2
-    expected = fight.table_long(me.hurt_scripts, 4)
+    expected = fight.table_long(me.hurt_scripts, 8)
     assert _script(_handle(fight, handle)) == expected
-    assert me.hp == 15
+    assert me.hp == 12
     me.behaviour_flags = OUT
     assert _script(_handle(fight, handle)) == SCRIPTS.flight_hurt
 
@@ -193,13 +193,13 @@ def test_shared_wait_only_counts_down_when_depth_is_near() -> None:
     assert fight.caster.wait == 7
 
 
-def test_unrecognized_attacker_preserves_the_stray_map_depth_write_when_aiming() -> None:
+def test_unrecognized_attacker_writes_aim_map_depth_only_to_self() -> None:
     fight, handle = make_caster(200)
     me, other = fight.actor(handle), fight.actor(fight.second)
-    me.attacker, me.map_y = fight.second, 77
+    me.attacker, me.map_y, other.map_y = fight.second, 77, 55
     fight.caster.flags = INITIAL
     assert _script(_handle(fight, handle)) == SCRIPTS.flight
-    assert (me.map_y, other.map_y) == (77, fight.actor(1).y)
+    assert (me.map_y, other.map_y) == (fight.actor(1).y, 55)
 
 
 def test_slam_overflow_comparison_uses_flags_before_word_wrap() -> None:

@@ -41,10 +41,7 @@ def dagger_handler(rules: KnightRules, fight: Fight, handle: int) -> HandlerResu
     if dagger.hit_target != 0:
         return END
     x = s16(dagger.x)
-    if dagger.facing == _FACING_RIGHT:
-        flying = x < rules.dagger.right_edge
-    else:
-        flying = x > 0 or -x > rules.dagger.left_margin
+    flying = x < rules.dagger.right_edge if dagger.facing == _FACING_RIGHT else x > 0
     return restart_from(dagger, rules.dagger.flight_script) if flying else END
 
 

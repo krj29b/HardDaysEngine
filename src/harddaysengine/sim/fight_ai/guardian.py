@@ -111,7 +111,6 @@ def _release(turn: _Turn) -> None:
     f.toggle_pause(f.first)
     f.restart_job(f.first, turn.rules.scripts.release)
     f.guardian.flags &= ~HOLD
-    # The original's timer store addresses script bytes, not an actor (§10.29).
 
 
 def _stages(turn: _Turn) -> HandlerResult | None:
@@ -223,19 +222,19 @@ def guardian_handler(
 
 
 def body_create(rules: GuardianRules, fight: Fight, call: RoutineCall) -> None:
-    """Create the reserved body at main-job x/height/x, preserving the depth typo (§10.29)."""
+    """Create the reserved body at the main job's x, height and depth (§10.29)."""
     cells = fight.guardian
     job = fight.find_job(cells.main)
     if job is None:
         return
     actor = fight.actor(cells.body)
     actor.active, actor.type, actor.frame_list = 1, GUARDIAN_TYPE, call.frame_list
-    actor.x, actor.height, actor.y, actor.facing = job.x, job.height, job.x, job.facing
+    actor.x, actor.height, actor.y, actor.facing = job.x, job.height, job.depth, job.facing
     fight.start_job(
         rules.scripts.body,
         cells.body,
         call.frame_list,
-        (job.x, job.height, job.x),
+        (job.x, job.height, job.depth),
         job.facing,
         GUARDIAN_TYPE,
     )

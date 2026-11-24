@@ -140,7 +140,8 @@ def _released(turn: _Turn) -> HandlerResult:
     turn.fight.snatch_flags &= ~RELEASE
     turn.me.behaviour_flags &= ~RELEASE
     turn.fight.toggle_pause(turn.fight.first)
-    # The original restart uses reversed owner/script registers and finds no job.
+    turn.target.hit_target = turn.target.attacker = 0
+    turn.fight.restart_job(turn.fight.first, turn.target.idle_script)
     turn.me.hp = u16(turn.me.hp - turn.rules.release_damage)
     return turn.script(turn.rules.scripts.hurt)
 

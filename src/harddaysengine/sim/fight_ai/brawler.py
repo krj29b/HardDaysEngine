@@ -174,10 +174,10 @@ def _decide(turn: _Turn, distance: int) -> HandlerResult:
     return _attack(turn, rules.thrust_cooldown, rules.thrust_action, rules.thrust_script)
 
 
-def _think(turn: _Turn, cleared: Actor) -> HandlerResult:
-    """Clear ``cleared``'s input and action, approach the target, then walk or decide."""
-    cleared.input = cleared.action = 0
+def _think(turn: _Turn) -> HandlerResult:
+    """Clear input and action, approach the target, then walk or decide."""
     me, target = turn.me, turn.target
+    me.input = me.action = 0
     flag, distance = approach(turn.fight, me, target)
     if flag:
         if turn.fight.approach.near == 0:
@@ -209,7 +209,7 @@ def _hit(turn: _Turn) -> HandlerResult:
     set_cooldown(me, turn.rules.after_hit_cooldown)
     victim = fight.actor(me.hit_target)
     if victim.type != KNIGHT_TYPE:
-        return _think(turn, victim)
+        return _think(turn)
     if victim.hit_target == 0 and s16(victim.hp) <= 0:
         turn.next_script = NO_SCRIPT
         if me.type == SPEAR_TYPE and not fight.demo:
@@ -230,7 +230,7 @@ def brawler_handler(
         return _hurt(turn)
     if turn.me.hit_target != 0:
         return _hit(turn)
-    return _think(turn, turn.me)
+    return _think(turn)
 
 
 def install_brawler(fight: Fight, rules: BrawlerRules, knight_rules: KnightRules) -> None:

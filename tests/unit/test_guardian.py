@@ -128,7 +128,7 @@ def test_hit_keeps_script_and_resets_shared_flags() -> None:
     assert me.cooldown == 0x0855 and f.guardian.flags == f.guardian.spare == 0
 
 
-def test_body_create_preserves_depth_typo_and_uses_job_facing() -> None:
+def test_body_create_uses_job_depth_and_job_facing() -> None:
     f, owner = make_guardian()
     main = f.find_job(owner)
     assert main is not None
@@ -136,7 +136,8 @@ def test_body_create_preserves_depth_typo_and_uses_job_facing() -> None:
     body_create(GUARDIAN, f, CALL)
     body = f.find_job(f.guardian.body)
     assert body is not None
-    assert (body.x, body.height, body.depth, body.frame_list) == (123, 0xFFFE, 123, 2)
+    assert (body.x, body.height, body.depth, body.frame_list) == (123, 0xFFFE, 88, 2)
+    assert f.actor(f.guardian.body).y == 88
     main.facing = 3
     body_facing(f, CALL)
     assert body.facing == 3

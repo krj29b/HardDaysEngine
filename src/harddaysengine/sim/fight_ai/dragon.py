@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
-from harddaysengine.sim.fight import DRAGON, END, KEEP, FightError, HandlerResult, restart_from
+from harddaysengine.sim.fight import DRAGON, END, KEEP, HandlerResult, restart_from
 from harddaysengine.sim.fight_ai.approach import abs_word, approach
 from harddaysengine.sim.fight_ai.effects import HitSparkRules, hit_spark
 from harddaysengine.sim.fight_hurt import contact_damage
@@ -17,7 +17,7 @@ from harddaysengine.sim.trajectory import FlightRules, FlightSlot, start_flight,
 if TYPE_CHECKING:
     from harddaysengine.sim.actor import Actor
     from harddaysengine.sim.fight import Fight
-    from harddaysengine.sim.fight_script import Job, RoutineCall
+    from harddaysengine.sim.fight_script import RoutineCall
     from harddaysengine.sim.fighter_rules import KnightRules
 
 DRAGON_TYPE, PART_TYPE = 0x14, 0x2C
@@ -90,11 +90,6 @@ def _links(fight: Fight, rules: DragonRules) -> None:
         depth = u16(depth - rules.link_gap)
 
 
-def _later_job(fight: Fight, job: Job) -> Job | None:
-    index = next(i for i, current in enumerate(fight.engine.jobs) if current is job) + 2
-    return fight.engine.jobs[index] if index < len(fight.engine.jobs) else None
-
-
 def _horizontal(actor: Actor, rules: DragonRules) -> None:
     if actor.input & RIGHT:
         x = u16(actor.x + rules.step)
@@ -107,7 +102,7 @@ def _horizontal(actor: Actor, rules: DragonRules) -> None:
 
 
 def dragon_step(rules: DragonRules, fight: Fight, _call: RoutineCall | None = None) -> None:
-    """Approach, bound x and retain the misplaced restoration into a later job (§10.30)."""
+    """Approach, bound x and restore reduced reach/close tunables on the actor (§10.30)."""
     actor, cells = fight.actor(DRAGON), fight.dragon_cells
     actor.input = 0
     reduced = bool(cells.flags & REDUCED)
@@ -121,12 +116,11 @@ def dragon_step(rules: DragonRules, fight: Fight, _call: RoutineCall | None = No
         actor.y = u16(actor.y - rules.step)
     if actor.input & DOWN:
         actor.y = u16(actor.y + rules.step)
+    if reduced:
+        actor.reach_x, actor.too_close_x = cells.saved_reach, cells.saved_close
     job = fight.find_job(DRAGON)
     if job is not None:
         job.x, job.depth = actor.x, actor.y
-        later = _later_job(fight, job)
-        if reduced and later is not None:
-            later.width, later.frame_height = cells.saved_reach, cells.saved_close
 
 
 def _spawn_fire(fight: Fight, rules: DragonRules) -> None:
@@ -180,24 +174,14 @@ def _tracking_depth(depth: int, target: int, step: int) -> int:
     return u16(depth + step if s16(depth) < s16(target) else depth - step)
 
 
-def _flight(fight: Fight, rules: DragonRules, alias: Job | None = None) -> HandlerResult:
+def _flight(fight: Fight, rules: DragonRules) -> HandlerResult:
     actor, cells = fight.actor(DRAGON), fight.dragon_cells
     target = fight.actor(fight.first)
-    if alias is None:
-        actor.cooldown = u16(actor.cooldown - 1)
-        remaining = actor.cooldown
-        depth = _tracking_depth(actor.y, target.y, rules.step)
-        step_flight(fight.flights, DRAGON, actor)
-        actor.y = depth
-    else:
-        later = _later_job(fight, alias)
-        if later is None:
-            raise FightError("Dragon alias flight addresses beyond the job table")
-        later.x = u16(later.x - 1)
-        remaining = later.x
-        alias.height = _tracking_depth(alias.height, target.y, rules.step)
-        # The job address cannot match a trajectory keyed by an actor handle.
-    if remaining == 0:
+    actor.cooldown = u16(actor.cooldown - 1)
+    depth = _tracking_depth(actor.y, target.y, rules.step)
+    step_flight(fight.flights, DRAGON, actor)
+    actor.y = depth
+    if actor.cooldown == 0:
         cells.flags &= ~FLIGHT
     actor.anim_phase = u8(actor.anim_phase + 1)
     phase = 7 if s8(actor.anim_phase) >= 8 else actor.anim_phase
@@ -207,9 +191,9 @@ def _flight(fight: Fight, rules: DragonRules, alias: Job | None = None) -> Handl
     return _script(actor, script)
 
 
-def _think(fight: Fight, rules: DragonRules, idle: int, alias: Job | None = None) -> HandlerResult:
+def _think(fight: Fight, rules: DragonRules, idle: int) -> HandlerResult:
     if fight.dragon_cells.flags & FLIGHT:
-        return _flight(fight, rules, alias)
+        return _flight(fight, rules)
     dragon_step(rules, fight)
     actor, cells = fight.actor(DRAGON), fight.dragon_cells
     cells.distance = abs_word(actor.x - fight.actor(fight.first).x)
@@ -227,7 +211,7 @@ def _hurt(
         job = fight.find_job(DRAGON)
         if job is not None and job.running:
             return KEEP
-        return _think(fight, rules, actor.idle_script, job)
+        return _think(fight, rules, actor.idle_script)
     fight.dragon_cells.flags |= HIT
     offset = attacker.action if attacker.type == 0x0C else 12
     amount = (
@@ -278,17 +262,18 @@ def part_handler(rules: DragonRules, fight: Fight, owner: int) -> HandlerResult:
 
 
 def linked_jobs(rules: DragonRules, fight: Fight, _call: RoutineCall) -> None:
-    """Put both jobs at +10, preserving the wrong-register subtraction (§10.30)."""
+    """Sync both linked jobs and actors to Dragon depth plus offset and gap (§10.30)."""
     a, b = fight.find_job(fight.dragon_cells.link_a), fight.find_job(fight.dragon_cells.link_b)
-    depth = u16(fight.actor(DRAGON).y + rules.link_offset)
+    depth_a = u16(fight.actor(DRAGON).y + rules.link_offset)
+    depth_b = u16(depth_a - rules.link_gap)
     if a is not None:
-        a.depth = depth
+        a.depth = depth_a
     if b is not None:
-        b.depth = depth
-    if a is not None:
-        for handle in (fight.dragon_cells.link_a, fight.dragon_cells.link_b):
-            if handle:
-                fight.actor(handle).y = a.depth
+        b.depth = depth_b
+    if fight.dragon_cells.link_a:
+        fight.actor(fight.dragon_cells.link_a).y = depth_a
+    if fight.dragon_cells.link_b:
+        fight.actor(fight.dragon_cells.link_b).y = depth_b
 
 
 def install_dragon(fight: Fight, rules: DragonRules, knight_rules: KnightRules) -> None:

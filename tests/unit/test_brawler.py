@@ -257,14 +257,14 @@ def test_in_the_demo_the_spear_goes_back_to_idle() -> None:
     assert _script(_handle(fight, handle)) == IDLE
 
 
-def test_a_blow_on_another_record_clears_that_records_input() -> None:
+def test_a_blow_on_another_record_clears_only_self_not_victim() -> None:
     fight, handle = make_trogg_fight(150)
     other_handle = fight.alloc_record()
     other, trogg = fight.actor(other_handle), fight.actor(handle)
     other.type, other.input, other.action = AXE_TYPE, LEFT, 8
     trogg.hit_target, trogg.input, trogg.action = other_handle, UP, 8
     result = _handle(fight, handle)
-    assert (other.input, other.action) == (0, 0)
-    assert (trogg.input, trogg.action) == (UP, 8)
+    assert (other.input, other.action) == (LEFT, 8)
+    assert (trogg.input, trogg.action) == (0, 0)
     assert cooldown(trogg) == BRAWLER.after_hit_cooldown - 1
     assert result == Restart(AFTER_HIT, 150, 0, 100, 3)

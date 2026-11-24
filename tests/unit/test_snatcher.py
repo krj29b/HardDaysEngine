@@ -101,9 +101,9 @@ def test_failed_grab_clears_ready_and_emerges(x: int, y: int) -> None:
     assert me.behaviour_flags == SHOWN and fight.snatch_flags == 0
 
 
-def test_hit_carries_then_only_port_one_breaks_hold_and_restart_is_ineffective() -> None:
+def test_hit_carries_then_only_port_one_breaks_hold_and_restarts_victim_idle() -> None:
     fight, handle = _fight()
-    me = fight.actor(handle)
+    me, victim = fight.actor(handle), fight.actor(1)
     me.hit_target = 1
     assert _handle(fight, handle) == SCRIPTS.carry
     assert fight.snatch_flags == CARRY and me.anim_timer == SNATCHER.hold_timer
@@ -115,9 +115,11 @@ def test_hit_carries_then_only_port_one_breaks_hold_and_restart_is_ineffective()
     assert fight.snatch_flags == RELEASE
     job = fight.find_job(1)
     assert job is not None
-    old_script = job.script
+    job.script = 999
+    victim.hit_target, victim.attacker = handle, handle
     assert _handle(fight, handle) == SCRIPTS.hurt
-    assert job.paused == 0 and job.script == old_script
+    assert job.paused == 0 and job.script == victim.idle_script
+    assert (victim.hit_target, victim.attacker) == (0, 0)
     assert me.hp == 20 - SNATCHER.release_damage and fight.snatch_flags == 0
 
 

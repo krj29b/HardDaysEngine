@@ -98,15 +98,16 @@ def test_depth_mismatch_or_dead_target_keeps_idle_and_clears_reduced() -> None:
     assert not f.dragon_cells.flags & REDUCED
 
 
-def test_reduced_step_keeps_actor_tunables_and_restores_into_later_job() -> None:
+def test_reduced_step_restores_actor_tunables_without_touching_other_jobs() -> None:
     f = make_dragon()
     d = f.actor(DRAGON)
     f.dragon_cells.flags = REDUCED
-    dragon_step(R, f)
-    assert (d.reach_x, d.too_close_x) == (R.reduced_reach, R.reduced_close)
-    assert (f.dragon_cells.saved_reach, f.dragon_cells.saved_close) == (60, 10)
     later = f.engine.jobs[2]
-    assert (later.width, later.frame_height) == (60, 10)
+    later.width, later.frame_height = 11, 22
+    dragon_step(R, f)
+    assert (d.reach_x, d.too_close_x) == (60, 10)
+    assert (f.dragon_cells.saved_reach, f.dragon_cells.saved_close) == (60, 10)
+    assert (later.width, later.frame_height) == (11, 22)
     job = f.find_job(DRAGON)
     assert job is not None and (job.x, job.depth) == (d.x, d.y)
 
@@ -138,7 +139,7 @@ def test_flight_tracks_depth_at_equality_and_discards_trajectory_depth() -> None
     assert not f.dragon_cells.flags & FLIGHT
 
 
-def test_ignored_hit_keeps_running_script_and_aliases_ended_job_during_flight() -> None:
+def test_ignored_hit_keeps_running_script_and_advances_normal_flight_when_ended() -> None:
     f = make_dragon()
     d = f.actor(DRAGON)
     dragon_handler(R, RULES, f, DRAGON)
@@ -147,27 +148,12 @@ def test_ignored_hit_keeps_running_script_and_aliases_ended_job_during_flight() 
     job = f.find_job(DRAGON)
     assert job is not None
     job.running = False
-    job.height = 90
-    f.engine.jobs[2].x = 1
-    before = (d.x, d.height, d.cooldown)
-    dragon_handler(R, RULES, f, DRAGON)
-    assert (d.x, d.height, d.cooldown) == before
-    assert f.engine.jobs[2].x == 0 and job.height == 93
+    d.cooldown = 1
+    f.engine.jobs[2].x = 77
+    result = dragon_handler(R, RULES, f, DRAGON)
+    assert isinstance(result, Restart) and result.script == 609
+    assert d.cooldown == 0 and f.engine.jobs[2].x == 77
     assert not f.dragon_cells.flags & FLIGHT
-
-
-def test_alias_flight_outside_job_table_raises() -> None:
-    f = make_dragon()
-    d = f.actor(DRAGON)
-    d.attacker = f.dragon_cells.link_a
-    job = f.find_job(DRAGON)
-    assert job is not None
-    f.engine.jobs.remove(job)
-    f.engine.jobs.append(job)
-    job.running = False
-    f.dragon_cells.flags = FLIGHT
-    with pytest.raises(FightError, match="beyond the job table"):
-        dragon_handler(R, RULES, f, DRAGON)
 
 
 @pytest.mark.parametrize("kind", [0x0C, 0x34])
@@ -232,13 +218,14 @@ def test_part_hurt_hit_death_priorities_and_hop() -> None:
     assert isinstance(result, Restart) and result.script == SCRIPTS.part_death
 
 
-def test_linked_job_callback_preserves_both_depths_at_plus_offset() -> None:
+def test_linked_job_callback_offsets_both_links_by_offset_and_gap() -> None:
     f = make_dragon()
     a, b = f.dragon_cells.link_a, f.dragon_cells.link_b
     linked_jobs(R, f, CALL)
-    assert f.actor(a).y == f.actor(b).y == 108
-    assert f.find_job(a) is not None and f.find_job(a).depth == 108
-    assert f.find_job(b) is not None and f.find_job(b).depth == 108
+    assert f.actor(a).y == 108 and f.actor(b).y == 83
+    job_a, job_b = f.find_job(a), f.find_job(b)
+    assert job_a is not None and job_a.depth == 108
+    assert job_b is not None and job_b.depth == 83
 
 
 def test_flight_negative_phase_raises_instead_of_reading_unrelated_memory() -> None:

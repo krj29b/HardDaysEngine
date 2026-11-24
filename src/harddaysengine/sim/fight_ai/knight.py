@@ -44,21 +44,16 @@ def _walk(
     return walk(fight, rules.steps, handle, knight.probes, restart_from(actor, actor.idle_script))
 
 
-def _guard(
-    fight: Fight, rules: ComputerKnightRules, actor: Actor, target: Actor, distance: int, odds: int
-) -> tuple[int, int]:
+def _guard(fight: Fight, rules: ComputerKnightRules, actor: Actor, target: Actor, odds: int) -> int:
     if actor.behaviour_flags & 0x80:
-        return 0, distance
+        return 0
     roll = fight.rng.percent()
     if s8(roll) < s8(odds) or actor.facing == target.facing:
-        return 0, distance
+        return 0
     action = {0x08: 0x10, 0x20: 0x1C, 0x04: 0x1C}.get(target.action, 0)
-    if action:
-        delta = target.x - actor.x
-        if s16(abs_word(delta)) <= s16(rules.guard_range):
-            return action, distance
-        distance = int(bool(delta & 0x8000))
-    return 0, distance
+    if action and s16(abs_word(target.x - actor.x)) <= s16(rules.guard_range):
+        return action
+    return 0
 
 
 def _attack(
@@ -87,7 +82,7 @@ def _decide(
         return 0
     day = max(0, min(s16(fight.ai_day), len(rules.odds) - 1))
     odds = rules.odds[day]
-    action, distance = _guard(fight, rules, actor, target, distance, odds)
+    action = _guard(fight, rules, actor, target, odds)
     return action or _attack(fight, rules, actor, distance, odds)
 
 

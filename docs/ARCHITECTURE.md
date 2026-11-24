@@ -1927,9 +1927,8 @@ job's position and facing with its frame list, running the dagger script; it get
 damage table (in `mog` code; 3 per entry) and `action = $0C`.
 
 **Dagger handler** (type `$34`). With a `hit_target`: **end**. Facing 1: while `x < 330` (signed)
-the next script is the dagger flight script, else end. Other facings: while `x > 0` the flight
-script; at `-10 <= x <= 0` end; below `-10` the flight script again (a quirk: a dagger that steps
-past the margin keeps flying).
+the next script is the dagger flight script, else end. Other facings: while `x > 0` (signed) the
+flight script runs; for all `x <= 0` the dagger ends flight.
 
 **Hop.** `hop` sets the hop counter to `$FFFF`. `hop_step`, called by the owner's script each
 frame of a throw: the counter goes up by 1; the owner's `input` becomes 0 and its `facing` the hop
@@ -1985,9 +1984,8 @@ script's "jump if owner dead" branch.
 
 **Hit branch.** The next script is `after_hit_script` and the cool-down becomes 10. Then the
 target's type decides:
-- **Not `$0C`:** think, clearing the **target's** `input` and `action`. This is a quirk of the
-  original, which leaves the brawler's own `input` and `action` as they were. The next script
-  stays `after_hit_script` unless think changes it.
+- **Not `$0C`:** think, clearing the brawler's own `input` and `action` without modifying the
+  target record. The next script stays `after_hit_script` unless think changes it.
 - **`$0C`, with no `hit_target` of its own and `hp <= 0` (signed):** the next script becomes
   `$FFFFFFFF`. A spear Trogg while the demo flag is off then kills the target's job (§10.18) and
   plays the spear-finish script. Nothing further applies.
@@ -1995,7 +1993,7 @@ target's type decides:
   next script as it stands, so it repeats `after_hit_script` while the knight stands, and keeps
   its job (`$FFFFFFFF`) once the knight is down.
 
-**Think.** The chosen record's `input` and `action` become 0. Then:
+**Think.** The brawler's own `input` and `action` become 0. Then:
 1. Call **approach**, which returns a flag and a distance `d`.
 2. Flag set: if `near` is 0, **walk**. Otherwise `d = |x - target.x|` and **decide**.
 3. Flag clear: decide with the returned `d`.
@@ -2032,8 +2030,7 @@ target's type decides:
    - Otherwise right when `x < target.x` (signed), else left. Return flag 1 with distance
      `reach_x`.
 
-The input bits are ORed into the record's `input`. Think cleared it first, except in the hit
-branch's quirk, where stale bits of the last move stay set.
+The input bits are ORed into the record's `input`, which think clears first.
 
 **Walk.** If the low byte of `input` is 0, the next script stands. Otherwise the **step
 helpers** run for the bits that are set, in the order up (bit 3), down (bit 2), right (bit 0),
@@ -2185,11 +2182,9 @@ construction. A slot is keyed by actor handle; the request has owner, start and 
 are separate from the knight's type-$34 dagger objects.
 
 **Handler priority.** Start with the actor's idle script. An attacker link takes precedence
-over a hit link; otherwise think. Think clears the selected record's action (normally self;
-an unrecognized attacker or another Ratman hit by self is the selected record instead, a
-preserved quirk). State flags are tested in this order: self +104 bit 7 or bit 0 => flight;
-bit 5 => grabbed; +105 bit 0 => release; +104 bit 4 => throw victim; bit 3 => hold;
-+105 bit 2 => slam; otherwise choose a new action.
+over a hit link; otherwise think. Think always clears self's `action`. State flags are tested in
+this order: self +104 bit 7 or bit 0 => flight; bit 5 => grabbed; +105 bit 0 => release;
++104 bit 4 => throw victim; bit 3 => hold; +105 bit 2 => slam; otherwise choose a new action.
 
 **Choosing an action.** Face the first fighter. Within the actor's depth reach, stand while
 shared bit 5 or 3 is set or the first fighter has non-positive HP; otherwise a nonzero shared
@@ -2205,7 +2200,7 @@ flight, set self bit 0 and choose the flight script.
 
 Aim chooses destination x as target.x minus reach when the wrapped x difference is nonnegative,
 otherwise target.x plus reach; other destination coordinates are the target's. It writes
-self.map_x to destination x and the chosen stray record's map_y to target depth. Distance is
+self.map_x to destination x and self.map_y to target depth. Distance is
 the signed maximum of the word absolute x/depth differences. Aim arc is distance >> 1 (minimum
 3 when not above 2), steps distance >> 3 (at most 4 forces steps 4 and arc 10), and self's
 whole cooldown becomes the aimed step count. For the flight request only, halve steps with a
@@ -2221,15 +2216,14 @@ byte and shared bit 2 and aim again; otherwise use the near hold script below di
 the far hold script at 60 or more. Phase advance uses §10.20 without movement probes.
 
 **Hurt.** Only an attacker of type $0C directly wounds self; other types enter think and clear
-the attacker's action. Without self bit 0, attacker action $10 or $1C clears self's first flags
+self's action. Without self bit 0, attacker action $10 or $1C clears self's first flags
 byte and height, sets HP to -1 and selects the first death script. Any other action subtracts
-the **first fighter's**, not the attacker's, computed contact damage and selects the hurt
-table entry indexed by that first fighter's action. With bit 0 set, attacker action $18 causes
-the second death script and the same resets; other actions subtract the first fighter's
-damage, clear first flags/height and choose the airborne hurt script. Death accounting is
-performed by the script, never directly by the handler.
+the attacker's computed contact damage and selects the hurt table entry indexed by the attacker's
+action. With bit 0 set, attacker action $18 causes the second death script and the same resets;
+other actions subtract the attacker's damage, clear first flags/height and choose the airborne
+hurt script. Death accounting is performed by the script, never directly by the handler.
 
-**Hit.** Another Ratman enters think, clearing the victim's action. With self bit 0, shared
+**Hit.** Another Ratman enters think, clearing self's action. With self bit 0, shared
 bit 5 means continue flight; otherwise replace self's first flags byte with bit 5, set shared
 bit 5, set cooldown to sign-extended byte(victim.endurance + 6), zero height, pause the
 victim's job and select the grab script. With self bit 3, clear both self flag bytes, set
@@ -2381,9 +2375,8 @@ carry with release in both flags, otherwise repeat carry. On expiry clear shared
 carry, set shared/local freed, mark the first fighter dead, and fall into freed.
 Freed selects the swallow script, kills the target job, and clears both freed bits
 only when the local freed bit is set. Released clears both release bits, toggles
-the target pause, subtracts one HP from the Mudman and selects hurt. The original
-attempts to restart the target with owner/script registers reversed; it finds no
-job. Preserve that ineffective restart rather than inventing a recovery script.
+the target pause, clears the target's contact links, restarts the target job on its
+`idle_script`, subtracts one HP from the Mudman and selects hurt.
 
 With none of those shared flags, an unseen Mudman decrements its byte timer. Zero
 returns idle; any other result copies target x/depth, appears 75 pixels to its
@@ -2634,9 +2627,7 @@ current job/script (the -1 next-script sentinel). It does not clear action.
 Otherwise target the first fighter and handle shared flags in order 0,3,1,4,5.
 Bit 0 becomes bit 4 and selects $69E2; bit 3 clears and selects $6AB4. In either
 case bit 6 releases the first fighter: hop facing comes from the main actor,
-toggle its pause, restart fixed $19B2, then clear bit 6. The original then writes
-3 or 5 into SCRIPT +106 through the wrong register; this corrupts unrelated
-script data and is deliberately omitted, without setting the Guardian cooldown.
+toggle its pause, restart fixed $19B2, then clear bit 6.
 Bit 1 just clears. Bit 4 becomes bit 3, selects $6A7A, and grabs at inclusive
 x distance 130..150; bit 5 becomes bit 0, selects $69AE, grabs at 120..140.
 A grab toggles first-fighter pause, sets bit 6, selects the respective $6B52 /
@@ -2654,8 +2645,8 @@ left and up before down, wraps words, has no clipping/probe, and syncs body.
 
 Engine routines reached by these fixed scripts:
 - $0A0E (guardian_2) creates a body job on decoded $6404, type 8, using the
-  main job x/height/facing and, deliberately, x AGAIN as the initial depth.
-  The reserved record receives those coordinates; frame list is the call's.
+  main job's x, height, depth and facing. The reserved record receives those
+  coordinates; frame list is the call's.
 - $0A52 copies main JOB facing to body JOB; $0A76 frees body job/record.
 - $0BA8 subtracts decoded 10 HP from first fighter and toggles its pause.
 - $0BD2 toggles first-fighter pause and repositions its job: facing main
@@ -2700,8 +2691,8 @@ A type-$0C attacker sets flag $80, subtracts contact damage, selects the
 hurt table by attacker's action and creates the shared hit spark at the
 DRAGON's contact coordinates. A dagger ($34) sets $80, selects hurt offset
 12 and subtracts 3, then the same spark. Other attackers keep the current
-script if the dragon job is running; otherwise think, retaining the
-original job-pointer alias described below. On hit-target, action !=4
+script if the dragon job is running; otherwise think normally on the dragon
+actor. On hit-target, action !=4
 keeps the job; action 4 frees the target's job/record and selects the fixed
 bite/finish script. Classic code does not mark HP immediately; that script
 calls mark-first-dead. With no links clear action before thinking.
@@ -2710,12 +2701,9 @@ calls mark-first-dead. With no links clear action before thinking.
 $40 is set save reach/too-close and replace them with 2/1. Run approach
 §10.20 against first fighter, then force facing 1. Apply right before left
 in separate tests: x+5 only if signed result <100, x-5 only if signed result
->30. Apply up then down separately (five pixels, word wrap). Copy actor
-x/depth into its job. The original restores the saved reach/too-close
-through the JOB pointer: actor values stay 2/1; words at job+116/+118
-become the saved values (width/frame-height of the job two slots later).
-Preserve writes within the modeled ten-record table; writes beyond it
-are omitted as invalid-memory corruption. Save words remain in snapshots.
+>30. Apply up then down separately (five pixels, word wrap). When flag $40 was
+set, restore the saved `reach_x` and `too_close_x` values onto the dragon actor.
+Copy actor x/depth into its job. Save words remain in snapshots.
 
 After ground step save signed absolute x distance. Below 140, flag $20
 set picks an attack, otherwise start the near flight. At or above 140,
@@ -2745,21 +2733,12 @@ $20/breath and set $40. Both latter choices clear $80. Breath also spawns
 an ordinary idle-object job (type$28, creature frame list) at dragon x+55,
 height0, depth+5, facing1 on the decoded fire script.
 
-**Job alias on an ignored hit:** when the dragon job has ended, the
-original enters think with A1 pointing to its JOB. Ground thinking restores
-the actor pointer and is normal. In-flight thinking instead decrements
-the word at job+106 (x of the job two slots later) and adjusts job+8 (its
-height) as if it were actor depth. A job pointer cannot match a trajectory
-owned by an actor, so dragon x/height remain unchanged. Phase advancement
-and link sync still operate on the dragon. A missing two-slots-later record
-raises instead of reading arbitrary memory. The normal handler result then
-replaces its job coordinates from the actor, as with every restart.
-
-**Linked records:** normal sync writes actor depth dragon+10 into link A,
-and dragon-20 into link B; it does not reposition their jobs. The separate
-$6A82 routine differs: BOTH jobs get dragon+10 (a subtraction uses the wrong
-register), then BOTH actors get the first job's depth. Preserve this typo;
-missing jobs cause no zero-address writes.
+**Linked records:** normal sync writes actor depth `dragon.y + link_offset` into
+link A, and `dragon.y + link_offset - link_gap` into link B; it does not
+reposition their jobs. The separate $6A82 routine synchronizes both linked jobs
+and their actor records with the same depths (`dragon.y + link_offset` for
+link A and `dragon.y + link_offset - link_gap` for link B); missing jobs cause
+no zero-address writes.
 
 **Object handler (type$2C):** default idle, first target. Attacker returns
 idle; hit-target returns idle, and unless the target is type$14 sets hop
@@ -2811,9 +2790,8 @@ A down target clears only the high cooldown byte (+106); at signed distance abov
 Against a living target, with block latch clear, consume one percent draw. When
 its signed byte is at least the signed odds byte and facings differ: opponent
 action $08 within signed x distance120 selects defend $10; action $20 or $04
-within120 selects block $1C. A failed range test leaves distance equal to the
-x-difference sign (1 for opponent left, 0 otherwise), preserving the original bug.
-The redundant second facing comparison has no additional effect.
+within120 selects block $1C. When the guard range check fails, the true distance
+is preserved for subsequent attack selection.
 
 Then consume a percent draw. A signed byte greater than odds attacks; otherwise
 consume one discarded full draw (the debug taunt), then walk. Attack tests in order:

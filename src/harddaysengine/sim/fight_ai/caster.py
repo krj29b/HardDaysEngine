@@ -96,7 +96,6 @@ class _Turn:
     rules: CasterRules
     knight_rules: KnightRules
     handle: int
-    selected: Actor | None = None
 
     @property
     def me(self) -> Actor:
@@ -109,8 +108,10 @@ class _Turn:
     def script(self, script: int) -> HandlerResult:
         return restart_from(self.me, script)
 
-    def damage(self) -> int:
-        return contact_damage(self.fight, self.knight_rules, self.target)
+    def damage(self, attacker: Actor | None = None) -> int:
+        return contact_damage(
+            self.fight, self.knight_rules, self.target if attacker is None else attacker
+        )
 
 
 def _subtract(actor: Actor, amount: int) -> bool:
@@ -127,9 +128,7 @@ def _walk(turn: _Turn, block: int) -> HandlerResult:
 
 def _aim(turn: _Turn) -> HandlerResult:
     f, me, rules = turn.fight, turn.me, turn.rules
-    distance, steps, arc = aim_flight(
-        f.flights, rules.flight, turn.handle, me, turn.target, turn.selected
-    )
+    distance, steps, arc = aim_flight(f.flights, rules.flight, turn.handle, me, turn.target)
     f.caster.aim_distance, f.caster.aim_steps, f.caster.aim_arc = distance, steps, arc
     f.flights.request.steps = max(steps >> 1, rules.minimum_steps)
     if s16(distance) <= s16(rules.quick_range):
@@ -271,10 +270,9 @@ def _slam(turn: _Turn) -> HandlerResult:
     return turn.script(scripts.squeeze if alive else scripts.finish)
 
 
-def _think(turn: _Turn, selected: Actor) -> HandlerResult:
-    selected.action = 0
-    turn.selected = selected
+def _think(turn: _Turn) -> HandlerResult:
     me = turn.me
+    me.action = 0
     if me.behaviour_flags & (QUICK | OUT):
         return _flight(turn)
     if me.behaviour_flags & GRABBED:
@@ -294,18 +292,18 @@ def _hurt(turn: _Turn) -> HandlerResult:
     me, scripts = turn.me, turn.rules.scripts
     attacker = turn.fight.actor(me.attacker)
     if attacker.type != 0x0C:
-        return _think(turn, attacker)
+        return _think(turn)
     airborne = bool(me.behaviour_flags & OUT)
     lethal = attacker.action == 0x18 if airborne else attacker.action in (0x10, 0x1C)
     if lethal:
         me.behaviour_flags = me.height = 0
         me.hp = turn.rules.dead_hp
         return turn.script(scripts.flight_death if airborne else scripts.death)
-    _subtract(me, turn.damage())
+    _subtract(me, turn.damage(attacker))
     if airborne:
         me.behaviour_flags = me.height = 0
         return turn.script(scripts.flight_hurt)
-    return turn.script(turn.fight.table_long(me.hurt_scripts, turn.target.action))
+    return turn.script(turn.fight.table_long(me.hurt_scripts, attacker.action))
 
 
 def _catch(turn: _Turn, victim: Actor) -> HandlerResult:
@@ -324,7 +322,7 @@ def _hit(turn: _Turn) -> HandlerResult:
     f, me = turn.fight, turn.me
     victim = f.actor(me.hit_target)
     if victim.type == CASTER_TYPE:
-        return _think(turn, victim)
+        return _think(turn)
     if me.behaviour_flags & OUT:
         return _catch(turn, victim)
     if me.behaviour_flags & HOLD:
@@ -352,7 +350,7 @@ def caster_handler(
         return _hurt(turn)
     if turn.me.hit_target:
         return _hit(turn)
-    return _think(turn, turn.me)
+    return _think(turn)
 
 
 def install_caster(fight: Fight, rules: CasterRules, knight_rules: KnightRules) -> None:
