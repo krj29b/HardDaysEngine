@@ -29,3 +29,5 @@ mode = "auto"               # auto, standard, shared-pad
 # surround = "off"            # off, blur, solid
 # surround_brightness = 0.28  # 0.0..1.0
 # surround_color = "#101014"  # #RRGGBB
+# hd_pack_dir = ""            # external HD asset pack directory
+# hd_mode = "auto"            # off, auto, on
