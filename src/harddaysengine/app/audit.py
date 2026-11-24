@@ -633,7 +633,7 @@ def _fight_shots(rig: AuditRig) -> Iterator[AuditShot]:
         for tick in (6, 120, 240, 480, 960):
             while session.tick_count < tick and session.active_encounter is not None:
                 session.step_tick(fight_host_input(session))
-            if session.active_encounter is None:
+            if session.active_encounter is None or session.blocking_fade:
                 break
             yield rig.capture(session, f"host_{name}_vbl{tick}")
 

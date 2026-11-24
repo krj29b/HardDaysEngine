@@ -82,12 +82,18 @@ def test_no_hit_set_or_an_empty_record_never_hits() -> None:
     assert contact_test(engine, ListEntry("e", 0, 100, 100), ListEntry("d", 0, 100, 100)) is None
 
 
-def test_a_mirrored_attacker_gates_with_the_mirrored_point_but_tests_the_raw_one() -> None:
-    defender = CelShape("d", (_rows(16, 16, {2: {2}}),), None)
-    engine = _engine(WEAPON, defender)
+def test_a_mirrored_attacker_tests_and_reports_the_mirrored_point() -> None:
+    # Weapon is 16px wide with hit point at px=2; mirrored gate_x is 100 + 16 - 2 = 114 (col 14).
+    defender_raw_only = CelShape("d", (_rows(16, 16, {2: {2}}),), None)
+    engine = _engine(WEAPON, defender_raw_only)
+    engine.mirrored.add(("w", 0))
+    assert contact_test(engine, ListEntry("w", 0, 100, 100), ListEntry("d", 0, 100, 100)) is None
+
+    defender_mirrored_col = CelShape("d", (_rows(16, 16, {2: {14}}),), None)
+    engine = _engine(WEAPON, defender_mirrored_col)
     engine.mirrored.add(("w", 0))
     hit = contact_test(engine, ListEntry("w", 0, 100, 100), ListEntry("d", 0, 100, 100))
-    assert hit == Contact(102, 102)
+    assert hit == Contact(114, 102)
 
 
 def test_a_mirrored_defender_is_read_across_its_aligned_row() -> None:
@@ -100,40 +106,43 @@ def test_a_mirrored_defender_is_read_across_its_aligned_row() -> None:
     assert contact_test(engine, attack, hurt) == Contact(hurt.x + 6, 102)
 
 
-def test_a_raw_column_past_the_row_reads_the_next_row() -> None:
-    defender = CelShape("d", (_rows(16, 4, {1: {0}}),), None)
-    engine = _engine(LONG_REACH, defender)
+def test_opaque_enforces_strict_frame_bounds_without_scanline_wraparound() -> None:
+    frame = _rows(16, 4, {1: {0}})
+    assert frame.opaque(0, 1, mirrored=False)
+    assert not frame.opaque(16, 0, mirrored=False)
+    assert not frame.opaque(0xFFFF, 1, mirrored=False)
+    assert not frame.opaque(0, 4, mirrored=False)
+    assert not frame.opaque(0, 0xFFFF, mirrored=False)
+    # Mirrored LONG_REACH at x=104 (width=16, px=12) tests gate_x = 104 + 16 - 12 = 108 (col 8),
+    # which misses col 0 on row 1 and never wraps past width into row 1.
+    engine = _engine(LONG_REACH, CelShape("d", (frame,), None))
     engine.mirrored.add(("r", 0))
-    hit = contact_test(engine, ListEntry("r", 0, 104, 100), ListEntry("d", 0, 100, 100))
-    assert hit == Contact(116, 100)
+    assert contact_test(engine, ListEntry("r", 0, 104, 100), ListEntry("d", 0, 100, 100)) is None
 
 
-def test_the_pass_links_the_first_hit_and_empties_the_lists() -> None:
+def test_the_pass_links_the_first_hit_and_empties_per_job_lists() -> None:
     engine = _engine(WEAPON, CelShape("d", (FULL,), None))
     attacker, near, far = engine.jobs[0], engine.jobs[1], engine.jobs[2]
     for job, owner, depth in ((attacker, 1, 50), (near, 2, 60), (far, 3, 61)):
         job.active, job.owner, job.depth = True, owner, depth
-    engine.attack.cursor = attacker.list_base
-    engine.attack.append(ListEntry("w", 0, 100, 100))
+    attacker.attack.append(ListEntry("w", 0, 100, 100))
     for job in (far, near):
-        engine.hurt.cursor = job.list_base
-        engine.hurt.append(ListEntry("d", 0, 100, 100))
+        job.hurt.append(ListEntry("d", 0, 100, 100))
     cleared: list[bool] = []
     contact_scan(engine, lambda: cleared.append(True))
     actors = engine.actors
     assert cleared == [True]
     assert (actors[0].hit_target, actors[1].attacker, actors[2].attacker) == (2, 1, 0)
     assert (actors[1].hit_x, actors[1].hit_y) == (102, 102)
-    assert engine.attack.read(attacker.list_base) == []
-    assert engine.hurt.read(near.list_base) == []
+    assert attacker.attack == []
+    assert near.hurt == [] and far.hurt == []
 
 
 def test_a_job_never_hits_itself() -> None:
     engine = _engine(WEAPON, CelShape("d", (FULL,), None))
     job = engine.jobs[0]
     job.active, job.owner = True, 1
-    engine.attack.cursor = engine.hurt.cursor = job.list_base
-    engine.attack.append(ListEntry("w", 0, 100, 100))
-    engine.hurt.append(ListEntry("d", 0, 100, 100))
+    job.attack.append(ListEntry("w", 0, 100, 100))
+    job.hurt.append(ListEntry("d", 0, 100, 100))
     contact_scan(engine, lambda: None)
     assert engine.actors[0].hit_target == 0

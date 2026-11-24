@@ -11,6 +11,7 @@ from harddaysengine.sim.trajectory import (
     FlightState,
     TrajectoryError,
     aim_flight,
+    release_flight,
     start_flight,
     step_flight,
 )
@@ -79,3 +80,15 @@ def test_aim_sets_destination_cooldown_and_minimum_arc_from_rules() -> None:
     target.x = 20
     assert aim_flight(state, FLIGHT, 7, actor, target) == (60, 7, 30)
     assert state.request.target_x == 40
+
+
+def test_release_flight_clears_only_matching_owner_slots() -> None:
+    state = FlightState(
+        slots=[
+            FlightSlot(owner=7, remaining=5),
+            FlightSlot(owner=8, remaining=3),
+            FlightSlot(owner=7, remaining=2),
+        ]
+    )
+    release_flight(state, 7)
+    assert [(s.owner, s.remaining) for s in state.slots] == [(0, 0), (8, 3), (0, 0)]

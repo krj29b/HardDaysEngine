@@ -417,7 +417,7 @@ class GameSession:
         if self.scene != GameScene.OVERWORLD or self.disk_set is None:
             raise ValueError("Saving requires an overworld campaign")
         return CampaignCheckpoint(
-            version=1,
+            version=2,
             data_hash=disk_signature(self.disk_set),
             state_hash=self.state_hash(),
             seed=self.seed,

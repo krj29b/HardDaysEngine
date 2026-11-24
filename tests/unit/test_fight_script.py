@@ -140,7 +140,7 @@ def test_gore_off_skips_the_draw_and_its_lists_but_not_the_box() -> None:
     r.engine.gore_off = True
     job = r.job(BASE)
     assert r.engine.tick().draws == []
-    assert r.engine.attack.read(job.list_base) == []
+    assert job.attack == []
     assert r.actor().box_max_x == 110
 
 
@@ -160,13 +160,15 @@ def test_box_takes_the_union_of_the_draws() -> None:
     assert (owner.box_min_x, owner.box_max_x, owner.box_min_y, owner.box_max_y) == (96, 116, 40, 54)
 
 
-def test_list_entries_go_to_the_jobs_own_slots() -> None:
+def test_list_entries_go_to_the_jobs_own_isolated_lists() -> None:
     r = rig(draw(1, 0, flags=0x03) + mark(0xFF))
-    r.job(BASE, depth=10)
+    first = r.job(BASE, depth=10)
     second = r.job(BASE, owner=2, depth=20)
     r.engine.tick()
-    assert [e.cel for e in r.engine.attack.read(second.list_base)] == ["b.cel"]
-    assert r.engine.hurt.read(second.list_base)[0].x == 100
+    assert [e.cel for e in first.attack] == ["b.cel"]
+    assert [e.cel for e in second.attack] == ["b.cel"]
+    assert second.hurt[0].x == 100
+    assert first.attack is not second.attack and first.hurt is not second.hurt
 
 
 def test_a_bad_slot_or_frame_is_an_error() -> None:
@@ -275,31 +277,31 @@ def motion(count: int, flags: int, vy: int, vy_limit: int, vx: int = 0, vx_limit
     return bytes((0x8C, 0, count, flags, vy, vy_limit, vx, vx_limit))
 
 
-def test_rise_halves_the_speed_and_runs_out_without_clearing_active() -> None:
+def test_rise_halves_the_speed_and_clears_active_on_expiry() -> None:
     r = rig(motion(2, 0x01, 8, 2) + draw(0, 0) + mark() + draw(0, 1) + mark(0xFF))
     job = r.job(BASE)
     frames = r.frames(4)
     heights = [f[0][3] - 50 for f in frames]
     assert heights == [0, -8, -12, -12]
     assert [f[0][1] for f in frames] == [0, 0, 0, 1]
-    assert job.work.motion_active
+    assert not job.work.motion_active
 
 
-def test_a_fall_that_does_not_land_adds_ff_xx_to_x() -> None:
-    job = Job(list_base=0, x=100, height=0xFFEC, facing=1)
+def test_a_fall_that_does_not_land_moves_horizontally_by_plain_vx() -> None:
+    job = Job(x=100, height=0xFFEC, facing=1)
     work = job.work
     work.motion_flags, work.vy, work.vy_limit, work.vx, work.vx_limit = 0x12, 4, 16, 3, 0
     work.motion_active, work.return_pos = True, 40
     motion_step(job)
     assert job.height == 0xFFF0
     assert work.vy == 0xE0
-    assert job.x == (100 + 0xFF03) & 0xFFFF
+    assert job.x == 103
     assert work.vx == 1
     assert job.script == 40
 
 
 def test_landing_clears_the_fall_and_keeps_the_plain_speed() -> None:
-    job = Job(list_base=0, x=100, height=0xFFFE, facing=3)
+    job = Job(x=100, height=0xFFFE, facing=3)
     work = job.work
     work.motion_flags, work.vy, work.vx, work.vx_limit = 0x52, 4, 3, 5
     work.motion_active = True
@@ -309,7 +311,7 @@ def test_landing_clears_the_fall_and_keeps_the_plain_speed() -> None:
 
 
 def test_a_step_that_moves_nothing_ends_the_motion() -> None:
-    job = Job(list_base=0)
+    job = Job()
     job.work.motion_active = True
     motion_step(job)
     assert not job.work.motion_active
@@ -434,7 +436,7 @@ def test_same_facing_test_looks_up_the_acting_knights_job() -> None:
 # ---- the second-script pass and sorting ----------------------------------------------------
 
 
-def test_second_script_runs_on_a_copy_with_height_zero_and_a_shared_work_block() -> None:
+def test_second_script_runs_on_isolated_copy_with_fresh_work_and_box() -> None:
     second = BASE + 6 + 6 + 2 + 6 + 2
     code = op6(0xAC, 1, second) + draw(0, 0, flags=0x01) + mark() + draw(0, 1) + mark(0xFF)
     code += op2(0x88, 3) + draw(1, 0, flags=0x02) + mark() + mark(0xFF)
@@ -445,32 +447,28 @@ def test_second_script_runs_on_a_copy_with_height_zero_and_a_shared_work_block()
     out = r.engine.tick()
     assert [(d.cel, d.y) for d in out.draws] == [("b.cel", 50), ("a.cel", 40)]
     assert job.script == BASE + 20
-    assert r.engine.scratch_work.loop_count == 2
     assert job.work.loop_count == 0
+    assert job.attack == []
 
 
-def test_second_script_entries_append_at_the_cursor_of_the_last_main_pass_job() -> None:
+def test_second_script_does_not_leak_into_main_pass_lists_or_box() -> None:
     second = BASE + 6 + 6 + 2
     code = op6(0xAC, 1, second) + draw(0, 0, flags=0x02) + mark(0xFF)
     code += draw(1, 0, flags=0x02) + mark(0xFF)
     r = rig(code)
     job = r.job(BASE)
     r.engine.tick()
-    r.engine.attack.clear()
+    assert [e.cel for e in job.attack] == ["a.cel"]
     r.engine.tick()
-    entries = r.engine.attack.entries
-    assert entries[job.list_base] is None
-    second_entry = entries[job.list_base + 1]
-    assert second_entry is not None
-    assert second_entry.cel == "b.cel"
-    assert r.engine.attack.read(job.list_base) == []
+    assert job.attack == []
+    assert r.actor().box_min_x == 0
 
 
 def test_sort_is_an_unsigned_bubble_on_depth() -> None:
-    jobs = [Job(list_base=i * 8, depth=d) for i, d in enumerate((50, 0xFFF0, 10, 30))]
+    jobs = [Job(owner=i + 1, depth=d) for i, d in enumerate((50, 0xFFF0, 10, 30))]
     sort_jobs(jobs)
     assert [j.depth for j in jobs] == [10, 30, 50, 0xFFF0]
-    assert [j.list_base for j in jobs] == [16, 24, 0, 8]
+    assert [j.owner for j in jobs] == [3, 4, 1, 2]
 
 
 def test_paused_and_inactive_jobs_do_not_run() -> None:
@@ -480,8 +478,10 @@ def test_paused_and_inactive_jobs_do_not_run() -> None:
     assert r.frames(1) == [[]]
 
 
-def test_list_overflow_is_an_error() -> None:
-    r = rig(draw(0, 0, flags=0x02) * 81 + mark(0xFF))
-    r.job(BASE)
-    with pytest.raises(ScriptError, match="outside the buffer"):
-        r.engine.tick()
+def test_many_attack_entries_stay_isolated_to_their_own_job() -> None:
+    r = rig(draw(0, 0, flags=0x02) * 12 + mark(0xFF))
+    first = r.job(BASE, owner=1, depth=10)
+    second = r.job(BASE + 12 * 6, owner=2, depth=20)
+    r.engine.tick()
+    assert len(first.attack) == 12
+    assert second.attack == []

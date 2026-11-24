@@ -42,7 +42,6 @@ def test_repeated_real_gl_captures_do_not_advance_fight(adf_dir: Path) -> None:
         state = (
             repr(fight.actors),
             repr(fight.engine.jobs),
-            repr(fight.engine.scratch_work),
             fight.rng.state,
         )
         first = rig.capture_fight(audit.scene, "first")
@@ -50,7 +49,6 @@ def test_repeated_real_gl_captures_do_not_advance_fight(adf_dir: Path) -> None:
         assert state == (
             repr(fight.actors),
             repr(fight.engine.jobs),
-            repr(fight.engine.scratch_work),
             fight.rng.state,
         )
         np.testing.assert_array_equal(first.rgb, second.rgb)

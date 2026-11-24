@@ -7,8 +7,7 @@ Handlers (§10.16) are registered per type byte by the tasks that write them; en
 (``$B0``) per name. A routine without an implementation is reported in
 :attr:`FrameOutput.skipped_calls` and otherwise ignored, as §10.18 states.
 
-Actor handles: 1..4 are the knights, 5 the dragon, 6..25 the fight pool and 26 the spare record
-the link clear touches. 0 is "none".
+Actor handles: 1..4 are the knights, 5 the dragon and 6..25 the fight pool. 0 is "none".
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ from harddaysengine.sim.m68k import s16, u16, u32
 from harddaysengine.sim.rng import Rng
 from harddaysengine.sim.screen_fx import ShakeRules, ShakeState
 from harddaysengine.sim.sound import SoundCells, SoundRequest, play
-from harddaysengine.sim.trajectory import FlightState
+from harddaysengine.sim.trajectory import FlightState, release_flight
 
 if TYPE_CHECKING:
     from harddaysengine.sim.inventory import Inventory
@@ -40,7 +39,6 @@ KNIGHT_COUNT = 4
 DRAGON = KNIGHT_COUNT + 1
 POOL_FIRST = DRAGON + 1
 POOL_SIZE = 20
-POOL_SPARE = POOL_FIRST + POOL_SIZE
 IDLE_OBJECT_TYPE = 0x28
 
 FIGHTER_DIED = "fighter_died"
@@ -296,7 +294,7 @@ class Fight:
     def __post_init__(self) -> None:
         if len(self.knights) != KNIGHT_COUNT:
             raise ValueError(f"a fight needs {KNIGHT_COUNT} knight records")
-        pool = [Actor() for _ in range(POOL_SIZE + 1)]
+        pool = [Actor() for _ in range(POOL_SIZE)]
         self.actors = [*self.knights, self.dragon, *pool]
         self.engine = ScriptEngine(
             image=self.image,
@@ -306,6 +304,7 @@ class Fight:
             call=self._call,
             spawn=self._spawn_object,
             sound=self.play_sound,
+            on_kill=self._release_flight,
         )
         self.routines = {
             FIGHTER_DIED: fighter_died,
@@ -314,6 +313,9 @@ class Fight:
             PAUSE_ALL: pause_all,
             SET_GLOAT: set_gloat_latch,
         }
+
+    def _release_flight(self, owner: int) -> None:
+        release_flight(self.flights, owner)
 
     def play_sound(self, sound: int) -> None:
         """A play request on the next free channel, in execution order (§10.32)."""
@@ -328,10 +330,11 @@ class Fight:
         return self.actors[handle - 1]
 
     def alloc_record(self) -> int:
-        """Take the first free pool record and mark it in use."""
-        for handle in range(POOL_FIRST, POOL_SPARE):
+        """Take the first free pool record, clear it and mark it in use."""
+        for handle in range(POOL_FIRST, POOL_FIRST + POOL_SIZE):
             actor = self.actor(handle)
             if actor.active == 0:
+                actor.clear()
                 actor.active = 1
                 return handle
         raise FightError("all 20 fight records are in use")
@@ -380,11 +383,12 @@ class Fight:
             job.paused ^= 1
 
     def kill_job(self, owner: int) -> None:
-        """Free the owner's job and its record."""
+        """Free the owner's job, its record and any active trajectory slot."""
         job = self.find_job(owner)
         if job is not None:
             job.active = job.running = False
             self.actor(owner).active = 0
+        release_flight(self.flights, owner)
 
     def restart_job(self, owner: int, script: int) -> None:
         """Give the owner's job a cleared work block and a new script."""
@@ -431,8 +435,12 @@ class Fight:
         return inventory.byte(slot)
 
     def clear_links(self) -> None:
-        """Clear both links of the dragon, 21 pool records and the four knights (§10.18)."""
-        for handle in (DRAGON, *range(POOL_FIRST, POOL_SPARE + 1), *range(1, KNIGHT_COUNT + 1)):
+        """Clear both links of the dragon, 20 pool records and the four knights (§10.18)."""
+        for handle in (
+            DRAGON,
+            *range(POOL_FIRST, POOL_FIRST + POOL_SIZE),
+            *range(1, KNIGHT_COUNT + 1),
+        ):
             actor = self.actor(handle)
             actor.hit_target = actor.attacker = 0
 
@@ -480,6 +488,7 @@ class Fight:
         if isinstance(result, End):
             job.active = job.running = False
             owner.active = 0
+            release_flight(self.flights, job.owner)
             return
         job.script = result.script
         job.x, job.height, job.depth = u16(result.x), u16(result.height), u16(result.depth)
@@ -539,7 +548,7 @@ def set_gloat_latch(fight: Fight, _call: RoutineCall | None = None) -> None:
 
 def pause_all(fight: Fight, _call: RoutineCall | None = None) -> None:
     """Toggle the pause of every pool record's job except the kept one, then the dragon's."""
-    for handle in range(POOL_FIRST, POOL_SPARE):
+    for handle in range(POOL_FIRST, POOL_FIRST + POOL_SIZE):
         if handle != fight.kept:
             fight.toggle_pause(handle)
     fight.toggle_pause(DRAGON)

@@ -81,9 +81,8 @@ def contact_test(engine: ScriptEngine, attack: ListEntry, hurt: ListEntry) -> Co
         cy = u16(attack.y + py)
         if not _inside(gate_x, hurt.x, defender.width) or not _inside(cy, hurt.y, defender.height):
             continue
-        cx = u16(attack.x + px)
-        if defender.opaque(u16(cx - hurt.x), u16(cy - hurt.y), mirrored=defender_mirrored):
-            return Contact(cx, cy)
+        if defender.opaque(u16(gate_x - hurt.x), u16(cy - hurt.y), mirrored=defender_mirrored):
+            return Contact(gate_x, cy)
     return None
 
 
@@ -94,13 +93,13 @@ def _inside(value: int, start: int, size: int) -> bool:
 
 def _first_contact(engine: ScriptEngine, attacker: Job) -> tuple[Job, Contact] | None:
     """The first hurt entry of another job in reach that one of ``attacker``'s entries hits."""
-    for attack in engine.attack.read(attacker.list_base):
+    for attack in attacker.attack:
         for victim in engine.jobs:
             if victim is attacker or not victim.active:
                 continue
             if not depth_close(victim.depth, attacker.depth):
                 continue
-            for hurt in engine.hurt.read(victim.list_base):
+            for hurt in victim.hurt:
                 contact = contact_test(engine, attack, hurt)
                 if contact is not None:
                     return victim, contact
@@ -108,7 +107,7 @@ def _first_contact(engine: ScriptEngine, attacker: Job) -> tuple[Job, Contact] |
 
 
 def contact_scan(engine: ScriptEngine, clear_links: Callable[[], None]) -> None:
-    """The contact pass: links, contact points, then empty lists (§10.10, §10.17)."""
+    """The contact pass: links, contact points, then empty per-job lists (§10.10, §10.17)."""
     clear_links()
     for attacker in engine.jobs:
         if not attacker.active:
@@ -121,5 +120,6 @@ def contact_scan(engine: ScriptEngine, clear_links: Callable[[], None]) -> None:
         victim_actor = engine.owner(victim)
         victim_actor.attacker = attacker.owner
         victim_actor.hit_x, victim_actor.hit_y = contact.x, contact.y
-    engine.attack.clear()
-    engine.hurt.clear()
+    for job in engine.jobs:
+        job.attack.clear()
+        job.hurt.clear()

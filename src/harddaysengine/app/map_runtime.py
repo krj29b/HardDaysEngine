@@ -81,11 +81,7 @@ class MapRuntime:
         return {
             "jobs": [asdict(job) for job in engine.jobs],
             "box": asdict(engine.box),
-            "scratch": asdict(engine.scratch_work),
             "mirrored": sorted(engine.mirrored),
             "vbl": engine.vbl,
-            "attack": [None if row is None else asdict(row) for row in engine.attack.entries],
-            "hurt": [None if row is None else asdict(row) for row in engine.hurt.entries],
-            "cursors": [engine.attack.cursor, engine.hurt.cursor],
             "effect_vbl": self.scene.fight.effect_vbl,
         }

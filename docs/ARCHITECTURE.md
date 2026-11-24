@@ -263,24 +263,24 @@ Moonstone uses an asymmetric **point-against-bitplane** collision model (`contac
 1. **Defender Hurtboxes (Green Overlay in Inspector):**
    - There is no separate hurtbox file. When a combat script executes a cel draw instruction
      (`opcode $00..$1F`, 6 bytes: `[slot_op, frame, dy_s8, flags, dx_be16]`), bit 0 of `flags`
-     (`flags & 0x01`) registers the drawn cel `(cel_table, frame, screen_x, screen_y)` in the job's
-     **Hurt List** (`ulHurtList`, up to 6 entries per job per frame).
+     (`flags & 0x01`) registers the drawn cel `(cel, frame, screen_x, screen_y)` in the job's own
+     **Hurt List** (`job.hurt`).
    - In addition, any drawn cel without `flags & 0x40` expands the actor's union screen bounding box
      `[box_min_x, box_max_x] × [box_min_y, box_max_y]` (`Knight` offsets `+58, +60, +112, +114`),
-     which `blockedMask` uses for body-to-body movement blocking.
-   - During `contactTest`, the defender's hurt surface is the **cel frame's bounding rectangle**
+     which movement blocking uses for body-to-body separation.
+   - During `contact_test`, the defender's hurt surface is the **cel frame's bounding rectangle**
      `[def_x, def_x + cel_w) × [def_y, def_y + cel_h)` **combined with the pixel-accurate non-zero
-     bitplane mask** of that cel frame (a point hits only if at least one present bitplane has bit `1`
-     at `(pt_x - def_x, pt_y - def_y)`).
+     bitplane mask** of that cel frame (a point hits only if `0 <= local_x < cel_w`,
+     `0 <= local_y < cel_h`, and at least one stored bitplane has bit `1` at `(local_x, local_y)`).
 
 2. **Attacker Weapon Hitboxes / Attack Point Sets (`B/collide.hit`, Red Overlay in Inspector):**
    - When a combat script executes a cel draw instruction with bit 1 of `flags` (`flags & 0x02`),
-     it registers `(cel_table, frame, screen_x, screen_y)` in the job's **Attack List**
-     (`ulAttackList`, up to 6 entries per job per frame).
+     it registers `(cel, frame, screen_x, screen_y)` in the job's own **Attack List**
+     (`job.attack`).
    - `collide.hit` (`8,360` bytes on Disk B) is an ASCII text file defining per-frame weapon attack
      points for 14 cel sets: `kn4`, `TroggSpear2`, `TroggAxe2`, `Ratmen1`, `Mudmen1`, `Balok1`,
      `Dragon1`, `Dragon2`, `Dragon5`, `be1`, `Demon2`, `Demon3`, `Troll1`, `Troll2`.
-   - **On-disk ASCII Grammar (`hitParse`):**
+   - **On-disk ASCII Grammar:**
      - Each section starts with a line containing the cel stem name (e.g. `kn4`), terminated by LF
        (`0x0A`).
      - Followed by one record per cel frame (indexed `0, 1, 2, ...`) until the 2-character sentinel
@@ -300,19 +300,18 @@ Moonstone uses an asymmetric **point-against-bitplane** collision model (`contac
      - `max_y` (`uint8`): $\max_{i} y_i$ (bounding-box height of the attack points).
      - `points[count]`: pairs of `(x_i: uint8, y_i: uint8)` in cel-local coordinates (`0..cel_w-1`,
        `0..cel_h-1` in unflipped orientation).
-   - **Exact `contactTest` Algorithm (`LAB_03DB`):**
-     - If the attacker's cel frame is horizontally flipped (`(hot_and_flags & 1) == 0`), the coarse
-       attack box $X$ origin is shifted by `cel_w - max_x`.
+   - **Contact Test Algorithm:**
+     - If the attacker's cel frame is horizontally mirrored, the coarse attack box $X$ origin is
+       shifted to `att_x + cel_w - max_x`.
      - **Step 1 (Coarse AABB Overlap):** Check 1D overlap of `[def_x, def_x + cel_w]` with
        `[att_box_x, att_box_x + max_x]` and `[def_y, def_y + cel_h]` with `[att_y, att_y + max_y]`.
      - **Step 2 (Per-Point Bitplane Test):** For each point `(px, py)` in the frame's hit record:
-       - Compute screen coordinates `(sx, sy)` (reflecting `px` as `cel_w - px` when the attacker
-         cel is flipped for the bounds check; note the original 68k quirk where the bitplane test
-         itself reloads raw `px + att_x`).
-       - If `(sx, sy)` lies inside `[def_x, def_x + cel_w) × [def_y, def_y + cel_h)`, test bit
-         `15 - ((cx - def_x) & 15)` of word `((cx - def_x) >> 4) * 2 + (cy - def_y) * row_bytes`
-         across each present bitplane of the defender cel. The first non-zero bit registers a hit at
-         `(cx, cy)`.
+       - Compute screen coordinates `(gate_x, cy)`, reflecting `px` as `att_x + cel_w - px` when
+         the attacker cel is mirrored (otherwise `att_x + px`), and `cy = att_y + py`.
+       - If `(gate_x, cy)` lies strictly inside `[def_x, def_x + cel_w) × [def_y, def_y + cel_h)`,
+         test the defender frame mask at `(gate_x - def_x, cy - def_y)` in the defender's current
+         orientation (enforcing strict `0 <= x < cel_w` and `0 <= y < cel_h` with no scanline
+         wraparound). The first opaque pixel registers a hit at `(gate_x, cy)`.
 
 ### 4.3 Arena `.t` Files (`56` files on Disks B & C)
 Arena layout files are named `<region><index>.t` (`fo1..8.t`, `gl1..8.t`, `sw1..8.t`, `wa1..8.t`
@@ -1275,12 +1274,10 @@ frame 45 they get 7 hit points and stronger entries, at frame 49 they get 12.
 ### 10.5 Spawning
 
 - **Spawn lists** are records of four words `{x, height, y, facing}` in `mog` data. Spawning one
-  creature takes the next free fight-pool actor, copies the four words, runs the initialiser and
-  starts a job with the actor's idle script. `alive_now` goes up by one. Neither the pool
-  allocator, the creature spawner, nor the job-kill opcode zeroes a recycled pool record's
-  remaining fields (`behaviour_flags`, `behaviour_flags2`, `cooldown`, etc.) or releases keyed
-  trajectory slots; only initialisers that explicitly write them (such as Mudmen clearing
-  `+104/+105`) reset them.
+  creature takes the next free fight-pool actor (zeroing all fields via `Actor.clear()` before
+  marking `active = 1`), copies the four words, runs the initialiser and starts a job with the
+  actor's idle script. `alive_now` goes up by one. Killing or ending a job releases any keyed
+  trajectory slots held by that owner (`release_flight`).
 - **Entry lane.** Starting a job overrides the actor's `y` with one of three depth lanes. A
   counter steps 1, 2, 3, 1, ... (increment, mask with 3, skip zero). With `E` the arena's low
   edge and `g = 200 - E` (16-bit):
@@ -1596,15 +1593,12 @@ and script.
    later one is smaller; repeat until a sweep swaps nothing. Inactive records take part.
 2. **Second-script pass**: for each record in table order that is active, not paused and has its
    second script armed, run a *copy* of the job whose `height` is 0, whose script is the second
-   script and whose work block is the single scratch work block shared by all jobs. The scratch
-   block is never cleared, between jobs or between ticks. Changes to the copy are thrown away;
-   writes to the owner (pokes, kill, write-back) are real. The list cursors and the bounding box
-   cells are **not** reset for this pass: the copy appends to wherever the cursors stand and grows
-   whatever box the cells hold (normally the state left by the last job of the previous main
-   pass).
+   script, with a fresh `Work()` block and empty `attack`/`hurt` lists, after clearing the
+   bounding-box cells. Changes to the copy are thrown away; writes to the owner (pokes, kill,
+   write-back) are real.
 3. **Main pass**: for each record in table order that is active and not paused (a job whose
-   script has ended still runs), point the two list cursors at the job's own lists, clear the box
-   cells (armed flag and the four edges to 0) and run the job.
+   script has ended still runs), clear the job's own `attack` and `hurt` lists and the box cells
+   (armed flag and the four edges to 0), then run the job.
 
 **Running a job** executes instructions from the job's script position until a frame marker. A
 script position of 0 means "nothing": the run stops at once without a write-back. Instructions:
@@ -1621,8 +1615,8 @@ script position of 0 means "nothing": the run stops at once without a write-back
   is set the box grows (below). If flag bit 7 is set and the gore-off flag is on, nothing else
   happens. Otherwise: the text flag takes flag bit 5; with bit 4 the cel is stamped into the
   background picture, without it the draw is entered in the restore list; with bit 1 an attack
-  entry `{cel, frame, x, y}` is written at the attack cursor, with bit 0 a hurt entry at the hurt
-  cursor; and the cel is drawn on the screen. The run continues with the next instruction.
+  entry `{cel, frame, x, y}` is appended to `job.attack`, with bit 0 a hurt entry is appended to
+  `job.hurt`; and the cel is drawn on the screen. The run continues with the next instruction.
 - **Box growth.** If the box is not armed, all four edges take `x` / `y` and it becomes armed.
   Then, with signed compares: `min_x = x` unless `x > min_x`; `max_x = x + w` unless that is
   smaller than `max_x`; the same for `y` with `h`.
@@ -1630,7 +1624,7 @@ script position of 0 means "nothing": the run stops at once without a write-back
   the run:
   1. Loop 1 active: count down; if not zero, go to the loop-1 position. If zero, loop 1 is cleared.
   2. Motion active: count down the steps (byte); if the result is not negative (signed byte),
-     take one motion step. Otherwise fall through *without* clearing the active flag.
+     take one motion step. Otherwise clear `motion_active` and fall through.
   3. Deferred jump armed: disarm it and go to its target.
   4. `next = $FF`: if loop 2 is active, count down; if not zero, go to the loop-2 position.
      Otherwise loop 2 is cleared and the script has **ended** (`running = 0`). The script position
@@ -1665,8 +1659,8 @@ script position of 0 means "nothing": the run stops at once without a write-back
   its position and facing; the script moves on by 6 *after* the call returns (as for `$B8`).
 - **`$B4 _ target`**: if the owner's `hp` (signed) is 0 or less, jump and reset the work block.
 - **`$B8 _ target`**: spawn an object running `target` (§10.18).
-- **`$BC`**: clear the owner's `active` long, clear the job's `active` and `running`, move on by
-  2 and continue (the run goes on until a marker).
+- **`$BC`**: clear the owner's `active` long, clear the job's `active` and `running`, release any
+  trajectory slots held by the owner, move on by 2 and continue (the run goes on until a marker).
 - **`$C0 n`**: the job's frame list becomes frame-set list `n - 1` (§10.15, 1 = knight, 2 =
   creature, 3 = map, 4 = effect); the owner's `frame_list` (+38) too.
 - **`$C4 _ target`**: find the first record in the table, active or not, whose owner is the
@@ -1677,91 +1671,82 @@ script position of 0 means "nothing": the run stops at once without a write-back
 - **`$90`, `$9C` and `$D4`..`$FC`**: the original has no handler (it hangs). The run stops without
   a write-back. No shipped script contains them.
 
-**Motion step.** `v` starts as the vertical speed (zero-extended to 16 bits).
+**Motion step.** Vertical speed is `vy & $FF` and horizontal speed is `vx & $FF` (independent;
+vertical high bytes never carry into horizontal motion).
 
-- Flag bit 1 (fall): `height += v`. If `height` is now 0 or more (signed), it becomes 0 and bit 1
-  is cleared. Otherwise `v` takes the new `height` as a word, and unless flag bit 5 is set, if the
-  low byte of `v` is below the limit (signed bytes) it is doubled (low byte only) and stored as
-  the new vertical speed.
-- Otherwise flag bit 0 (rise): `height -= v`; unless bit 5, if the low byte of `v` is above the
-  limit (signed bytes) it is halved (unsigned shift of the low byte) and stored.
-- The low byte of `v` is replaced by the horizontal speed; the high byte stays (so after a fall
-  that did not land it is `$FF`, and a horizontal move adds `$FFxx`). Flag bit 4 moves `x` by `v`
-  in the facing direction (subtract when facing bit 1 is set), flag bit 2 opposite to it; after
-  each move, unless bit 7, if the low byte of `v` is above the limit (signed) it is halved and
-  stored as the new horizontal speed.
+- Flag bit 1 (fall): `height += vy`. If `height` is now 0 or more (signed), it becomes 0 and bit 1
+  is cleared. Otherwise, unless flag bit 5 is set, if the low byte of `height` is below `vy_limit`
+  (signed bytes) `vy` becomes `(height << 1) & $FF`.
+- Otherwise flag bit 0 (rise): `height -= vy`; unless bit 5, if `vy` is above `vy_limit` (signed
+  bytes) `vy` is halved (`vy >> 1`).
+- Flag bit 4 moves `x` by `vx` in the facing direction (subtract when facing bit 1 is set), flag
+  bit 2 opposite to it; after each move, unless bit 7, if `vx` is above `vx_limit` (signed) `vx`
+  is halved (`vx >> 1`).
 - Unless flag bit 6, the script goes to the motion return position.
 - If none of the moves happened, motion is no longer active.
 
 **Contact pass** (§10.10, exact form). Clear the links (§10.18). For each active job in table
-order, for each entry of its attack list until an empty entry: for each *other* active job whose
-`depth` is within 10 (`|a - b|` as a 16-bit difference, then a signed compare with 10) and each of
-its hurt entries until an empty entry: if the attacking cel has a hit set (§4.2), run the contact
-test; on a hit write the links and contact point and continue with the next attacking job. Then
-every list is emptied. The **contact test** of attacking cel `A`, frame `fa` at `(xa, ya)` against
-hurt cel `D`, frame `fd` at `(xd, yd)`:
+order, for each entry of `attacker.attack`: for each *other* active job whose `depth` is within 10
+(`|a - b|` as a 16-bit difference, then a signed compare with 10) and each entry of `victim.hurt`:
+if the attacking cel has a hit set (§4.2), run the contact test; on a hit write the links and
+contact point and continue with the next attacking job. Then every job's `attack` and `hurt` lists
+are cleared. The **contact test** of attacking cel `A`, frame `fa` at `(xa, ya)` against hurt cel
+`D`, frame `fd` at `(xd, yd)`:
 
 1. `m` is `A`'s width for `fa` if that frame is currently mirrored, else 0. The hit record of
    `fa` (§4.2) has `count`, `max_dx`, `max_dy` and the points. A count of 0 never hits.
 2. Coarse x: the interval `[xd, xd + width_d]` against `[x0, x0 + max_dx]`, where `x0 = xa`, or
    `xa + m - max_dx` when `m` is not 0. Coarse y: `[yd, yd + height_d]` against
    `[ya, ya + max_dy]`, 16-bit values compared as unsigned. The interval test of `[a0, a1]`
-   (defender) and `[b0, b1]` is the original's: if `b0 < a0` it passes when `b1 >= a0`; else if
-   `b0 < a1` it passes; else if `b1 < a0` it fails; else it passes when `b1 < a1`. So `b` ending
-   on `a0` counts and `b` starting on `a1` does not. Either failing: no hit.
-3. For each point `(px, py)`: the gate x is `xa + px`, or `xa + m - px` when `m` is not 0; the
-   point is skipped unless `xd <= gate x < xd + width_d` and `yd <= ya + py < yd + height_d`
-   (signed). Then the **raw** position `cx = xa + px`, `cy = ya + py` is used (mirror ignored, a
-   quirk of the original). With `xw = cx - xd`, `yw = cy - yd` the word at byte offset
-   `(xw >> 4) * 2 + yw * row_bytes` (a signed word) of each stored plane of `D`'s frame, as it is
-   stored now (mirrored or not, §3.2), is read and bit `15 - (xw & 15)` tested; any set bit is a
-   hit with contact point `(cx, cy)`. A column past the row therefore reads the next row.
+   (defender) and `[b0, b1]` is: if `b0 < a0` it passes when `b1 >= a0`; else if `b0 < a1` it
+   passes; else if `b1 < a0` it fails; else it passes when `b1 < a1`. So `b` ending on `a0` counts
+   and `b` starting on `a1` does not. Either failing: no hit.
+3. For each point `(px, py)`: compute `gate_x = xa + m - px` when `m` is not 0, else `xa + px`,
+   and `cy = ya + py`. Skip the point unless `xd <= gate_x < xd + width_d` and
+   `yd <= cy < yd + height_d` (signed). Test `D`'s frame mask at local coordinates
+   `(gate_x - xd, cy - yd)` in its current orientation (mirrored or not, §3.2), enforcing strict
+   bounds `0 <= x < width_d` and `0 <= y < height_d` (no scanline wraparound). Any opaque pixel is
+   a hit with contact point `(gate_x, cy)`.
 
-   Deliberate differences: the original counts planes through a 16-entry table indexed by the
-   whole plane mask, so a 5-plane frame (mask `$10` or more) reads past the table and tests a
-   meaningless number of planes; the implementation tests every stored plane. A word outside the
-   frame's plane reads nothing (the original reads neighbouring memory).
-
-**Lists.** The attack lists of all ten jobs are one buffer of 80 entries, eight per job, and so
-are the hurt lists. A job's list starts at its own eight entries and ends at the first empty
-entry; the cursor of a pass can run on into the next job's entries, and the contact pass reads
-through them the same way. Writing past the 80th entry is outside the buffer; the
-implementation raises an error there (no shipped script does it).
+**Lists.** Each job owns isolated `attack: list[ListEntry]` and `hurt: list[ListEntry]` lists (no
+shared 80-entry buffer or cross-job spillover). A job's lists are cleared at the start of its main
+pass and again after `contact_scan()`.
 
 **Corrections to §4.1 and §7.2.** Screen y is `depth + height + dy` with `height` negative in the
 air (§4.1 had `depth - height`). The `$88` random count comes from the VBL counter, not the PRNG.
 Motion flag bit 0 lowers `height` (rises) and bit 1 raises it to 0 (falls); §7.2 had them
 swapped and clamped the rise. A jump-if-dead reset and the `$D0` reset keep the second script.
 `$C0` also writes the owner's frame list. A draw's flag bit 2 is not a mirror bit: mirroring
-follows the job's facing alone. The motion count is not reset when it runs out.
+follows the job's facing alone.
 
 ### 10.18 Job plumbing and engine routines (`T11.8`)
 
-**Record pool.** Allocating a fight actor takes the first of the 20 pool records whose `active`
-long is 0 and sets it to 1. When all 20 are taken the original returns the address after the last
-record without marking it; the implementation raises an error.
+**Record pool.** The fight pool holds 20 records (handles `6..25`). Allocating a fight actor takes
+the first pool record whose `active` long is 0, clears all fields via `Actor.clear()`, and sets
+`active = 1`. When all 20 are taken, allocation raises `FightError`.
 
 **Starting a job.** The first record in table order whose `active` byte is 0 gets: a cleared work
 block, the script, the owner, the frame list, `x`, `height`, `depth`, facing and type;
-`active = running = 1`. With no free record nothing happens (the original prints a debug message
-through a routine that does nothing).
+`active = running = 1`. With no free record nothing happens.
 
-**Spawning an actor** (used by `$B8` with type `$28`, and by the arena set-ups): allocate a record;
-its `x`, `height`, `y`, `facing` and `frame_list` take the given values, both links are cleared,
-`active = 1`, `type` is set; then start a job for it.
+**Spawning an actor** (used by `$B8` with type `$28`, and by the arena set-ups): allocate a cleared
+record; its `x`, `height`, `y`, `facing` and `frame_list` take the given values, both links are
+cleared, `active = 1`, `type` is set; then start a job for it.
 
 **Owner lookup.** The first record in table order whose owner is the actor, active or not. The
-pause toggle flips the found job's `paused` word; the kill clears its `active` and `running` and
-the owner's `active` long; the restart clears its work block and sets script and `running`.
+pause toggle flips the found job's `paused` word; the kill clears its `active` and `running`,
+clears the owner's `active` long, and releases any trajectory slots owned by that actor; the restart
+clears its work block and sets script and `running`.
 
-**Clearing links.** Both links of the dragon record, of 21 pool records (one more than the pool;
-the implementation's pool has a spare 21st record for this) and of the four knights are cleared.
+**Clearing links.** Both links (`hit_target`, `attacker`) of the dragon record, all 20 pool records
+(`6..25`), and the four knights (`1..4`) are cleared.
 
 **Job pass** (§10.8, exact form). For each active job in table order: skip it if its owner has
 neither link and its script is still running. Otherwise call the handler for the job's type
-byte. *Keep* leaves the job alone; *end* clears the job's `active` and `running` and the owner's
-`active` long; a script restarts the job on it with the returned `x`, `height`, `depth` and facing
-and `running = 1`. The work block is **not** reset on a restart.
+byte. *Keep* leaves the job alone; *end* clears the job's `active` and `running`, clears the
+owner's `active` long, and releases any trajectory slots held by that owner; a script restarts the
+job on it with the returned `x`, `height`, `depth` and facing and `running = 1`. The work block is
+**not** reset on a restart.
 
 **Idle object** (`$28`): clear both links of the owner and keep.
 
@@ -5744,7 +5729,9 @@ overworld. The host suspends ticks in the panel and consumes its keys. The main
 menu offers Load. The overworld offers Save and Load. A single `campaign-save.json`
 file beside the config holds the checkpoint. Save replaces it atomically.
 
-Version 1 stores typed campaign cells and a deterministic checkpoint hash. The
+Version 2 stores typed campaign cells (with per-job attack/hurt lists inside
+`map_jobs.jobs` and no shared list buffers or scratch work) and a deterministic
+checkpoint hash. The
 save identifies the original program and gameplay executables by digest. Loading
 reconstructs shared actor, inventory and PRNG references, decodes static tables
 from the current disks, and verifies the checkpoint before switching sessions.

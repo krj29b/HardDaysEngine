@@ -18,7 +18,6 @@ if TYPE_CHECKING:
     from harddaysengine.sim.actor import Actor
 
 JOB_COUNT = 10
-LIST_ENTRIES_PER_JOB = 8
 FRAME_LIST_SLOTS = 5
 FACING_RIGHT = 1
 FACING_LEFT = 3
@@ -90,9 +89,8 @@ class Work:
 
 @dataclass(slots=True)
 class Job:
-    """One job record (§9.6, §10.17). ``list_base`` is its first entry in the list buffers."""
+    """One job record (§9.6, §10.17) with isolated per-job attack and hurt lists."""
 
-    list_base: int
     active: bool = False
     running: bool = False
     paused: int = 0
@@ -110,6 +108,8 @@ class Job:
     frame_list: int = 0
     type: int = 0
     work: Work = field(default_factory=Work)
+    attack: list[ListEntry] = field(default_factory=list)
+    hurt: list[ListEntry] = field(default_factory=list)
 
 
 @dataclass(slots=True, frozen=True)
@@ -130,20 +130,12 @@ class FrameShape:
         return ((self.width + 15) >> 4) << 4
 
     def opaque(self, xw: int, yw: int, *, mirrored: bool) -> bool:
-        """The contact test's pixel read at offset ``(xw, yw)`` from the cel's corner (§10.17).
-
-        The word is addressed as the original does: byte offset ``(xw >> 4) * 2 + yw *
-        row_bytes`` as a signed word, so a column past the row reads on into the next row. An
-        address outside the frame's plane reads nothing.
-        """
-        row_bytes = self.aligned_width >> 3
-        offset = s16(u16(((xw >> 4) << 1) + u16(yw * row_bytes)))
-        if row_bytes == 0 or not 0 <= offset < row_bytes * self.height:
+        """True when pixel ``(xw, yw)`` inside ``[0, width) x [0, height)`` is opaque (§10.17)."""
+        x, y = s16(xw), s16(yw)
+        if not (0 <= x < self.width and 0 <= y < self.height):
             return False
-        row, byte_in_row = divmod(offset, row_bytes)
-        column = byte_in_row * 8 + (xw & 15)
-        bit = column if mirrored else self.aligned_width - 1 - column
-        return bool((self.mask_rows[row] >> bit) & 1)
+        bit = x if mirrored else self.aligned_width - 1 - x
+        return bool((self.mask_rows[y] >> bit) & 1)
 
 
 @dataclass(slots=True, frozen=True)
@@ -248,34 +240,6 @@ class BoxCells:
             self.max_y = bottom
 
 
-class ListBuffer:
-    """One of the two 80-entry list buffers, eight entries per job (§10.17)."""
-
-    def __init__(self) -> None:
-        self.entries: list[ListEntry | None] = [None] * (JOB_COUNT * LIST_ENTRIES_PER_JOB)
-        self.cursor: int | None = None
-
-    def append(self, entry: ListEntry) -> None:
-        """Write at the cursor and advance it."""
-        if self.cursor is None or self.cursor >= len(self.entries):
-            raise ScriptError(f"list entry written outside the buffer at {self.cursor}")
-        self.entries[self.cursor] = entry
-        self.cursor += 1
-
-    def read(self, base: int) -> list[ListEntry]:
-        """Entries from ``base`` up to the first empty one (it may run into the next job's)."""
-        found: list[ListEntry] = []
-        for entry in self.entries[base:]:
-            if entry is None:
-                break
-            found.append(entry)
-        return found
-
-    def clear(self) -> None:
-        """Empty every entry (end of the contact pass); the cursor stays."""
-        self.entries = [None] * len(self.entries)
-
-
 @dataclass(slots=True)
 class TickOutput:
     """What one engine tick produced, in order."""
@@ -287,12 +251,13 @@ class TickOutput:
 
 @dataclass(slots=True)
 class ScriptEngine:
-    """All engine cells of §10.17: the job table, lists, box, scratch block and the cel state.
+    """All engine cells of §10.17: the job table, box cells and the cel mirror state.
 
     ``frame_lists`` holds the four frame-set lists (§10.15) by number 1..4. ``call`` runs a
     ``$B0`` routine and ``spawn`` a ``$B8`` object; both are supplied by the fight (§10.18).
     ``sound`` receives each ``$A4`` id when the fight keeps one ordered request list (§10.32);
-    without it the ids go to :attr:`TickOutput.sounds`.
+    without it the ids go to :attr:`TickOutput.sounds`. ``on_kill`` is called with the owner
+    handle whenever ``$BC`` terminates a job.
     """
 
     image: ScriptImage
@@ -302,13 +267,9 @@ class ScriptEngine:
     call: Callable[[RoutineCall], None]
     spawn: Callable[[int, Job], None]
     sound: Callable[[int], None] | None = None
-    jobs: list[Job] = field(
-        default_factory=lambda: [Job(list_base=i * LIST_ENTRIES_PER_JOB) for i in range(JOB_COUNT)]
-    )
-    attack: ListBuffer = field(default_factory=ListBuffer)
-    hurt: ListBuffer = field(default_factory=ListBuffer)
+    on_kill: Callable[[int], None] | None = None
+    jobs: list[Job] = field(default_factory=lambda: [Job() for _ in range(JOB_COUNT)])
     box: BoxCells = field(default_factory=BoxCells)
-    scratch_work: Work = field(default_factory=Work)
     mirrored: set[tuple[str, int]] = field(default_factory=set)
     gore_off: bool = False
     vbl: int = 0
@@ -325,13 +286,20 @@ class ScriptEngine:
         sort_jobs(self.jobs)
         for job in self.jobs:
             if job.active and not job.paused and job.work.second_armed:
-                scratch = replace(job, height=0, script=job.work.second_script)
-                scratch.work = self.scratch_work
+                scratch = replace(
+                    job,
+                    height=0,
+                    script=job.work.second_script,
+                    work=Work(),
+                    attack=[],
+                    hurt=[],
+                )
+                self.box.clear()
                 run_job(self, scratch)
         for job in self.jobs:
             if job.active and not job.paused:
-                self.attack.cursor = job.list_base
-                self.hurt.cursor = job.list_base
+                job.attack.clear()
+                job.hurt.clear()
                 self.box.clear()
                 run_job(self, job)
         return self.output
@@ -406,15 +374,15 @@ def _draw(engine: ScriptEngine, job: Job, pos: int) -> None:
         engine.box.grow(x, shape.width, y, shape.height)
     if engine.gore_off and flags & _DRAW_GORE:
         return
-    _emit(engine, Draw(cel.name, frame, x, y, key in engine.mirrored, False, False), flags)
+    _emit(engine, job, Draw(cel.name, frame, x, y, key in engine.mirrored, False, False), flags)
 
 
-def _emit(engine: ScriptEngine, draw: Draw, flags: int) -> None:
+def _emit(engine: ScriptEngine, job: Job, draw: Draw, flags: int) -> None:
     """Lists, stamp, text flag and the draw itself, for a draw that is not skipped (§10.17)."""
     if flags & _DRAW_ATTACK:
-        engine.attack.append(ListEntry(draw.cel, draw.frame, draw.x, draw.y))
+        job.attack.append(ListEntry(draw.cel, draw.frame, draw.x, draw.y))
     if flags & _DRAW_HURT:
-        engine.hurt.append(ListEntry(draw.cel, draw.frame, draw.x, draw.y))
+        job.hurt.append(ListEntry(draw.cel, draw.frame, draw.x, draw.y))
     stamp, text = bool(flags & _DRAW_STAMP), bool(flags & _DRAW_TEXT)
     engine.output.draws.append(replace(draw, stamp=stamp, text=text))
 
@@ -462,6 +430,7 @@ def _marker_target(job: Job, next_byte: int) -> None:
         if s8(work.motion_count) >= 0:
             motion_step(job)
             return
+        work.motion_active = False
     if work.call_armed:
         work.call_armed = False
         job.script = work.call_target
@@ -484,46 +453,43 @@ def _op_marker(engine: ScriptEngine, job: Job, pos: int) -> bool:
     return True
 
 
-def _vertical(job: Job, work: Work, v: int) -> tuple[int, bool]:
+def _vertical(job: Job, work: Work) -> bool:
+    v = work.vy & 0xFF
     if work.motion_flags & _MOTION_FALL:
         job.height = u16(job.height + v)
         if s16(job.height) >= 0:
             job.height = 0
             work.motion_flags &= ~_MOTION_FALL & 0xFF
-            return v, True
-        v = job.height
-        if not work.motion_flags & _MOTION_LOCK_VY and s8(v) < s8(work.vy_limit):
-            v = (v & 0xFF00) | u8(v << 1)
-            work.vy = v & 0xFF
-        return v, True
+            return True
+        low = job.height & 0xFF
+        if not work.motion_flags & _MOTION_LOCK_VY and s8(low) < s8(work.vy_limit):
+            work.vy = u8(low << 1)
+        return True
     if work.motion_flags & _MOTION_RISE:
         job.height = u16(job.height - v)
         if not work.motion_flags & _MOTION_LOCK_VY and s8(v) > s8(work.vy_limit):
-            v = (v & 0xFF00) | ((v & 0xFF) >> 1)
-            work.vy = v & 0xFF
-        return v, True
-    return v, False
+            work.vy = v >> 1
+        return True
+    return False
 
 
-def _horizontal(job: Job, work: Work, v: int, *, subtract: bool) -> int:
-    job.x = u16(job.x - v) if subtract else u16(job.x + v)
-    if not work.motion_flags & _MOTION_LOCK_VX and s8(v) > s8(work.vx_limit):
-        v = (v & 0xFF00) | ((v & 0xFF) >> 1)
-        work.vx = v & 0xFF
-    return v
+def _horizontal(job: Job, work: Work, *, subtract: bool) -> None:
+    vx = work.vx & 0xFF
+    job.x = u16(job.x - vx) if subtract else u16(job.x + vx)
+    if not work.motion_flags & _MOTION_LOCK_VX and s8(vx) > s8(work.vx_limit):
+        work.vx = vx >> 1
 
 
 def motion_step(job: Job) -> None:
-    """One step of the ``$8C`` motion block, with the original's register quirks (§10.17)."""
+    """One step of the ``$8C`` motion block (§10.17)."""
     work = job.work
-    v, moved = _vertical(job, work, work.vy)
-    v = (v & 0xFF00) | work.vx
+    moved = _vertical(job, work)
     left = bool(job.facing & 2)
     if work.motion_flags & _MOTION_FORWARD:
-        v = _horizontal(job, work, v, subtract=left)
+        _horizontal(job, work, subtract=left)
         moved = True
     if work.motion_flags & _MOTION_BACK:
-        v = _horizontal(job, work, v, subtract=not left)
+        _horizontal(job, work, subtract=not left)
         moved = True
     if not work.motion_flags & _MOTION_KEEP:
         job.script = work.return_pos
@@ -669,6 +635,8 @@ def _op_spawn(engine: ScriptEngine, job: Job, pos: int) -> bool:
 def _op_kill(engine: ScriptEngine, job: Job, _pos: int) -> bool:
     engine.owner(job).active = 0
     job.active = job.running = False
+    if engine.on_kill is not None:
+        engine.on_kill(job.owner)
     job.script += 2
     return False
 

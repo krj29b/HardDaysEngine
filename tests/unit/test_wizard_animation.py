@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 
 from harddaysengine.sim.fight import FightConstants
-from harddaysengine.sim.fight_script import CelShape, FrameShape, ScriptImage
+from harddaysengine.sim.fight_script import CelShape, FrameShape, ListEntry, ScriptImage
 from harddaysengine.sim.rng import Rng
 from harddaysengine.sim.sound import SoundKind, SoundRequest
 from harddaysengine.sim.wizard import WizardEngine, open_animation
@@ -89,7 +89,7 @@ def test_snapshots_include_work_lists_current_output_and_random_state() -> None:
     run.fight.engine.jobs[0].work.loop_count = 17
     assert run.snapshot() != before
     before = run.snapshot()
-    run.fight.engine.attack.cursor = 5
+    run.fight.engine.jobs[0].attack.append(ListEntry("cel", 0, 10, 20))
     assert run.snapshot() != before
     before = run.snapshot()
     run.fight.rng.draw()

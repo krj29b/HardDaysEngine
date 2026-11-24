@@ -59,17 +59,13 @@ class WizardAnimation:
     sounds: list[SoundRequest] = field(default_factory=list)
 
     def snapshot(self) -> dict[str, object]:
-        """Retain jobs, motion work, list cursors and the displayed engine output (§12.36)."""
+        """Retain jobs, motion work, per-job lists and the displayed engine output (§12.36)."""
         engine = self.fight.engine
         return {
             "countdown": self.countdown,
             "frame_wait": self.frame_wait,
             "jobs": [asdict(job) for job in engine.jobs],
             "actors": [asdict(actor) for actor in self.fight.actors],
-            "scratch": asdict(engine.scratch_work),
-            "attack": [None if value is None else asdict(value) for value in engine.attack.entries],
-            "hurt": [None if value is None else asdict(value) for value in engine.hurt.entries],
-            "cursors": [engine.attack.cursor, engine.hurt.cursor],
             "box": asdict(engine.box),
             "mirrored": sorted(engine.mirrored),
             "output": asdict(engine.output),

@@ -14,7 +14,6 @@ from harddaysengine.sim.fight import (
     KEEP,
     POOL_FIRST,
     POOL_SIZE,
-    POOL_SPARE,
     Fight,
     FightConstants,
     FightError,
@@ -27,6 +26,7 @@ from harddaysengine.sim.fight import (
     restart_from,
 )
 from harddaysengine.sim.fight_script import CelShape, FrameShape, HitShape, ScriptImage
+from harddaysengine.sim.trajectory import FlightSlot
 
 KNIGHT_TYPE = 0x0C
 BASE = 2
@@ -61,15 +61,19 @@ def test_a_fight_needs_four_knights() -> None:
         Fight(ScriptImage(b"", {}), {}, {}, [Actor()], Actor(), FightConstants(35, 0xFFFF))
 
 
-def test_records_are_taken_in_order_until_the_pool_is_full() -> None:
+def test_records_are_taken_in_order_cleared_on_alloc_and_bounded_to_twenty() -> None:
     fight = _fight()
+    dirty = fight.actor(POOL_FIRST)
+    dirty.behaviour_flags, dirty.cooldown, dirty.hp = 0x5A, 17, 99
     handles = [fight.alloc_record() for _ in range(POOL_SIZE)]
-    assert handles == list(range(POOL_FIRST, POOL_SPARE))
-    assert fight.actor(handles[0]).active == 1
+    assert handles == list(range(POOL_FIRST, POOL_FIRST + POOL_SIZE))
+    assert (dirty.active, dirty.behaviour_flags, dirty.cooldown, dirty.hp) == (1, 0, 0, 0)
     with pytest.raises(FightError, match="20 fight records"):
         fight.alloc_record()
     with pytest.raises(FightError, match="no actor"):
         fight.actor(0)
+    with pytest.raises(FightError, match="no actor"):
+        fight.actor(POOL_FIRST + POOL_SIZE)
 
 
 def test_spawn_places_the_record_and_starts_a_job() -> None:
@@ -115,12 +119,48 @@ def test_owner_lookup_matches_inactive_jobs_and_drives_pause_kill_restart() -> N
     fight.toggle_pause(7)  # no job: nothing happens
 
 
-def test_clear_links_covers_knights_dragon_and_the_spare_record() -> None:
+def test_clear_links_covers_knights_dragon_and_twenty_pool_records() -> None:
     fight = _fight()
-    for handle in (1, 4, DRAGON, POOL_FIRST, POOL_SPARE):
+    for handle in (1, 4, DRAGON, POOL_FIRST, POOL_FIRST + POOL_SIZE - 1):
         fight.actor(handle).hit_target = fight.actor(handle).attacker = 3
     fight.clear_links()
-    assert all(fight.actor(h).hit_target == fight.actor(h).attacker == 0 for h in range(1, 27))
+    assert len(fight.actors) == POOL_FIRST + POOL_SIZE - 1
+    assert all(
+        fight.actor(h).hit_target == fight.actor(h).attacker == 0
+        for h in range(1, POOL_FIRST + POOL_SIZE)
+    )
+
+
+def test_killing_or_ending_a_job_releases_its_trajectory_slots() -> None:
+    # 1) kill_job
+    fight = _fight()
+    fight.flights.slots = [
+        FlightSlot(owner=POOL_FIRST, remaining=5),
+        FlightSlot(owner=2, remaining=4),
+    ]
+    h = fight.spawn_actor(BASE, 1, (10, 0, 50), 1, KNIGHT_TYPE)
+    assert h == POOL_FIRST
+    fight.kill_job(h)
+    assert (fight.flights.slots[0].owner, fight.flights.slots[0].remaining) == (0, 0)
+    assert fight.flights.slots[1].owner == 2
+
+    # 2) Handler returning END
+    fight = _fight()
+    fight.flights.slots = [FlightSlot(owner=POOL_FIRST, remaining=6)]
+    fight.handlers[KNIGHT_TYPE] = lambda _f, _h: END
+    h = fight.spawn_actor(BASE, 1, (10, 0, 50), 1, KNIGHT_TYPE)
+    job = fight.find_job(h)
+    assert job is not None
+    job.running = False
+    fight.job_pass()
+    assert (fight.flights.slots[0].owner, fight.flights.slots[0].remaining) == (0, 0)
+
+    # 3) Script opcode $BC (_op_kill)
+    fight = _fight(bytes((0xBC, 0)) + b"\xff\xff")
+    fight.flights.slots = [FlightSlot(owner=POOL_FIRST, remaining=7)]
+    h = fight.spawn_actor(BASE, 1, (10, 0, 50), 1, KNIGHT_TYPE)
+    fight.engine.tick()
+    assert (fight.flights.slots[0].owner, fight.flights.slots[0].remaining) == (0, 0)
 
 
 def test_job_pass_calls_handlers_only_on_links_or_an_ended_script() -> None:

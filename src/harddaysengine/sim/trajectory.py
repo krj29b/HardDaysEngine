@@ -130,6 +130,14 @@ def step_flight(state: FlightState, owner: int, actor: Actor) -> bool:
     return False
 
 
+def release_flight(state: FlightState, owner: int) -> None:
+    """Release any trajectory slots held by ``owner`` (§10.23)."""
+    for slot in state.slots:
+        if slot.owner == owner:
+            slot.owner = 0
+            slot.remaining = 0
+
+
 def aim_flight(
     state: FlightState,
     rules: FlightRules,

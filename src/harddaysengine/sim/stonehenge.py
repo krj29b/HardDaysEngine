@@ -161,17 +161,8 @@ class RitualRun:
             "jobs": [asdict(job) for job in self.fight.engine.jobs],
             "actors": [asdict(actor) for actor in self.fight.actors],
             "vbl": self.fight.engine.vbl,
-            "scratch": asdict(self.fight.engine.scratch_work),
             "box": asdict(self.fight.engine.box),
             "mirrored": sorted(self.fight.engine.mirrored),
-            "attack": [
-                None if value is None else asdict(value)
-                for value in self.fight.engine.attack.entries
-            ],
-            "hurt": [
-                None if value is None else asdict(value) for value in self.fight.engine.hurt.entries
-            ],
-            "cursors": [self.fight.engine.attack.cursor, self.fight.engine.hurt.cursor],
             "rng": self.fight.rng.state,
         }
 

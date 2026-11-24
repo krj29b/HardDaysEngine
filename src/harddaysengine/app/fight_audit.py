@@ -120,7 +120,7 @@ def _dragon_input(audit: FightAudit) -> int:
         return DOWN if dy > 0 else UP
     if (knight.facing == 1) != (dx > 0):
         return RIGHT if dx > 0 else LEFT
-    if abs(dx) > 40:
+    if abs(dx) > 45:
         return RIGHT if dx > 0 else LEFT
     table = audit.rules.actions_right if knight.facing == 1 else audit.rules.actions_left
     return FIRE | table.index(0x18)

@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from harddaysengine.sim.actor import Actor
 from harddaysengine.sim.ai_map_state import MapAiCells
 from harddaysengine.sim.fight import DrakeCells, FlyerCells
-from harddaysengine.sim.fight_script import BoxCells, Draw, Job, ListEntry, Work
+from harddaysengine.sim.fight_script import BoxCells, Draw, Job
 from harddaysengine.sim.inventory import Inventory
 from harddaysengine.sim.location_state import KnightState
 from harddaysengine.sim.map_dragon import DragonFlight
@@ -115,12 +115,8 @@ class PaletteCheckpoint(_SaveModel):
 class MapCheckpoint(_SaveModel):
     jobs: Annotated[list[Job], Field(min_length=10, max_length=10)]
     box: BoxCells
-    scratch: Work
     mirrored: set[tuple[str, int]]
     vbl: _Tick
-    attack: Annotated[list[ListEntry | None], Field(min_length=80, max_length=80)]
-    hurt: Annotated[list[ListEntry | None], Field(min_length=80, max_length=80)]
-    cursors: tuple[int | None, int | None]
     effect_vbl: int | None
     stamps: list[Draw]
     draws: list[Draw]
@@ -136,10 +132,8 @@ class MapCheckpoint(_SaveModel):
         """Restore mutable interpreter state and recompose the retained frame."""
         fight = runtime.scene.fight
         engine = fight.engine
-        engine.jobs, engine.box, engine.scratch_work = self.jobs, self.box, self.scratch
+        engine.jobs, engine.box = self.jobs, self.box
         engine.mirrored, engine.vbl = self.mirrored, self.vbl
-        engine.attack.entries, engine.hurt.entries = self.attack, self.hurt
-        engine.attack.cursor, engine.hurt.cursor = self.cursors
         fight.effect_vbl = self.effect_vbl
         runtime.restore_draws(self.stamps, self.draws)
 
@@ -162,7 +156,7 @@ class FightCheckpoint(_SaveModel):
 class CampaignCheckpoint(_SaveModel):
     """The finite set of records needed to resume an overworld tick."""
 
-    version: Literal[1]
+    version: Literal[2]
     data_hash: _Hash
     state_hash: _Hash
     seed: int
