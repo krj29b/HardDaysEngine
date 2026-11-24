@@ -85,13 +85,17 @@ If a task is too large for one session, split it into `T<id>a`, `T<id>b` and so 
 
 ```powershell
 uv sync                                  # install deps (Python 3.12, see .python-version)
-uv run python scripts/quality_gate.py    # the full gate; must be green before DONE
-uv run pytest -m "not adf and not gl"    # tests needing neither disks nor OpenGL
-uv run pytest -m adf                     # tests needing the real disks
+uv run python scripts/quality_gate.py    # the full gate (with coverage); must be green before DONE
+uv run pytest -q tests/unit/test_foo.py  # fast, low-output iteration (no coverage table)
+uv run pytest -q -m "not adf and not gl" # tests needing neither disks nor OpenGL
+uv run pytest -q -m adf                  # tests needing the real disks
 uv run lint-imports                      # layering contracts only
 uv run harddaysengine --version
 uv run harddaysengine --list-disks
 ```
+
+Use `uv run pytest -q` for iterative test runs (`addopts` defaults to `--tb=short` without
+coverage to keep context compact); coverage is enforced by `scripts/quality_gate.py`.
 
 ADF location, in priority order: `--adf-dir`, then the `HARDDAYSENGINE_ADF_DIR` environment variable,
 then `adf_dir =` in `config.toml`, then `./disks/`.

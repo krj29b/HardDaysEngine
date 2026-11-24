@@ -111,6 +111,8 @@ PYTEST_CMD: tuple[str, ...] = (
     "worksteal",
     "-m",
     "not gl",
+    "--cov=harddaysengine",
+    "--cov-report=term-missing",
 )
 
 

@@ -151,8 +151,7 @@ addopts = [
     "-ra",
     "--strict-markers",
     "--strict-config",
-    "--cov=harddaysengine",
-    "--cov-report=term-missing",
+    "--tb=short",
 ]
 markers = [
     "sim: Pure deterministic 50Hz simulation tests (zero I/O or GPU required)",
