@@ -89,7 +89,6 @@ def meeting_visit(session: GameSession, *, defender_wins: bool = False) -> None:
         actor.hp = actor.hp_max = 200 if kid == KnightId.RED else 20
         actor.strength, actor.constitution, actor.endurance, actor.sword = 3, 2, 2, 25
         recalc_endurance(actor)
-        session._sync_legacy_actor(kid)
     first, other = (KnightId.BLUE, KnightId.RED) if defender_wins else (KnightId.RED, KnightId.BLUE)
     session.overworld.turn_index = session.overworld.turn_order.index(first)
     session.overworld.spent = 17
@@ -105,7 +104,6 @@ def hoard_visit(session: GameSession) -> None:
     inv.counts[:] = [0] * 12
     inv.counts[4], inv.counts[11] = 1, 2
     recalc_endurance(actor)
-    session._sync_legacy_actor(KnightId.RED)
     world.setup_turn()
     world.spent, world.moon_frame, world.prng.state = 17, 45, 0x2468ACE1
     session._dragon_attack()

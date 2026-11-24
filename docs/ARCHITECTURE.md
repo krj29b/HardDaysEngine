@@ -2127,14 +2127,8 @@ actor changes during combat belong only to that Fight. Input is the original fiv
 right/left/down/up/fire word; a normalized horizontal or vertical axis cannot set both
 opposing direction bits. Scene rendering reads the retained frame of §10.21.
 
-During the remaining map/sheet migration the old location screens need a separate data-only
-record. It has no combat timers, controller, scripts or damage logic. At fight entry its
-health, equipment, stats, daggers, lives and inventory masks are translated to the Actor.
-At fight return the resulting health, daggers and lives are copied back for those screens.
-Legacy sword tiers 1..4 correspond to codes $16..$19 and armour levels 0..3 to $1B..$1E;
-the legacy screens' extra tier is clamped at the last supported code. Stamina, score and
-secondary-weapon selection from those screens never affect combat. This adapter is removed
-with T11.15 to T11.21, rather than retaining a second combat controller.
+Combat, map, sheet and place screens all share the session's four persistent `Actor` records and
+`Inventory` instances directly, with no separate shadow knight record or fight-entry translation.
 
 The existing map still uses its earlier generator until T11.12; the original fight generator
 is session-owned, seeded once and reused across fights. No fight is reseeded on entry. T11.12
@@ -5694,8 +5688,9 @@ overworld. The host suspends ticks in the panel and consumes its keys. The main
 menu offers Load. The overworld offers Save and Load. A single `campaign-save.json`
 file beside the config holds the checkpoint. Save replaces it atomically.
 
-Version 2 stores typed campaign cells (with per-job attack/hurt lists inside
-`map_jobs.jobs` and no shared list buffers or scratch work) and a deterministic
+Version 3 stores typed campaign cells (with per-job attack/hurt lists inside
+`map_jobs.jobs`, explicit `IntEnum` AI phase state on `fights.drake`, `Actor.block_latched`, and
+no legacy knight shadow mirror or shared list buffers) and a deterministic
 checkpoint hash. The
 save identifies the original program and gameplay executables by digest. Loading
 reconstructs shared actor, inventory and PRNG references, decodes static tables

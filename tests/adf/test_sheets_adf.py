@@ -191,9 +191,9 @@ def test_natural_trogg_lair_win_opens_operable_loot(adf_dir: Path) -> None:
         seed=0x2468ACE1,
     )
     world = session.overworld
-    legacy = session.knight_combat[KnightId.BLUE]
-    legacy.hp = legacy.max_hp = 200
-    legacy.strength, legacy.sword_tier, legacy.daggers = 3, 4, 5
+    actor = session.actors[int(KnightId.BLUE)]
+    actor.hp = actor.hp_max = 200
+    actor.strength, actor.sword, actor.daggers = 3, 25, 5
     world.lairs[1].creatures_left = 1
     world.lairs[1].loot.counts[0] = 1
     session._dispatch_lair(1)

@@ -12,7 +12,6 @@ from harddaysengine.sim.ai_map_state import MapAiCells
 from harddaysengine.sim.fight import DrakeCells, FlyerCells
 from harddaysengine.sim.fight_script import BoxCells, Draw, Job
 from harddaysengine.sim.inventory import Inventory
-from harddaysengine.sim.location_state import KnightState
 from harddaysengine.sim.map_dragon import DragonFlight
 from harddaysengine.sim.map_rules import MapColors
 from harddaysengine.sim.overworld import Arrival, Lair, MapSprite
@@ -156,7 +155,7 @@ class FightCheckpoint(_SaveModel):
 class CampaignCheckpoint(_SaveModel):
     """The finite set of records needed to resume an overworld tick."""
 
-    version: Literal[2]
+    version: Literal[3]
     data_hash: _Hash
     state_hash: _Hash
     seed: int
@@ -170,7 +169,6 @@ class CampaignCheckpoint(_SaveModel):
     palette: PaletteCheckpoint
     map_jobs: MapCheckpoint | None
     fights: FightCheckpoint | None
-    legacy: dict[KnightId, KnightState]
     paused: bool
     selected_players: Annotated[int, Field(ge=1, le=4)]
     menu_cursor: int

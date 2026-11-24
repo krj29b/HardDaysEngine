@@ -204,12 +204,12 @@ def test_campaign_host_samples_only_human_input_and_settles_computer_duel(
     first = session.players[0]
     opponent = next(kid for kid in KnightId if kid not in session.players)
     session._reset_campaign(1, (first,))
-    assert len(session.knight_combat) == 4
-    legacy = session.knight_combat[first]
+    assert len(session.actors) == 4
+    actor = session.actors[int(first)]
     if win:
-        legacy.hp = legacy.max_hp = 200
-        legacy.sword_tier = 4
-    lives = legacy.lives
+        actor.hp = actor.hp_max = 200
+        actor.sword = 25
+    lives = actor.lives
     trigger = EncounterTrigger(
         TriggerKind.PVP_DUEL, first, -1, 1, MoonPhase.NEW_MOON, opponent_knight_id=opponent
     )
@@ -229,5 +229,5 @@ def test_campaign_host_samples_only_human_input_and_settles_computer_duel(
             break
     assert session.active_encounter is None and session.scene == GameScene.OVERWORLD
     assert session.last_defeat_mask == (2 if win else 1)
-    assert session.knight_combat[first].lives == lives - int(not win)
+    assert session.actors[int(first)].lives == lives - int(not win)
     assert not any(job.active for job in active.runtime.fight.engine.jobs)

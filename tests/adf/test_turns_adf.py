@@ -120,7 +120,6 @@ def test_map_attack_uses_real_dragon_runtime_and_settles_at_host_boundary(
     world.dragon.engaged_with = 1
     world.dragon_touch[:] = [1]
     world.current_actor.gold = 30
-    session._sync_legacy_actor(KnightId.RED)
     _ticks(session, 2)
     active = session.active_encounter
     assert session.scene == GameScene.COMBAT and active is not None

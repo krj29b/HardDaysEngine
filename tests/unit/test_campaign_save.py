@@ -1,4 +1,4 @@
-"""Headless v2 campaign checkpoint serialization and schema checks (§13.11)."""
+"""Headless v3 campaign checkpoint serialization and schema checks (§13.11)."""
 
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from harddaysengine.sim.ai_map_state import MapAiCells
 from harddaysengine.sim.fight import DrakeCells, FlyerCells
 from harddaysengine.sim.fight_script import BoxCells, Draw, Job, ListEntry
 from harddaysengine.sim.inventory import Inventory
-from harddaysengine.sim.location_state import KnightState
 from harddaysengine.sim.map_dragon import DragonFlight
 from harddaysengine.sim.map_rules import MapColors
 from harddaysengine.sim.overworld import Arrival
@@ -100,7 +99,7 @@ def _sample_checkpoint() -> CampaignCheckpoint:
         vbl=0,
     )
     return CampaignCheckpoint(
-        version=2,
+        version=3,
         data_hash=_HASH,
         state_hash=_HASH,
         seed=1,
@@ -116,7 +115,6 @@ def _sample_checkpoint() -> CampaignCheckpoint:
         fights=FightCheckpoint(
             flyer=FlyerCells(), drake=DrakeCells(), sound=SoundCells(plain=1, list_offsets=[2, 4])
         ),
-        legacy={KnightId.RED: KnightState(KnightId.RED)},
         paused=False,
         selected_players=1,
         menu_cursor=0,
@@ -138,13 +136,13 @@ def _sample_checkpoint() -> CampaignCheckpoint:
     )
 
 
-def test_v2_checkpoint_and_replay_round_trip(tmp_path: Path) -> None:
+def test_v3_checkpoint_and_replay_round_trip(tmp_path: Path) -> None:
     checkpoint = _sample_checkpoint()
     save_path = tmp_path / "save.json"
     write_checkpoint(save_path, checkpoint)
     restored = read_checkpoint(save_path)
     assert restored == checkpoint
-    assert restored.version == 2
+    assert restored.version == 3
     assert restored.map_jobs is not None
     assert restored.map_jobs.jobs[0].attack == [ListEntry("mi.c", 0, 12, 34)]
     assert restored.map_jobs.jobs[0].hurt == [ListEntry("mi.c", 1, 56, 78)]
@@ -161,15 +159,22 @@ def test_v2_checkpoint_and_replay_round_trip(tmp_path: Path) -> None:
     )
 
 
-def test_legacy_v1_checkpoint_and_legacy_map_fields_are_rejected(tmp_path: Path) -> None:
+def test_legacy_checkpoints_and_legacy_fields_are_rejected(tmp_path: Path) -> None:
     checkpoint = _sample_checkpoint()
     payload = json.loads(checkpoint.model_dump_json())
 
-    v1_payload = dict(payload, version=1)
-    v1_path = tmp_path / "v1.json"
-    v1_path.write_text(json.dumps(v1_payload), encoding="utf-8")
+    for old_version in (1, 2):
+        old_payload = dict(payload, version=old_version)
+        old_path = tmp_path / f"v{old_version}.json"
+        old_path.write_text(json.dumps(old_payload), encoding="utf-8")
+        with pytest.raises(ValidationError):
+            read_checkpoint(old_path)
+
+    legacy_payload = dict(payload, legacy={})
+    legacy_path = tmp_path / "legacy_field.json"
+    legacy_path.write_text(json.dumps(legacy_payload), encoding="utf-8")
     with pytest.raises(ValidationError):
-        read_checkpoint(v1_path)
+        read_checkpoint(legacy_path)
 
     for legacy_key in ("scratch", "attack", "hurt", "cursors"):
         bad_map = dict(payload["map_jobs"], **{legacy_key: None})

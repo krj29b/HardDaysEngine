@@ -91,8 +91,7 @@ from harddaysengine.sim.dice_house import DiceEngine, DiceWorld, can_enter
 from harddaysengine.sim.fight_moves import FIRE
 from harddaysengine.sim.fight_setup import SpawnLanes, settle_defeats
 from harddaysengine.sim.inventory import Inventory
-from harddaysengine.sim.location_state import KnightState
-from harddaysengine.sim.m68k import s8, s16, u8, u16
+from harddaysengine.sim.m68k import s8, s16, u16
 from harddaysengine.sim.map_dragon import (
     automatic_loss,
     settle as settle_dragon,
@@ -256,10 +255,7 @@ class GameSession:
         self.asset_bundle: GameAssetBundle | None = (
             GameAssetBundle(disk_set) if disk_set is not None else None
         )
-        self.knight_combat: dict[KnightId, KnightState] = {
-            kid: KnightState(knight_id=kid) for kid in KnightId
-        }
-        self.actors = [Actor(kind=_KNIGHT_KINDS[kid]) for kid in KnightId]
+        self.actors = [self._default_knight_actor(kid) for kid in KnightId]
         self.dragon_actor = Actor()
         self.inventories = {handle: Inventory() for handle in range(1, 6)}
         self.fight_rng = Rng(seed)
@@ -304,6 +300,22 @@ class GameSession:
                 elif self.scene == GameScene.OVERWORLD:
                     self._map_music()
 
+    @staticmethod
+    def _default_knight_actor(kid: KnightId) -> Actor:
+        return Actor(
+            kind=_KNIGHT_KINDS[kid],
+            inventory=int(kid) + 1,
+            hp=20,
+            hp_max=20,
+            strength=1,
+            constitution=1,
+            endurance=1,
+            sword=0x16,
+            armour=0x1B,
+            daggers=1,
+            lives=3,
+        )
+
     def _reset_campaign(self, count: int, custom_roster: Sequence[KnightId] = ()) -> None:
         clamped = max(1, min(4, count))
         roster = (
@@ -313,7 +325,6 @@ class GameSession:
         )
         self.players = roster
         self.selected_player_count = len(roster)
-        self.knight_combat = {kid: KnightState(knight_id=kid) for kid in KnightId}
         self.active_encounter = None
         self.town_screen = None
         self.stone_screen = None
@@ -328,7 +339,7 @@ class GameSession:
         self.dice_screen = None
         self.last_sheet_item = 65535
         self.practice_mode = False
-        self.actors = [Actor(kind=_KNIGHT_KINDS[kid]) for kid in KnightId]
+        self.actors = [self._default_knight_actor(kid) for kid in KnightId]
         self.dragon_actor = Actor()
         self.inventories = {handle: Inventory() for handle in range(1, 6)}
         self.fight_rng = Rng(self.seed)
@@ -418,7 +429,7 @@ class GameSession:
         if self.scene != GameScene.OVERWORLD or self.disk_set is None:
             raise ValueError("Saving requires an overworld campaign")
         return CampaignCheckpoint(
-            version=2,
+            version=3,
             data_hash=disk_signature(self.disk_set),
             state_hash=self.state_hash(),
             seed=self.seed,
@@ -432,7 +443,6 @@ class GameSession:
             palette=PaletteCheckpoint.model_validate(self.palette_fx.snapshot()),
             map_jobs=MapCheckpoint.capture(self.map_runtime) if self.map_runtime else None,
             fights=FightCheckpoint.capture(self.fight_loader) if self.fight_loader else None,
-            legacy=self.knight_combat,
             paused=self.paused,
             selected_players=self.selected_player_count,
             menu_cursor=self.menu_cursor,
@@ -496,7 +506,6 @@ class GameSession:
         )
         saved.world.restore(self.overworld)
         self.palette_fx = saved.palette.restore()
-        self.knight_combat = saved.legacy
         self._restore_campaign_host_cells(saved)
         if saved.map_jobs is not None and self.asset_bundle is not None and world.turn_rules:
             self.map_runtime = MapRuntime(self.asset_bundle, self.overworld, world.turn_rules)
@@ -865,8 +874,6 @@ class GameSession:
             initialize_stock(
                 self.overworld, self.overworld.turn_rules.stock, self.overworld.turn_rules.gifts
             )
-        for kid in KnightId:
-            self._sync_legacy_actor(kid)
         self._start_map_colors()
         return True
 
@@ -877,22 +884,6 @@ class GameSession:
                 self.overworld.colors.start(
                     _palette_to_rgb12(picture.palette), self.overworld.data()
                 )
-
-    def _sync_legacy_actor(self, kid: KnightId) -> None:
-        actor, legacy = self.actors[int(kid)], self.knight_combat[kid]
-        legacy.hp, legacy.max_hp = s16(actor.hp), s16(actor.hp_max)
-        legacy.strength, legacy.constitution, legacy.endurance = (
-            actor.strength,
-            actor.constitution,
-            actor.endurance,
-        )
-        legacy.gold, legacy.lives, legacy.daggers = s16(actor.gold), s8(actor.lives), actor.daggers
-        legacy.sword_tier, legacy.armour = actor.sword - 21, actor.armour - 27
-        legacy.xp = actor.progress
-        legacy.keys, legacy.moonstones = (
-            self.inventories[int(kid) + 1].byte(20),
-            self.inventories[int(kid) + 1].byte(22),
-        )
 
     def _reenter_map(self) -> None:
         self.scene = GameScene.OVERWORLD
@@ -969,8 +960,6 @@ class GameSession:
         if world.ai_rules is None:
             raise ValueError("original computer map rules are required")
         row = computer_frame(world, world.ai_rules, key)
-        for kid in KnightId:
-            self._sync_legacy_actor(kid)
         self.last_status = ""
         if self._map_result(row, ord("Q") if key == ord("Q") else 0) and self.map_runtime:
             self.map_runtime.advance(world, self.tick_count)
@@ -982,8 +971,6 @@ class GameSession:
             raise ValueError("meeting loot requires original transfer tables")
         winner.progress = u16(winner.progress + progress)
         transfer_loot(winner, loser, self.overworld.ordered_actors(), self.inventories, rules.gifts)
-        for kid in KnightId:
-            self._sync_legacy_actor(kid)
 
     def _map_result(self, row: Arrival | None, key: int) -> bool:
         world = self.overworld
@@ -1006,8 +993,6 @@ class GameSession:
         if world.turn_rules is None:
             raise ValueError("calendar data is required to advance turns")
         result = advance_turn(world, world.turn_rules)
-        for kid in KnightId:
-            self._sync_legacy_actor(kid)
         if result == TurnResult.NEXT_DAY:
             self._show_next_day()
         elif result == TurnResult.GAME_OVER:
@@ -1035,8 +1020,6 @@ class GameSession:
         world.dragon_encounter = False
         if automatic_loss(world, rules):
             self._clear_map_jobs()
-            for kid in KnightId:
-                self._sync_legacy_actor(kid)
             self._reenter_map()
             self.last_status = "DRAGON TAKES LOOT"
             return
@@ -1237,8 +1220,6 @@ class GameSession:
     def _meeting_fight(self, screen: MeetingScreen) -> None:
         state, world = screen.state, self.overworld
         kid, other = KnightId(state.first - 1), KnightId(state.second - 1)
-        for who in (kid, other):
-            self._sync_legacy_actor(who)
         state.phase = MeetingPhase.COMBAT
         self._start_combat(
             EncounterTrigger(
@@ -1282,8 +1263,6 @@ class GameSession:
     def _meeting_return(self, screen: MeetingScreen) -> None:
         if screen.state.hoard:
             self.overworld.spent = self.overworld.budget
-        for kid in KnightId:
-            self._sync_legacy_actor(kid)
         self.meeting_screen, self.sheet_screen = None, None
         self._reenter_map()
 
@@ -1435,7 +1414,6 @@ class GameSession:
     def _valley_combat(self, screen: ValleyScreen) -> None:
         kid = KnightId(screen.state.knight - 1)
         self.overworld.setup_turn()
-        self._sync_legacy_actor(kid)
         screen.state.phase = ValleyPhase.COMBAT
         self._start_combat(
             EncounterTrigger(
@@ -1467,7 +1445,6 @@ class GameSession:
         else:
             self.overworld.setup_turn()
             valley_defeat(actor, self.overworld.prng, self._turn_rules().gifts, screen.rules)
-        self._sync_legacy_actor(KnightId(state.knight - 1))
         self.scene, state.phase = GameScene.VALLEY, ValleyPhase.COMBAT_OUT
         self.palette_fx.set_palette(_palette_to_rgb12(active.runtime.scene.palette))
         self._valley_fade(screen, out=True)
@@ -1479,7 +1456,6 @@ class GameSession:
             valley_moonstone(
                 self.inventories[screen.state.knight], self.overworld.prng, screen.rules
             )
-        self._sync_legacy_actor(KnightId(screen.state.knight - 1))
         self.valley_screen = None
         self._reenter_map()
 
@@ -1530,7 +1506,6 @@ class GameSession:
         if visit.wait or self.palette_fx.is_fading:
             return
         village_reward(self.actors[visit.knight - 1], visit.rules)
-        self._sync_legacy_actor(KnightId(visit.knight - 1))
         visit.phase = VillagePhase.TEMPLE
         self._open_sheet(visit.rules.sheet)
 
@@ -1657,7 +1632,6 @@ class GameSession:
                 self._turn_rules().gifts,
                 self.overworld.gifts,
             )
-            self._sync_legacy_actor(KnightId(state.knight - 1))
             self._wizard_stage(screen, 1)
         elif state.phase == WizardPhase.EXIT_OUT:
             state.phase = WizardPhase.TEMPLE
@@ -1933,7 +1907,6 @@ class GameSession:
         inp = self._player_input(frame, kid)
         done = screen.step(world, inp, fading=self.palette_fx.is_fading)
         self._play_requests(screen.run.state.sounds)
-        self._sync_legacy_actor(kid)
         if done:
             self._begin_sound_return("dice")
 
@@ -1975,7 +1948,6 @@ class GameSession:
         inp = self._player_input(frame, kid)
         done = screen.step(world, inp, fading=self.palette_fx.is_fading)
         self._play_requests(screen.state.sounds)
-        self._sync_legacy_actor(kid)
         if done:
             self._begin_sound_return("service")
 
@@ -2002,8 +1974,6 @@ class GameSession:
         if self.audio is not None and self.asset_bundle is not None:
             self._play_requests(self.asset_bundle.get_scene_sounds().sheet(screen.state.sounds))
         self.bad_luck |= screen.state.bad_luck
-        for knight in KnightId:
-            self._sync_legacy_actor(knight)
         if done:
             self._close_sheet()
 
@@ -2116,7 +2086,6 @@ class GameSession:
         args = (self.actors, self.dragon_actor, self.inventories, self.fight_rng)
         if self.practice_mode:
             second_id = self.players[1]
-            self._prepare_fight_knights(knight_id, second_id)
             runtime = loader.duel(
                 background,
                 *args,
@@ -2127,7 +2096,6 @@ class GameSession:
             )
             return ActiveEncounter(trigger, runtime, (knight_id, second_id))
         if trigger.kind == TriggerKind.DRAGON_INTERCEPT:
-            self._prepare_fight_knights(knight_id)
             runtime = loader.creature(
                 loader.arena_for(0x14),
                 background,
@@ -2141,7 +2109,6 @@ class GameSession:
             opponent_id = trigger.opponent_knight_id
             if opponent_id is None:
                 raise FightUnavailableError("duel opponent is missing")
-            self._prepare_fight_knights(knight_id, opponent_id)
             runtime = loader.duel(
                 background,
                 *args,
@@ -2155,7 +2122,6 @@ class GameSession:
             return ActiveEncounter(trigger, runtime, (knight_id, opponent_id))
         arena = loader.arena_for(trigger.creature_type)
         lair_count = self._fight_lair_count(trigger, loader)
-        self._prepare_fight_knights(knight_id)
         runtime = loader.creature(
             arena,
             background,
@@ -2183,34 +2149,6 @@ class GameSession:
         return self.lair_counts.setdefault(
             trigger.lair_index, loader.defs.lairs[trigger.lair_index].creatures_left
         )
-
-    def _prepare_fight_knights(self, *kids: KnightId) -> None:
-        for kid in kids:
-            if self.overworld.rules is not None and self.actors[int(kid)].kind == 4:
-                self._sync_legacy_actor(kid)
-            else:
-                self._prepare_fight_knight(kid)
-
-    def _prepare_fight_knight(self, kid: KnightId) -> None:
-        """Translate only the legacy sheet values at fight entry (§10.22)."""
-        legacy, actor = self.knight_combat[kid], self.actors[int(kid)]
-        actor.hp, actor.hp_max = u16(legacy.hp), u16(legacy.max_hp)
-        actor.strength, actor.constitution, actor.endurance = (
-            u8(legacy.strength),
-            u8(legacy.constitution),
-            u8(legacy.endurance),
-        )
-        actor.sword = 0x16 + max(0, min(3, legacy.sword_tier - 1))
-        actor.armour = 0x1B + max(0, min(3, legacy.armour))
-        actor.daggers, actor.lives, actor.gold = (
-            u8(legacy.daggers),
-            u8(legacy.lives),
-            u16(legacy.gold),
-        )
-        actor.inventory = int(kid) + 1
-        inventory = self.inventories[actor.inventory]
-        inventory.counts[0x14 // 2] = u8(legacy.keys)
-        inventory.counts[0x16 // 2] = u8(legacy.moonstones)
 
     def _start_combat(self, trigger: EncounterTrigger, knight_id: KnightId) -> None:
         self._clear_map_jobs()
@@ -2324,8 +2262,6 @@ class GameSession:
         settle_dragon(self.overworld, rules, lost=lost, spend=lost)
         self.bad_luck = 0
         active.runtime.release()
-        for kid in KnightId:
-            self._sync_legacy_actor(kid)
         if lost:
             self.active_encounter = None
             self._return_from_map_fight(False)
@@ -2340,11 +2276,10 @@ class GameSession:
         fight = active.runtime.fight
         self._settle_computer_duel(active)
         for kid in active.knight_ids:
-            actor, legacy = self.actors[int(kid)], self.knight_combat[kid]
-            legacy.hp, legacy.daggers, legacy.lives = s16(actor.hp), actor.daggers, s8(actor.lives)
+            actor = self.actors[int(kid)]
             ow = self.overworld.knights.get(kid)
             if ow is not None:
-                ow.lives = legacy.lives
+                ow.lives = s8(actor.lives)
         if active.trigger.kind == TriggerKind.LAIR_BOSS:
             self.lair_counts[active.trigger.lair_index] = fight.total
             if self.overworld.lairs:
@@ -2357,8 +2292,6 @@ class GameSession:
             and self.overworld.turn_rules is not None
         ):
             settle_dragon(self.overworld, self.overworld.turn_rules, lost=not won)
-            for kid in KnightId:
-                self._sync_legacy_actor(kid)
 
     def _settle_computer_duel(self, active: ActiveEncounter) -> None:
         if self.practice_mode or active.trigger.kind != TriggerKind.PVP_DUEL:
@@ -2429,7 +2362,6 @@ class GameSession:
             "palette": self.palette_fx.snapshot(),
             "sound_fade": (self._sound_fade_ticks, self._sound_return),
             "map_jobs": self.map_runtime.snapshot() if self.map_runtime else None,
-            "legacy": [asdict(self.knight_combat[kid]) for kid in KnightId],
             "encounter": self.active_encounter.snapshot() if self.active_encounter else None,
             "fight_lanes": self.spawn_lanes.counter,
             "flyer_toggle": self.fight_loader.flyer.toggle if self.fight_loader else 0,

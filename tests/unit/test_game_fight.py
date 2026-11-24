@@ -132,12 +132,11 @@ def test_host_keeps_engine_jobs_and_actor_records_between_ticks_and_renders() ->
 @pytest.mark.parametrize("lost", [False, True])
 def test_host_returns_engine_health_and_lives_after_the_end_delay(lost: bool) -> None:
     session = _session()
-    legacy = session.knight_combat[KnightId.RED]
-    legacy.hp, legacy.max_hp, legacy.lives = 57, 80, 2
+    actor = session.actors[0]
+    actor.hp, actor.hp_max, actor.lives = 57, 80, 2
     session._start_combat(_trigger(), KnightId.RED)
     assert session.active_encounter is not None
     runtime = session.active_encounter.runtime
-    actor = session.actors[0]
     actor.hp = 0 if lost else 35
     actor.daggers = 2
     for _ in range(17):
@@ -150,9 +149,9 @@ def test_host_returns_engine_health_and_lives_after_the_end_delay(lost: bool) ->
         session.step_tick(InputFrame())
     assert session.scene == GameScene.OVERWORLD
     assert session.active_encounter is None
-    assert legacy.hp == (80 if lost else 35)
-    assert legacy.lives == (1 if lost else 2)
-    assert legacy.daggers == 2
+    assert actor.hp == (80 if lost else 35)
+    assert actor.lives == (1 if lost else 2)
+    assert actor.daggers == 2
     assert session.overworld.spent == session.overworld.budget
 
 

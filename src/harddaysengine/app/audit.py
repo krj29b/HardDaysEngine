@@ -607,9 +607,9 @@ def _host_fight_session(rig: AuditRig, name: str, lair_index: int = -1) -> GameS
         raise ValueError("fight audit requires the original assets")
     session.fight_loader = FightLoader(session.asset_bundle)
     arena = next(a for a in session.fight_loader.defs.arenas if a.name == name)
-    knight = session.knight_combat[_PRIMARY]
-    knight.hp = knight.max_hp = 50
-    knight.strength, knight.sword_tier, knight.daggers = 3, 4, 99
+    knight = session.actors[int(_PRIMARY)]
+    knight.hp = knight.hp_max = 50
+    knight.strength, knight.sword, knight.daggers = 3, 25, 99
     session._start_combat(
         EncounterTrigger(
             kind=TriggerKind.LAIR_BOSS if lair_index >= 0 else TriggerKind.WANDERING_MONSTER,
@@ -819,9 +819,9 @@ def _sheet_shots(rig: AuditRig) -> Iterator[AuditShot]:
     _step(session, 24)
     yield rig.capture(session, "sheet11_wyrm_fixture")
     session = rig.new_session((KnightId.BLUE,))
-    legacy = session.knight_combat[KnightId.BLUE]
-    legacy.hp = legacy.max_hp = 200
-    legacy.strength, legacy.sword_tier, legacy.daggers = 3, 4, 5
+    actor = session.actors[int(KnightId.BLUE)]
+    actor.hp = actor.hp_max = 200
+    actor.strength, actor.sword, actor.daggers = 3, 25, 5
     session.overworld.lairs[1].creatures_left = 1
     session.overworld.lairs[1].gold = 7
     session.overworld.lairs[1].loot.counts[0] = 1

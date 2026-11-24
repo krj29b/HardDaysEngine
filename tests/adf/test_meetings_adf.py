@@ -179,7 +179,6 @@ def test_natural_computer_winner_gets_one_original_transfer_and_no_human_sheet(
     actor.hp = actor.hp_max = 20
     actor.gold = 40
     session.actors[1].gold = 0
-    session._sync_legacy_actor(KnightId.RED)
     with patch("harddaysengine.app.game.transfer_loot", wraps=transfer_loot) as transfer:
         _returned(session)
         transfer.assert_called_once()

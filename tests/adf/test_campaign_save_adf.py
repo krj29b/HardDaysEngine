@@ -41,20 +41,21 @@ def test_map_dragon_checkpoint_resumes_and_supports_replay(adf_dir: Path, tmp_pa
     write_checkpoint(save_path, original.campaign_checkpoint())
 
     saved = read_checkpoint(save_path)
-    assert saved.version == 2
+    assert saved.version == 3
     assert saved.map_jobs is not None
     replay_start = saved.model_dump_json()
     loaded = GameSession.from_campaign_checkpoint(saved, disks)
     assert loaded.state_hash() == original.state_hash()
 
-    # Legacy v1 checkpoints must be cleanly rejected under the v2 schema.
-    v1_path = tmp_path / "legacy-v1.json"
-    v1_path.write_text(
-        replay_start.replace('"version":2', '"version":1', 1),
-        encoding="utf-8",
-    )
-    with pytest.raises(ValueError):
-        read_checkpoint(v1_path)
+    # Legacy v1/v2 checkpoints must be cleanly rejected under the v3 schema.
+    for old_version in (1, 2):
+        old_path = tmp_path / f"legacy-v{old_version}.json"
+        old_path.write_text(
+            replay_start.replace('"version":3', f'"version":{old_version}', 1),
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError):
+            read_checkpoint(old_path)
     assert loaded.overworld.actors[0] is loaded.actors[0]
     assert loaded.overworld.inventories[1] is loaded.inventories[1]
     assert loaded.overworld.prng is loaded.fight_rng

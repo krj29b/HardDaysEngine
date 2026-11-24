@@ -149,7 +149,6 @@ def _multi_day(adf_dir: Path) -> tuple[list[str], set[int], int]:
     world = session.overworld
     # Keep the stationary human alive through natural computer/Dragon encounters.
     world.actors[0].lives = 60
-    session._sync_legacy_actor(KnightId.RED)
     hashes, computers, rounds = [], set(), 0
     previous = session.scene
     for tick in range(20000):

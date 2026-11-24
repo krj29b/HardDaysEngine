@@ -49,9 +49,9 @@ def _session(adf_dir: Path, arena_name: str, *, hp: int = 200) -> GameSession:
     assert session.asset_bundle is not None
     session.fight_loader = FightLoader(session.asset_bundle)
     arena = next(a for a in session.fight_loader.defs.arenas if a.name == arena_name)
-    legacy = session.knight_combat[KnightId.BLUE]
-    legacy.hp = legacy.max_hp = hp
-    legacy.strength, legacy.sword_tier, legacy.daggers, legacy.lives = 3, 4, 99, 2
+    actor = session.actors[int(KnightId.BLUE)]
+    actor.hp = actor.hp_max = hp
+    actor.strength, actor.sword, actor.daggers, actor.lives = 3, 25, 99, 2
     session._handle_overworld_triggers(
         KnightId.BLUE,
         (
@@ -87,9 +87,10 @@ def test_campaign_host_wins_each_trogg_encounter_and_returns_record_changes(
     assert session.scene == GameScene.OVERWORLD
     assert session.active_encounter is None
     assert fight.total == 0
-    assert session.knight_combat[KnightId.BLUE].hp == fight.actor(active.runtime.first).hp
-    assert session.knight_combat[KnightId.BLUE].daggers < 99
-    assert session.knight_combat[KnightId.BLUE].lives == 2
+    actor = session.actors[int(KnightId.BLUE)]
+    assert actor.hp == fight.actor(active.runtime.first).hp
+    assert actor.daggers < 99
+    assert actor.lives == 2
 
 
 def test_campaign_host_loses_through_the_death_script_and_settles_one_life(adf_dir: Path) -> None:
@@ -103,8 +104,9 @@ def test_campaign_host_loses_through_the_death_script_and_settles_one_life(adf_d
     assert active.runtime.finished
     assert session.scene == GameScene.OVERWORLD
     assert session.last_status == "KNIGHT FALLEN"
-    assert session.knight_combat[KnightId.BLUE].lives == 1
-    assert session.knight_combat[KnightId.BLUE].hp == 20
+    actor = session.actors[int(KnightId.BLUE)]
+    assert actor.lives == 1
+    assert actor.hp == 20
 
 
 def test_fight_checkpoint_distinguishes_lair_and_knight_order(adf_dir: Path) -> None:

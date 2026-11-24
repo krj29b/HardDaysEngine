@@ -17,7 +17,6 @@ from harddaysengine.app.village_audit import village_exit, village_temple
 from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.village_data import parse_village_rules
-from harddaysengine.sim.m68k import s8
 from harddaysengine.sim.overworld import Arrival
 from harddaysengine.sim.types import KnightId
 from harddaysengine.sim.village import VillagePhase, reward
@@ -73,7 +72,6 @@ def test_all_village_colours_reward_active_visitor_once_and_spend_after_temple(
     sheet = session.sheet_screen
     assert sheet is not None and sheet.state.number == 9 and sheet.state.knight == int(kid) + 1
     assert actor.lives == 3 and actor.hp == before["hp"] and world.spent < world.budget
-    assert session.knight_combat[kid].lives == s8(actor.lives)
     assert inventories == {k: asdict(v) for k, v in session.inventories.items()}
     assert others == [asdict(row) for index, row in enumerate(session.actors) if index != kid]
     assert world.prng.state == rng
