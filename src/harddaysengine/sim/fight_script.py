@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from harddaysengine.sim.m68k import s8, s16, u8, u16
+from harddaysengine.sim.script_adapter import ScriptFieldAdapter
 
 if TYPE_CHECKING:
     from harddaysengine.sim.actor import Actor
@@ -593,7 +594,9 @@ def _owner_size(size_flags: int) -> int:
 def _op_poke(engine: ScriptEngine, job: Job, pos: int) -> bool:
     data = engine.image.data
     size = _owner_size(_byte(data, pos + 1))
-    engine.owner(job).write(s16(_word(data, pos + 2)), size, _long(data, pos + 4))
+    ScriptFieldAdapter.write(
+        engine.owner(job), s16(_word(data, pos + 2)), size, _long(data, pos + 4)
+    )
     job.script += 8
     return False
 
@@ -663,7 +666,7 @@ def _op_if_same_facing(engine: ScriptEngine, job: Job, pos: int) -> bool:
 def _owner_value(engine: ScriptEngine, job: Job, pos: int) -> int:
     data = engine.image.data
     size = _owner_size(_byte(data, pos + 1))
-    return engine.owner(job).read(s16(_word(data, pos + 2)), size)
+    return ScriptFieldAdapter.read(engine.owner(job), s16(_word(data, pos + 2)), size)
 
 
 def _op_if_zero(engine: ScriptEngine, job: Job, pos: int) -> bool:

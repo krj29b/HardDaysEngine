@@ -94,7 +94,7 @@ def _follow(fight: Fight, actor: Actor) -> None:
 
 
 def _wait(actor: Actor, value: int) -> None:
-    actor.write(106, 1, value)
+    actor.set_cooldown_byte(value)
 
 
 def _walk(turn: _Turn, script: int) -> HandlerResult:
@@ -166,10 +166,10 @@ def _think(turn: _Turn) -> HandlerResult:
         if not f.approach.near:
             return _walk(turn, me.idle_script)
         distance = abs_word(me.x - target.x)
-    wait = me.read(106, 1)
+    wait = me.cooldown_byte()
     if wait:
         _wait(me, u8(wait - 1))
-        if me.read(106, 1):
+        if me.cooldown_byte():
             return _walk(turn, me.idle_script)
     return _attack(turn, s16(distance))
 

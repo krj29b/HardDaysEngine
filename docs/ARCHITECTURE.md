@@ -1031,7 +1031,10 @@ One layout serves knights, the dragon, creatures and fight objects.
 | +128 | u16 | `map_y` | Overworld position. |
 | +130 | u8 | `life_loss` | Non-zero makes the next day turnover take a life. |
 
-Bytes +87 and +131 are never used by the original.
+Bytes +87 and +131 are unused padding bytes omitted from the domain `Actor` dataclass; the script
+field adapter (`sim/script_adapter.py`) maps them as read-as-zero / ignore-writes for full 132-byte
+VM compatibility. Domain logic accesses primary stats (`+70..+72`) via `StatKind` and the high byte
+of `cooldown` (`+106`) via named `cooldown_byte` helpers.
 
 ### 9.3 Derived values
 

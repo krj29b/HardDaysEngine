@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from harddaysengine.sim.actor import StatKind
 from harddaysengine.sim.m68k import s8, s16, s32, u8, u16
 from harddaysengine.sim.rewards import armour_hp_bonus, recalc_endurance, recalc_hp
 
@@ -161,8 +162,9 @@ def _armour(state: SheetState, actor: Actor, other: Actor) -> None:
 
 def buy_stat(state: SheetState, rules: SheetRules, world: OverworldState, field: int) -> None:
     actor = world.actors[state.knight - 1]
-    actor.write(field, 1, actor.read(field, 1) + 1)
-    if field == 71:
+    stat = StatKind(field)
+    actor.add_stat(stat, 1)
+    if stat is StatKind.CONSTITUTION:
         actor.hp = u16(actor.hp + 10)
     actor.progress = u16(actor.progress - rules.stat_price)
     recalc(world, state.knight)

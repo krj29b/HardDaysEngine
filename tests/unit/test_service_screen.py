@@ -185,8 +185,7 @@ def test_mystic_leave_clears_the_donation_so_it_answers_nothing_given() -> None:
 @pytest.mark.parametrize("index", range(1, 40))
 def test_mystic_replies_come_from_the_tables_by_outcome_and_stat(index: int, stat: int) -> None:
     seed = (index * 0x9E3779B9) & 0xFFFFFFFF
-    actor = Actor(gold=30, strength=stat, constitution=stat, hp=40, hp_max=40)
-    actor.write(72, 1, stat)
+    actor = Actor(gold=30, strength=stat, constitution=stat, endurance=stat, hp=40, hp_max=40)
     twin, twin_rng = replace(actor), Rng(seed)
     expected = mystic_gamble(twin, Inventory(), 6, twin_rng, GIFTS, MYSTIC)
     state, _ = _donating(ServiceKind.MYSTIC, actor)

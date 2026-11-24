@@ -10,7 +10,7 @@ from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.turn_rules import parse_turn_rules
 from harddaysengine.assets.wizard_data import parse_wizard_dialogue
-from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.actor import Actor, StatKind
 from harddaysengine.sim.inventory import Inventory
 from harddaysengine.sim.rewards import GiftKind, GiftResult, GiftState, wizard_gift
 from harddaysengine.sim.rng import Rng
@@ -102,7 +102,7 @@ def test_gift_result_and_final_seed_match_independent_disk_table_oracle(adf_dir:
             row = row - 7 if row > 8 else row
             offset = dialogue.stats[row][0]
             expected = GiftResult(GiftKind.STAT, row, stat=offset)
-            assert actor.read(offset, 1) == 3
+            assert actor.get_stat(StatKind(offset)) == 3
         elif roll <= limits[2]:
             cursor = _draw(cursor)
             gold = cursor & 31

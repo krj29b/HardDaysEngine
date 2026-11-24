@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from harddaysengine.sim.actor import StatKind
 from harddaysengine.sim.m68k import s16, u16
 from harddaysengine.sim.rewards import pick_stat, recalc_endurance, recalc_hp
 from harddaysengine.sim.service_types import DiceResult, MysticResult
@@ -63,28 +64,41 @@ def heal(actor: Actor, donation: int, rules: HealerRules) -> tuple[int, int]:
     return amount, changed
 
 
-def _mystic_change(
-    actor: Actor, inventory: Inventory, stat: int, rules: MysticRules, *, won: bool
+def _mystic_raise(
+    actor: Actor, inventory: Inventory, kind: StatKind, rules: MysticRules
 ) -> MysticResult:
-    if won:
-        if not stat:
-            return MysticResult("nothing", 0)
-        actor.write(stat, 1, actor.read(stat, 1) + 1)
-        if stat == 71:
-            actor.hp = u16(actor.hp + rules.hp_step)
-        recalc_hp(actor, inventory)
-        recalc_endurance(actor)
-        return MysticResult("raise", stat)
-    if stat and actor.read(stat, 1) == rules.stat_floor:
-        return MysticResult("unchanged", stat)
-    if stat:
-        actor.write(stat, 1, actor.read(stat, 1) - 1)
-        if stat == 71:
+    actor.add_stat(kind, 1)
+    if kind is StatKind.CONSTITUTION:
+        actor.hp = u16(actor.hp + rules.hp_step)
+    recalc_hp(actor, inventory)
+    recalc_endurance(actor)
+    return MysticResult("raise", kind)
+
+
+def _mystic_lower(
+    actor: Actor, inventory: Inventory, kind: StatKind | None, rules: MysticRules
+) -> MysticResult:
+    if kind is not None and actor.get_stat(kind) == rules.stat_floor:
+        return MysticResult("unchanged", kind)
+    if kind is not None:
+        actor.add_stat(kind, -1)
+        if kind is StatKind.CONSTITUTION:
             hp = u16(actor.hp - rules.hp_step)
             actor.hp = hp if s16(hp) > 0 else rules.hp_floor
     recalc_endurance(actor)
     recalc_hp(actor, inventory)
-    return MysticResult("lower" if stat else "unchanged", stat)
+    return MysticResult("lower" if kind is not None else "unchanged", 0 if kind is None else kind)
+
+
+def _mystic_change(
+    actor: Actor, inventory: Inventory, stat: int, rules: MysticRules, *, won: bool
+) -> MysticResult:
+    kind = StatKind(stat) if stat else None
+    if won:
+        if kind is None:
+            return MysticResult("nothing", 0)
+        return _mystic_raise(actor, inventory, kind, rules)
+    return _mystic_lower(actor, inventory, kind, rules)
 
 
 def mystic_gamble(

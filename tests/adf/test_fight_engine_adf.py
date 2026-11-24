@@ -30,6 +30,7 @@ from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.mog_code import MogCode
 from harddaysengine.sim.actor import Actor
 from harddaysengine.sim.fight import Fight, FightConstants
+from harddaysengine.sim.script_adapter import ScriptFieldAdapter
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -139,7 +140,7 @@ class Walker:
         if op == 0xC8:
             offset = struct.unpack_from(">h", self.data, pc + 2)[0]
             assert self.data[pc + 1] & 1, "only byte tests are walked"
-            branch = self.owner.read(offset, 1) == 0
+            branch = ScriptFieldAdapter.read(self.owner, offset, 1) == 0
             return (
                 (struct.unpack_from(">I", self.data, pc + 4)[0] if branch else pc + 8),
                 deferred,

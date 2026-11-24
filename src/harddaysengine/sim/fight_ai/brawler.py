@@ -29,8 +29,6 @@ BRAWLER_TYPES = (AXE_TYPE, AXE_TYPE_2, SPEAR_TYPE)
 KNIGHT_TYPE = 0x0C
 DAGGER_TYPE = 0x34
 NO_SCRIPT = 0xFFFFFFFF
-_COOLDOWN_SHIFT = 8
-_LOW_BYTE = 0xFF
 
 
 @dataclass(slots=True, frozen=True)
@@ -84,13 +82,13 @@ class _Turn:
 
 
 def cooldown(actor: Actor) -> int:
-    """The cool-down byte: the high byte of the word at +106."""
-    return actor.cooldown >> _COOLDOWN_SHIFT
+    """The cool-down byte: the high byte of ``actor.cooldown``."""
+    return actor.cooldown_byte()
 
 
 def set_cooldown(actor: Actor, value: int) -> None:
-    """Write the cool-down byte and leave the low byte of the word alone."""
-    actor.cooldown = (value & _LOW_BYTE) << _COOLDOWN_SHIFT | actor.cooldown & _LOW_BYTE
+    """Write the cool-down byte and leave the low byte of ``actor.cooldown`` alone."""
+    actor.set_cooldown_byte(value)
 
 
 def _walk(turn: _Turn) -> HandlerResult:

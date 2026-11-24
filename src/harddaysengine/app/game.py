@@ -113,6 +113,7 @@ from harddaysengine.sim.overworld import (
 from harddaysengine.sim.palette_fx import PaletteFxState, pack_rgb12
 from harddaysengine.sim.rewards import transfer_loot, wizard_gift
 from harddaysengine.sim.rng import DEFAULT_SEED, Rng
+from harddaysengine.sim.script_adapter import ScriptFieldAdapter
 from harddaysengine.sim.service_screen import ServiceWorld
 from harddaysengine.sim.service_screen_types import ServiceKind
 from harddaysengine.sim.stock import initialize as initialize_stock
@@ -859,7 +860,7 @@ class GameSession:
         self.overworld.turn_rules = self.asset_bundle.get_turn_rules()
         self.overworld.ai_rules = self.asset_bundle.get_ai_map_rules()
         for offset, size, value in self.overworld.turn_rules.dragon_defaults:
-            self.dragon_actor.write(offset, size, value)
+            ScriptFieldAdapter.write(self.dragon_actor, offset, size, value)
         if self.overworld.turn_rules.stock is not None:
             initialize_stock(
                 self.overworld, self.overworld.turn_rules.stock, self.overworld.turn_rules.gifts

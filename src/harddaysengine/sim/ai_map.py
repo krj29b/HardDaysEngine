@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from harddaysengine.sim.actor import StatKind
 from harddaysengine.sim.ai_shop import purchase, shop_wish
 from harddaysengine.sim.fight_moves import DOWN, LEFT, RIGHT, UP
 from harddaysengine.sim.m68k import s8, s16, u8, u16, u32
@@ -80,7 +81,7 @@ def _stat_and_rest(world: OverworldState, rules: MapAiRules) -> None:
     if s16(actor.progress) >= s16(rules.stat_price):
         offset = pick_stat(actor, world.prng, world.turn_rules.gifts)
         if offset:
-            actor.write(offset, 1, actor.read(offset, 1) + 1)
+            actor.add_stat(StatKind(offset), 1)
             actor.progress = u16(actor.progress - rules.stat_price)
     world.ai.gate = 0
     inventory = world.inventories[actor.inventory]

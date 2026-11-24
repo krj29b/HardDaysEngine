@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 import pytest
 
-from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.actor import Actor, StatKind
 from harddaysengine.sim.inventory import Inventory
 from harddaysengine.sim.rng import Rng
 from harddaysengine.sim.service_types import DiceRules, HealerRules, MysticRules
@@ -92,7 +92,7 @@ def test_healer_above_cap_buys_and_byte_wraps() -> None:
 def test_mystic_raises_selected_stat_before_recalculation(stat: int) -> None:
     actor = Actor(strength=2, constitution=2, endurance=2, hp=10, hp_max=30)
     assert _gamble(actor, stat, 8, 43) == ("raise", stat, 2)
-    assert actor.read(stat, 1) == 3
+    assert actor.get_stat(StatKind(stat)) == 3
     assert actor.hp == (16 if stat == 71 else 10)
     assert actor.hp_max == (40 if stat == 71 else 30)
     assert actor.derived_endurance == (10 if stat == 72 else 8)

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import TYPE_CHECKING
 
+from harddaysengine.sim.actor import StatKind
 from harddaysengine.sim.m68k import u8, u16
 from harddaysengine.sim.rewards import pick_stat
 
@@ -66,8 +67,10 @@ def defeat(actor: Actor, rng: Rng, gifts: GiftRules, rules: ValleyRules) -> int:
     """Stat pick precedes the extra byte life loss; the equality floor is kept (§12.38)."""
     stat = pick_stat(actor, rng, gifts)
     actor.lives = u8(actor.lives - rules.life_loss)
-    if stat and actor.read(stat, 1) != rules.stat_floor:
-        actor.write(stat, 1, u8(actor.read(stat, 1) - rules.stat_loss))
+    if stat:
+        kind = StatKind(stat)
+        if actor.get_stat(kind) != rules.stat_floor:
+            actor.add_stat(kind, -rules.stat_loss)
     return stat
 
 

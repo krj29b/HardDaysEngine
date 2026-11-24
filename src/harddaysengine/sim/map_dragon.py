@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from harddaysengine.sim.fight import DRAGON, FightError, Restart, restart_from
 from harddaysengine.sim.m68k import s8, s16, u8, u16
 from harddaysengine.sim.rewards import transfer_loot
+from harddaysengine.sim.script_adapter import ScriptFieldAdapter
 
 if TYPE_CHECKING:
     from harddaysengine.sim.actor import Actor
@@ -75,7 +76,7 @@ def spawn(world: OverworldState, fight: Fight, rules: MapDragonRules) -> bool:
     for job in fight.engine.jobs:
         job.active = job.running = False
     for offset, size, value in rules.stores:
-        actor.write(offset, size, value)
+        ScriptFieldAdapter.write(actor, offset, size, value)
     actor.frame_list = 3
     bind_flight(world, fight, rules)
     position = (actor.x, actor.height, actor.y)

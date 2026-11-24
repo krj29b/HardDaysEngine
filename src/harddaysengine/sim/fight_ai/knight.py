@@ -76,7 +76,7 @@ def _decide(
     fight: Fight, rules: ComputerKnightRules, actor: Actor, target: Actor, distance: int
 ) -> int:
     if s16(target.hp) <= 0:
-        actor.write(106, 1, 0)
+        actor.set_cooldown_byte(0)
         if s16(distance) <= s16(rules.strike8_range) and not fight.gloated:
             return 0x08
         return 0

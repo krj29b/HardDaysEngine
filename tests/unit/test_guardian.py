@@ -40,7 +40,7 @@ def test_decision_boundaries(distance: int, script: int, action: int, wait: int)
     me = f.actor(owner)
     result = guardian_handler(GUARDIAN, RULES, f, owner)
     assert isinstance(result, Restart) and result.script == script
-    assert me.action == action and me.read(106, 1) == wait
+    assert me.action == action and me.cooldown_byte() == wait
     assert me.cooldown == wait << 8
 
 

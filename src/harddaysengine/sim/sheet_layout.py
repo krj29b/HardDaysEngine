@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from harddaysengine.sim.actor import StatKind
 from harddaysengine.sim.m68k import s8, s16
 from harddaysengine.sim.rewards import recalc_endurance, recalc_hp
 from harddaysengine.sim.sheet_types import SheetIcon, SheetRegion, SheetText
@@ -35,8 +36,8 @@ def button(
         raise ValueError("sheet button outside its decoded table")
     text = rules.buttons[table][index] or ""
     if region.side == 0 and index < 3 and s16(actor.progress) >= s16(rules.stat_price):
-        offset = (70, 72, 71)[index]
-        if actor.read(offset, 1) != 5:
+        stat = (StatKind.STRENGTH, StatKind.ENDURANCE, StatKind.CONSTITUTION)[index]
+        if actor.get_stat(stat) != 5:
             return rules.buttons[0][index] or "", flags ^ 64
     return text, flags
 
@@ -154,8 +155,12 @@ def knight_panel(
     recalc_hp(actor, inv)
     recalc_endurance(actor)
     state.texts.append(SheetText(world.names[handle - 1], 60 + shift, 24))
-    for frame, y, offset, index in ((38, 35, 70, 0), (39, 42, 71, 2), (40, 49, 72, 1)):
-        value = actor.read(offset, 1)
+    for frame, y, stat, index in (
+        (38, 35, StatKind.STRENGTH, 0),
+        (39, 42, StatKind.CONSTITUTION, 2),
+        (40, 49, StatKind.ENDURANCE, 1),
+    ):
+        value = actor.get_stat(stat)
         row(
             state,
             rules,
@@ -164,7 +169,7 @@ def knight_panel(
             y,
             value,
             0,
-            SheetRegion(0, 0, 0, 0, index, side, 3, field=offset),
+            SheetRegion(0, 0, 0, 0, index, side, 3, field=int(stat)),
         )
         state.texts.append(SheetText(str(value), 63 + shift, y))
     for frame, y in ((41, 35), (42, 42), (43, 49)):

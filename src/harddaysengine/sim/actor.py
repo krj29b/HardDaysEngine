@@ -1,91 +1,36 @@
-"""The 132-byte actor record shared by knights, the dragon and fight objects (ARCHITECTURE.md §9.2).
+"""The actor record shared by knights, the dragon and fight objects (ARCHITECTURE.md §9.2).
 
 Every field holds its raw unsigned value at its width; signed reads go through
 :func:`harddaysengine.sim.m68k.s16`. References (``hit_target``, ``attacker``, ``engaged_with``) are
 actor handles, script fields hold script positions and ``frame_list`` a frame-set number; 0 is
-"none" everywhere, as in the original. Scripts address the record by byte offset (§10.17,
-opcodes ``$A8``, ``$C8``, ``$CC``), so :meth:`Actor.read` and :meth:`Actor.write` map any byte
-range onto the named fields, big-endian.
+"none" everywhere. Script opcodes that address fields by byte offset go through
+:class:`harddaysengine.sim.script_adapter.ScriptFieldAdapter`.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+from enum import IntEnum
 
-from harddaysengine.sim.m68k import u32
+from harddaysengine.sim.m68k import u8
 
-ACTOR_SIZE = 132
+_COOLDOWN_SHIFT = 8
+_BYTE_MASK = 0xFF
 
-# (offset, width, field name) for every field of §9.2.
-_LAYOUT: tuple[tuple[int, int, str], ...] = (
-    (0, 4, "active"),
-    (4, 2, "x"),
-    (6, 2, "height"),
-    (8, 2, "y"),
-    (10, 1, "facing"),
-    (11, 1, "input_port"),
-    (12, 1, "anim_phase"),
-    (13, 1, "anim_timer"),
-    (14, 4, "hit_target"),
-    (18, 4, "attacker"),
-    (22, 4, "idle_script"),
-    (26, 4, "after_hit_script"),
-    (30, 4, "hurt_scripts"),
-    (34, 4, "action_scripts"),
-    (38, 4, "frame_list"),
-    (42, 4, "damage_table"),
-    (46, 4, "walk_scripts"),
-    (50, 4, "defence_table"),
-    (54, 4, "kind"),
-    (58, 2, "box_min_x"),
-    (60, 2, "box_max_x"),
-    (62, 2, "input"),
-    (64, 2, "action"),
-    (66, 2, "tile_x"),
-    (68, 2, "tile_y"),
-    (70, 1, "strength"),
-    (71, 1, "constitution"),
-    (72, 1, "endurance"),
-    (73, 1, "lives"),
-    (74, 2, "gold"),
-    (76, 1, "daggers"),
-    (77, 1, "type"),
-    (78, 2, "progress"),
-    (80, 2, "hp"),
-    (82, 1, "frog_days"),
-    (83, 1, "recency"),
-    (84, 2, "hp_max"),
-    (86, 1, "derived_endurance"),
-    (87, 1, "spare87"),
-    (88, 4, "sword"),
-    (92, 4, "armour"),
-    (96, 4, "inventory"),
-    (100, 4, "engaged_with"),
-    (104, 1, "behaviour_flags"),
-    (105, 1, "behaviour_flags2"),
-    (106, 2, "cooldown"),
-    (108, 4, "name"),
-    (112, 2, "box_min_y"),
-    (114, 2, "box_max_y"),
-    (116, 2, "reach_x"),
-    (118, 2, "too_close_x"),
-    (120, 2, "depth_reach"),
-    (122, 2, "hit_x"),
-    (124, 2, "hit_y"),
-    (126, 2, "map_x"),
-    (128, 2, "map_y"),
-    (130, 1, "life_loss"),
-    (131, 1, "spare131"),
+
+class StatKind(IntEnum):
+    """Primary knight attributes keyed by their decoded table codes (ARCHITECTURE.md §9.2)."""
+
+    STRENGTH = 70
+    CONSTITUTION = 71
+    ENDURANCE = 72
+
+
+ALL_STATS: tuple[StatKind, ...] = (
+    StatKind.STRENGTH,
+    StatKind.CONSTITUTION,
+    StatKind.ENDURANCE,
 )
-
-# For each byte of the record: (field name, field start, field width).
-_BYTE_OWNER: tuple[tuple[str, int, int], ...] = tuple(
-    (name, start, width) for start, width, name in _LAYOUT for _ in range(width)
-)
-
-
-class RecordAccessError(IndexError):
-    """Raised when a script addresses bytes outside the 132-byte record."""
 
 
 @dataclass(slots=True)
@@ -130,7 +75,6 @@ class Actor:
     recency: int = 0
     hp_max: int = 0
     derived_endurance: int = 0
-    spare87: int = 0
     sword: int = 0
     armour: int = 0
     inventory: int = 0
@@ -149,41 +93,44 @@ class Actor:
     map_x: int = 0
     map_y: int = 0
     life_loss: int = 0
-    spare131: int = 0
 
-    def read(self, offset: int, size: int) -> int:
-        """Big-endian unsigned read of ``size`` bytes at ``offset`` (§10.17, ``$C8`` / ``$CC``)."""
-        value = 0
-        for byte in _check_range(offset, size):
-            value = (value << 8) | self._byte(byte)
-        return value
+    def get_stat(self, stat: StatKind) -> int:
+        """Read one primary stat byte by :class:`StatKind`."""
+        if stat == StatKind.STRENGTH:
+            return self.strength
+        if stat == StatKind.CONSTITUTION:
+            return self.constitution
+        if stat == StatKind.ENDURANCE:
+            return self.endurance
+        raise ValueError(f"unknown stat kind {stat}")
 
-    def write(self, offset: int, size: int, value: int) -> None:
-        """Big-endian write of the low ``size`` bytes of ``value`` at ``offset`` (``$A8``)."""
-        positions = _check_range(offset, size)
-        for index, byte in enumerate(positions):
-            shift = 8 * (size - 1 - index)
-            self._set_byte(byte, (value >> shift) & 0xFF)
+    def set_stat(self, stat: StatKind, value: int) -> None:
+        """Write one primary stat byte by :class:`StatKind`."""
+        wrapped = u8(value)
+        if stat == StatKind.STRENGTH:
+            self.strength = wrapped
+        elif stat == StatKind.CONSTITUTION:
+            self.constitution = wrapped
+        elif stat == StatKind.ENDURANCE:
+            self.endurance = wrapped
+        else:
+            raise ValueError(f"unknown stat kind {stat}")
+
+    def add_stat(self, stat: StatKind, delta: int) -> int:
+        """Add ``delta`` (wrapped to unsigned byte) to one primary stat and return the new value."""
+        updated = u8(self.get_stat(stat) + delta)
+        self.set_stat(stat, updated)
+        return updated
+
+    def cooldown_byte(self) -> int:
+        """Read the high byte of the 16-bit ``cooldown`` counter."""
+        return (self.cooldown >> _COOLDOWN_SHIFT) & _BYTE_MASK
+
+    def set_cooldown_byte(self, value: int) -> None:
+        """Write the high byte of ``cooldown`` while preserving its low byte."""
+        self.cooldown = ((value & _BYTE_MASK) << _COOLDOWN_SHIFT) | (self.cooldown & _BYTE_MASK)
 
     def clear(self) -> None:
-        """Zero every field (a freed pool record, §10.18)."""
-        for _, _, name in _LAYOUT:
-            setattr(self, name, 0)
-
-    def _byte(self, byte: int) -> int:
-        name, start, width = _BYTE_OWNER[byte]
-        shift = 8 * (start + width - 1 - byte)
-        value: int = getattr(self, name)
-        return (value >> shift) & 0xFF
-
-    def _set_byte(self, byte: int, value: int) -> None:
-        name, start, width = _BYTE_OWNER[byte]
-        shift = 8 * (start + width - 1 - byte)
-        old: int = getattr(self, name)
-        setattr(self, name, u32((old & ~(0xFF << shift)) | (value << shift)))
-
-
-def _check_range(offset: int, size: int) -> range:
-    if offset < 0 or offset + size > ACTOR_SIZE:
-        raise RecordAccessError(f"record access at offset {offset}, size {size}")
-    return range(offset, offset + size)
+        """Reset every field to its default value (a freed pool record, §10.18)."""
+        for item in fields(self):
+            setattr(self, item.name, item.default)

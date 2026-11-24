@@ -19,6 +19,7 @@ from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.mog_code import MogCode
 from harddaysengine.assets.valley_data import parse_valley_data, valley_arena
+from harddaysengine.sim.actor import StatKind
 from harddaysengine.sim.rewards import pick_stat
 from harddaysengine.sim.types import KnightId
 from harddaysengine.sim.valley import ValleyPhase
@@ -180,13 +181,13 @@ def test_natural_loss_restores_hp_loses_three_lives_and_picked_stat_before_templ
         assert record is actor and gifts is session._turn_rules().gifts
         assert actor.lives == 4 and actor.hp == actor.hp_max
         offset = original(actor, rng, session._turn_rules().gifts)
-        oracle.extend((offset, actor.read(offset, 1)))
+        oracle.extend((offset, actor.get_stat(StatKind(offset))))
         return offset
 
     with patch("harddaysengine.sim.valley.pick_stat", side_effect=pick):
         valley_until(session, ValleyPhase.TEMPLE)
     assert session.last_defeat_mask == 1 and actor.lives == 2
-    assert actor.read(oracle[0], 1) == (oracle[1] if oracle[1] == 1 else oracle[1] - 1)
+    assert actor.get_stat(StatKind(oracle[0])) == (oracle[1] if oracle[1] == 1 else oracle[1] - 1)
     assert session.inventories[1].byte(20) == 15 and actor.progress == 0
     assert session.sheet_screen is not None and session.sheet_screen.state.number == 9
     assert world.spent == 17 and session.active_encounter is None

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import TYPE_CHECKING
 
+from harddaysengine.sim.actor import ALL_STATS, StatKind
 from harddaysengine.sim.m68k import s8, s16, u8, u16
 
 if TYPE_CHECKING:
@@ -69,14 +70,14 @@ def pick_stat(actor: Actor, rng: Rng, rules: GiftRules) -> int:
 
 def pick_stat_row(actor: Actor, rng: Rng, rules: GiftRules) -> tuple[int, int]:
     """Keep the chosen table row for the wizard's distinct stat speeches (§12.35)."""
-    if all(s8(actor.read(offset, 1)) >= 5 for offset in (70, 71, 72)):
+    if all(s8(actor.get_stat(stat)) >= 5 for stat in ALL_STATS):
         return -1, 0
     for _ in range(4096):
         row = rng.draw() & 15
         row = row - 7 if row > 8 else row
-        offset = rules.stats[row]
-        if actor.read(offset, 1) != 5:
-            return row, offset
+        stat = StatKind(rules.stats[row])
+        if actor.get_stat(stat) != 5:
+            return row, stat
     raise ValueError("stat selection did not terminate")
 
 
@@ -108,12 +109,12 @@ def inventory_gift(inventory: Inventory, rng: Rng, rules: GiftRules, state: Gift
     raise ValueError("item gift did not terminate")
 
 
-def _stat_gift(actor: Actor, inventory: Inventory, offset: int) -> None:
-    actor.write(offset, 1, actor.read(offset, 1) + 1)
-    if offset == 71:
+def _stat_gift(actor: Actor, inventory: Inventory, stat: StatKind) -> None:
+    actor.add_stat(stat, 1)
+    if stat is StatKind.CONSTITUTION:
         recalc_hp(actor, inventory)
         actor.hp = u16(actor.hp + 10)
-    if offset == 72:
+    if stat is StatKind.ENDURANCE:
         recalc_endurance(actor)
 
 
@@ -132,8 +133,9 @@ def wizard_gift(
             row, offset = pick_stat_row(actor, rng, rules)
             if not offset:
                 continue
-            _stat_gift(actor, inventory, offset)
-            return GiftResult(GiftKind.STAT, row, stat=offset)
+            stat = StatKind(offset)
+            _stat_gift(actor, inventory, stat)
+            return GiftResult(GiftKind.STAT, row, stat=stat)
         if roll <= gold_limit:
             gold = rng.draw() & 31
             amount = (gold - 10 if gold > 21 else gold) + 10

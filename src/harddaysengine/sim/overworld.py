@@ -13,6 +13,7 @@ from harddaysengine.sim.m68k import s8, s16, u8, u16
 from harddaysengine.sim.map_dragon import DragonFlight, attacks
 from harddaysengine.sim.map_rules import MapColors, MapRules
 from harddaysengine.sim.rewards import GiftState, recalc_endurance, recalc_hp
+from harddaysengine.sim.script_adapter import ScriptFieldAdapter
 from harddaysengine.sim.turns import TurnCells
 from harddaysengine.sim.types import KnightId
 
@@ -276,7 +277,7 @@ class OverworldState:
         for kid in KnightId:
             actor = self.actors[int(kid)]
             for offset, size, value in rules.defaults:
-                actor.write(offset, size, value)
+                ScriptFieldAdapter.write(actor, offset, size, value)
             actor.inventory = int(kid) + 1
             human = kid in self.human_order
             actor.kind = kinds[kid] if human else 4
