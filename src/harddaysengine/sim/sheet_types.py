@@ -17,7 +17,6 @@ class SheetRules:
     haste_limit: int
     hawk_limit: int
     protection_limit: int
-    armour_hp: bytes
     shop: ShopRules | None = None
     jingle_wait: int = 0
 

@@ -82,12 +82,10 @@ def test_sheet_decoder_rejects_unsupported_code(adf_dir: Path) -> None:
         parse_sheet_data(replace(executable, sections=(changed, *executable.sections[1:])))
 
 
-def test_sheet_rule_operands_and_armour_table_match_independent_reads(adf_dir: Path) -> None:
+def test_sheet_rule_operands_match_independent_reads(adf_dir: Path) -> None:
     executable = parse_hunk_executable("mog", DiskSet.from_directory(adf_dir).read_file("mog"))
     rules = parse_sheet_rules(executable, parse_sheet_data(executable), ((8, 8),) * 50)
     code = executable.sections[0].data
     assert (rules.gold_cap, rules.haste_limit, rules.hawk_limit, rules.protection_limit) == tuple(
         int.from_bytes(code[pos : pos + 2], "big") for pos in (0xC266, 0xBECA, 0xBF4E, 0xBFB8)
     )
-    table = int.from_bytes(code[0xC19C:0xC1A0], "big")
-    assert rules.armour_hp == code[table : table + 8]

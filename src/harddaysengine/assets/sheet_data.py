@@ -97,11 +97,8 @@ def parse_sheet_data(executable: DecodedHunkExecutable) -> SheetData:
 def parse_sheet_rules(
     executable: DecodedHunkExecutable, data: SheetData, sizes: tuple[tuple[int, int], ...]
 ) -> SheetRules:
-    """Read transaction operands and the original byte-indexed armour table (§12.26)."""
+    """Read checked sheet transaction operands and shop rules (§12.26)."""
     mog = MogCode(executable)
-    table = mog.lea(0xC19A, 0x4BF9, "sheet armour transfer")
-    if table.hunk != 0:
-        raise MogVersionError("mog: sheet armour table is outside code")
     ai = parse_ai_map_rules(executable)
     mog.expect(0xCEA2, (0x7008,), "bad jingle wait")
     mog.expect(0xCEDC, (0x7008,), "good jingle wait")
@@ -116,7 +113,6 @@ def parse_sheet_rules(
         mog.operand(0xBEC8, 0xB07C, "haste threshold"),
         mog.operand(0xBF4C, 0xB07C, "hawk threshold"),
         mog.operand(0xBFB6, 0xB07C, "protection threshold"),
-        mog.code[table.offset : table.offset + 8],
         parse_shop_rules(executable),
         jingle_wait=mog.word(0xCEA2) & 255,
     )

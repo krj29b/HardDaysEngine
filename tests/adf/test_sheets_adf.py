@@ -92,7 +92,10 @@ def test_lair_loot_gold_items_and_tidy_use_persistent_records(adf_dir: Path) -> 
     assert actor.gold == 150 and lair.gold == 6
     actor.gold = 151
     _click(session, _region(session, 74, 1))
-    assert actor.gold == 157 and lair.gold == 0
+    assert actor.gold == 151 and lair.gold == 6
+    actor.gold = 100
+    _click(session, _region(session, 74, 1))
+    assert actor.gold == 106 and lair.gold == 0
     _click(session, _region(session, 0, 1))
     assert world.inventories[actor.inventory].byte(0) == 1
     done = next(r for r in session.sheet_screen.state.regions if r.id == 7)

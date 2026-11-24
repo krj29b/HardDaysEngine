@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from harddaysengine.sim.m68k import s8, s16, s32, u8, u16
-from harddaysengine.sim.rewards import recalc_endurance, recalc_hp
+from harddaysengine.sim.rewards import armour_hp_bonus, recalc_endurance, recalc_hp
 
 if TYPE_CHECKING:
     from harddaysengine.sim.actor import Actor
@@ -121,9 +121,8 @@ def take_gold(state: SheetState, rules: SheetRules, world: OverworldState) -> No
         source = world.lairs[state.lair]
     else:
         source = world.dragon if state.number == 10 else world.actors[state.other - 1]
-    if not source.gold:
+    if not source.gold or s16(actor.gold) >= s16(rules.gold_cap):
         return
-    # Equivalent to the bounded word loop, including a starting gold above the cap.
     until_cap = u16(rules.gold_cap - actor.gold)
     amount = min(u16(source.gold), until_cap)
     actor.gold = u16(actor.gold + amount)
@@ -133,14 +132,14 @@ def take_gold(state: SheetState, rules: SheetRules, world: OverworldState) -> No
     state.changes = u16(state.changes + 1)
 
 
-def take_equipment(state: SheetState, rules: SheetRules, world: OverworldState, field: int) -> None:
+def take_equipment(state: SheetState, world: OverworldState, field: int) -> None:
     actor, other = world.actors[state.knight - 1], world.actors[state.other - 1]
     if field == 76:
         while actor.daggers != 10 and other.daggers:
             actor.daggers, other.daggers = u8(actor.daggers + 1), u8(other.daggers - 1)
         state.changes = u16(state.changes + 1)
     elif field == 92:
-        _armour(state, rules, actor, other)
+        _armour(state, actor, other)
     elif field == 88:
         if actor.sword == 25:
             take_item(state, world, 4)
@@ -149,15 +148,14 @@ def take_equipment(state: SheetState, rules: SheetRules, world: OverworldState, 
             state.changes = u16(state.changes + 1)
 
 
-def _armour(state: SheetState, rules: SheetRules, actor: Actor, other: Actor) -> None:
+def _armour(state: SheetState, actor: Actor, other: Actor) -> None:
     if s32(actor.armour) >= s32(other.armour):
         return
-    offset = actor.armour - 27
-    if not 0 <= offset <= len(rules.armour_hp) - 2:
-        raise ValueError("sheet armour lookup outside the decoded table")
-    gain = s16((rules.armour_hp[offset] << 8) | rules.armour_hp[offset + 1])
+    gain = armour_hp_bonus(other.armour) - armour_hp_bonus(actor.armour)
+    loss = armour_hp_bonus(other.armour)
     actor.armour, other.armour = other.armour, 27
-    actor.hp, other.hp = u16(actor.hp + gain), u16(other.hp - gain)
+    actor.hp = u16(actor.hp + gain)
+    other.hp = u16(max(0, s16(other.hp) - loss))
     state.changes = u16(state.changes + 1)
 
 

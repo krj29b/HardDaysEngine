@@ -1073,7 +1073,8 @@ The display names of all slots are given in §12.6.
 `$16, $14, $04, $06, $0E, $12, $08, $0C, $10, $00, $02, $0A`. If the loser still has lives, only
 the first slot he owns moves (one piece, or the whole mask for `$16` / `$14`); if nothing moved,
 the loser's gold is halved and the winner gets the other half. If the loser has no lives left,
-everything moves. A winner of type `$14` takes the gold first.
+everything moves (resetting `loser.sword = 22` when slot `$04` moves). A winner of type `$14`
+takes half the loser's gold first and does not halve it a second time when no items move.
 
 ### 9.5 Lair (20 bytes) and MapNode (6 bytes)
 
@@ -3485,9 +3486,10 @@ Computer gifts use the shared rules of §12.9/12, including the shared last-item
 memory and message cycles. Retries in random selection are bounded at4096 and
 raise when exhausted. Gold halves use logical word shifts: both winner's increment
 and loser's replacement are floor(gold/2), so odd gold loses one. Zero lives
-(exactly byte0) transfers all counts; other byte values transfer one owned slot.
-The all-transfer sword typo and the dragon-type14 gold-first double-halving path
-are retained. Recalculate the four knights after transfer, not the dragon.
+(exactly byte0) transfers all counts (resetting `loser.sword = 22` when slot 4
+moves); other byte values transfer one owned slot. A dragon winner (type 20)
+halves gold once up front and does not halve it a second time when no items
+move. Recalculate the four knights after transfer, not the dragon.
 
 **Checked executable reads:** moon frames through hunk0 LEA $0664; Next Day text
 list through $2BA8. Its14-byte linked records hold text pointer, x/y, style word,
@@ -3688,12 +3690,11 @@ A stat row with step 0 draws all its icons on one spot; the number beside it car
 | `$06` | 3 | (33, 149) | 12 | 3 | 20 | 1 |
 | `$08` | `$0A` | (69, 133) | 20 | 4 | 21 | 1 |
 | `$14` keys, bits 0..3 | 5, 6, 7, 8 | x 76, 94, 112, 130, y 111 | – | 1 each | 17 | 1, mask = the bit |
-| `$16` moonstones, bits 0..3 | 2, 1, 0, 0 | from (103, 111), see below | – | 1 each | 14, 15, 16, 14 | 1, mask = the bit |
+| `$16` moonstones, bits 0..3 | 2, 1, 0, 0 | from (103, 111) | 16 | 1 each | 14, 15, 16, 14 | 1, mask = the bit |
 | `$00` | 4 | (31, 165) | 13 | 4 | 18 | 5 |
 | `$0A`..`$12` (five scrolls) | `$0B`..`$0F` | columns from x 30, 25 apart, y 183 | – | 2 each (the second as frame `$10`, 4 right) | 22..26 | 5 |
 
-Quirk kept: the moonstone icons set their x once and advance by whatever step the previously
-drawn row left behind, so their spacing depends on what else the inventory holds.
+Moonstone icons advance by an explicit 16-pixel horizontal step, independent of earlier rows.
 
 **Lair loot panel** (sheet 2): three decoration frames (`$1F` at (58, 46), `$20` at (76, 33),
 `$21` at (58, 60)); if the lair's gold word is non-zero, the gold icon `$25` at (87, 64)
@@ -3826,15 +3827,15 @@ Each successful take adds one to the change counter and redraws.
 No check is made that the source holds a piece; counts wrap in the byte (the sheet only shows
 regions for what is there).
 
-**Take gold** (field `$4A`): gold moves one piece at a time from the source (the other
-knight's `gold`, or on sheet 2 the lair's gold word) until the source is empty or my gold is
-**exactly** 150; a knight already above 150 takes everything. A coin sound plays when the
+**Take gold** (field `$4A`): if `s16(gold) >= s16(gold_cap)`, return immediately without taking
+more. Otherwise gold moves from the source (the other knight's `gold`, or on sheet 2 the lair's
+gold word) until the source is empty or `gold` reaches `gold_cap`. A coin sound plays when the
 source ran empty.
 
 **Take armour** (field `$5C`): if my armour code is lower than the other's, I take it and the
-other falls back to `$1B`. A hit-point amount also moves from the other's `hp` to mine; the
-original looks it up by **my previous** armour with a byte offset into a word table, which
-yields 0 when I wore padded armour or mail and 10 when I wore plate (quirk kept).
+other falls back to `$1B` (27). Hit points adjust cleanly by the armour HP bonus delta consistent
+with `recalc_hp()` (`{28: 10, 29: 20, 30: 30}`): the taker gains `bonus(new) - bonus(old)` and
+the loser drops `bonus(old)` (clamped at 0).
 
 **Take sword** (field `$58`): if my sword is `$19`: the other's slot `$04` loses one, and
 except on sheet 2 my slot `$04` gains one and the other's sword becomes `$16`; then derived
@@ -4224,10 +4225,9 @@ implement item effects. Sheet sound events are retained in order for T11.23.
 Sound playback does not drive rules or consume simulation randomness here.
 
 Additional checked operands are read from hunk0 for the exact gold cap ($C264),
-gamble thresholds ($BEC8/$BF4C/$BFB6) and rest caps ($BEA6/$BEAE). The armour
-transfer's byte-indexed word table is reached through the checked LEA at $C19A.
-The stat price uses the existing checked map-AI decoder. Out-of-range sprite,
-button and armour-table accesses raise instead of substituting assets or reading
+gamble thresholds ($BEC8/$BF4C/$BFB6) and rest caps ($BEA6/$BEAE).
+The stat price uses the existing checked map-AI decoder. Out-of-range sprite and
+button accesses raise instead of substituting assets or reading
 unmodeled memory. No game tables are copied into source.
 
 ### 12.27 Runtime town screen data (T11.16a)

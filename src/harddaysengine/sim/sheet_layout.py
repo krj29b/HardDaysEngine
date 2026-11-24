@@ -76,16 +76,17 @@ def row(
         _icon(state, rules, SheetIcon(frame, x + index * step, y), region)
 
 
+_MOONSTONE_STEP = 16
+
+
 def inventory(state: SheetState, rules: SheetRules, inv: Inventory, shift: int, side: int) -> None:
-    """Keep the previous row's step for the moonstone spacing quirk (§12.3)."""
-    step = 0
+    """Layout inventory, key, moonstone, potion and scroll icons (§12.3)."""
     for slot, frame, x, y, stride, cap, index, kind in (
         (2, 9, 87, 164, 16, 4, 19, 5),
         (6, 3, 33, 149, 12, 3, 20, 1),
         (8, 10, 69, 133, 20, 4, 21, 1),
     ):
         if inv.byte(slot):
-            step = stride
             row(
                 state,
                 rules,
@@ -93,7 +94,7 @@ def inventory(state: SheetState, rules: SheetRules, inv: Inventory, shift: int, 
                 x + shift,
                 y,
                 min(cap, inv.byte(slot)),
-                step,
+                stride,
                 SheetRegion(0, 0, 0, 0, index, side, kind, field=slot),
             )
     for bit in range(4):
@@ -121,7 +122,7 @@ def inventory(state: SheetState, rules: SheetRules, inv: Inventory, shift: int, 
                 0,
                 SheetRegion(0, 0, 0, 0, index, side, 1, 1 << bit, 22),
             )
-            x += step
+            x += _MOONSTONE_STEP
     row(
         state,
         rules,

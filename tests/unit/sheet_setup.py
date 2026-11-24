@@ -16,7 +16,6 @@ RULES = SheetRules(
     12,
     17,
     13,
-    bytes.fromhex("0000000b00170023"),
 )
 
 

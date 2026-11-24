@@ -98,7 +98,7 @@ def _stat_or_daggers(
     if flags & 64:
         actions.buy_stat(state, rules, world, field)
     if flags & 32 and field == 76:
-        actions.take_equipment(state, rules, world, field)
+        actions.take_equipment(state, world, field)
 
 
 def _take(state: SheetState, rules: SheetRules, world: OverworldState, region: SheetRegion) -> None:
@@ -107,7 +107,7 @@ def _take(state: SheetState, rules: SheetRules, world: OverworldState, region: S
     elif region.field == 74:
         actions.take_gold(state, rules, world)
     elif region.field in (88, 92):
-        actions.take_equipment(state, rules, world, region.field)
+        actions.take_equipment(state, world, region.field)
 
 
 def step(

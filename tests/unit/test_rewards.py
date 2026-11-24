@@ -81,12 +81,12 @@ def test_reroll_exhaustion_is_explicit() -> None:
         item_gift(Actor(), Inventory(), Rng(0), rules, GiftState(last=0))
 
 
-def test_dragon_gold_first_and_empty_inventory_halves_twice() -> None:
+def test_dragon_gold_first_halves_once_even_with_empty_inventory() -> None:
     world = make_world()
     winner, loser = world.dragon, world.current_actor
     winner.type, winner.inventory, loser.gold = 20, 5, 9
     transfer_loot(winner, loser, world.ordered_actors(), world.inventories, GIFTS)
-    assert winner.gold == 6 and loser.gold == 2
+    assert winner.gold == 4 and loser.gold == 4
 
 
 def test_surviving_loser_loses_first_owned_slot_in_loaded_order() -> None:
@@ -101,7 +101,7 @@ def test_surviving_loser_loses_first_owned_slot_in_loaded_order() -> None:
     assert world.inventories[1].byte(22) == 5
 
 
-def test_zero_lives_transfers_all_counts_masks_wrap_and_preserves_sword_typo() -> None:
+def test_zero_lives_transfers_all_counts_masks_wrap_and_resets_sharp_sword() -> None:
     world = make_world()
     winner, loser = world.dragon, world.current_actor
     winner.inventory, loser.lives = 5, 0
@@ -111,7 +111,7 @@ def test_zero_lives_transfers_all_counts_masks_wrap_and_preserves_sword_typo() -
     transfer_loot(winner, loser, world.ordered_actors(), world.inventories, GIFTS)
     assert not any(source.counts)
     assert target.counts[0] == 1 and target.counts[10] == 7
-    assert loser.sword == 25
+    assert loser.sword == 22
 
 
 def test_derived_hp_wraps_caps_signed_and_forces_sharp_sword() -> None:

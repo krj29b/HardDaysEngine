@@ -42,9 +42,14 @@ class GiftResult:
     amount: int = 0
 
 
+def armour_hp_bonus(armour: int) -> int:
+    """HP bonus contributed by an armour code (§9.3)."""
+    return {28: 10, 29: 20, 30: 30}.get(armour, 0)
+
+
 def recalc_hp(actor: Actor, inventory: Inventory) -> None:
     """Word arithmetic, signed cap and forced sharp sword (§9.3)."""
-    bonus = {28: 10, 29: 20, 30: 30}.get(actor.armour, 0)
+    bonus = armour_hp_bonus(actor.armour)
     actor.hp_max = u16(actor.constitution * 10 + inventory.byte(6) * 20 + bonus + 10)
     if s16(actor.hp) >= s16(actor.hp_max):
         actor.hp = actor.hp_max
@@ -160,7 +165,7 @@ def _move_slot(
         target.counts[index] = u8(target.byte(slot) + count)
         source.counts[index] = 0
         if slot == 4:
-            loser.sword = 25
+            loser.sword = 22
     else:
         source.counts[index] = u8(count - 1)
         target.counts[index] = u8(target.byte(slot) + 1)
@@ -175,15 +180,16 @@ def transfer_loot(
     inventories: Mapping[int, Inventory],
     rules: GiftRules,
 ) -> None:
-    """Original slot order, dragon gold-first and exact-zero-lives test (§9.4/11.19)."""
+    """Slot order, dragon gold-first (single halving) and zero-lives transfer (§9.4/11.19)."""
     target, source = inventories[winner.inventory], inventories[loser.inventory]
-    if winner.type == 20:
+    took_gold = winner.type == 20
+    if took_gold:
         _gold(winner, loser)
     slots = [slot for slot in rules.transfer if source.byte(slot)]
     all_items = loser.lives == 0
     for slot in slots if all_items else slots[:1]:
         _move_slot(winner, loser, target, source, slot, all_items=all_items)
-    if not all_items and not slots:
+    if not all_items and not slots and not took_gold:
         _gold(winner, loser)
     for actor in actors:
         recalc_hp(actor, inventories[actor.inventory])

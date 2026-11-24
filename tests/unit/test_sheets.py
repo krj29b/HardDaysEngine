@@ -92,9 +92,9 @@ def test_read_only_lair_regions_cannot_transfer_but_keep_plain_text() -> None:
 
 @pytest.mark.parametrize(
     ("gold", "source", "expected", "remaining"),
-    [(150, 20, 153, 17), (153, 20, 153, 20), (160, 20, 180, 0), (65530, 20, 14, 0)],
+    [(150, 20, 153, 17), (153, 20, 153, 20), (160, 20, 160, 20), (65530, 20, 14, 0)],
 )
-def test_gold_stops_at_exact_cap_and_wraps(
+def test_gold_stops_at_cap_without_exceeding_it(
     gold: int, source: int, expected: int, remaining: int
 ) -> None:
     world, state = sheet(2)
@@ -201,19 +201,28 @@ def test_held_fire_repeats_only_while_inventory_region_exists_and_pointer_clamps
     assert (state.pointer_x, state.pointer_y) == (314, 0)
 
 
-def test_armour_uses_byte_indexed_decoded_word_and_dagger_top_up() -> None:
+def test_armour_applies_hp_bonus_delta_and_dagger_top_up() -> None:
     world, state = sheet(1)
     first, second = world.actors[:2]
     first.armour, second.armour, first.hp, second.hp = 29, 30, 20, 40
     redraw(state, RULES, world)
     click(state, RULES, world, _region(state, 92, 1))
     assert first.armour == 30 and second.armour == 27
-    assert first.hp == 31 and second.hp == 29
+    assert first.hp == 30 and second.hp == 10
     state.number, state.changes = 1, 0
     first.daggers, second.daggers = 8, 5
     redraw(state, RULES, world)
     click(state, RULES, world, _region(state, 76, 1))
     assert first.daggers == 10 and second.daggers == 3
+
+
+def test_moonstone_icons_use_explicit_horizontal_step_even_when_prior_rows_empty() -> None:
+    world, state = sheet(9)
+    world.inventories[1].counts[:] = [0] * 12
+    world.inventories[1].counts[11] = 0b1111
+    redraw(state, RULES, world)
+    xs = [r.x for r in state.regions if r.field == 22]
+    assert xs == [177, 193, 209, 225]
 
 
 def test_offer_drops_passive_inventory_items_but_leaves_keys_and_moonstones() -> None:
