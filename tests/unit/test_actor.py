@@ -53,9 +53,13 @@ def test_a_long_write_keeps_only_the_low_bytes_of_a_short_field() -> None:
 
 def test_padding_bytes_read_zero_and_ignore_writes() -> None:
     actor = Actor()
-    for offset in (87, 131):
+    for offset in (87, 105, 131):
         ScriptFieldAdapter.write(actor, offset, 1, 0xAA)
         assert ScriptFieldAdapter.read(actor, offset, 1) == 0
+    ScriptFieldAdapter.write(actor, 104, 1, 0x80)
+    assert actor.block_latched and ScriptFieldAdapter.read(actor, 104, 1) == 0x80
+    ScriptFieldAdapter.write(actor, 104, 1, 0x7F)
+    assert not actor.block_latched and ScriptFieldAdapter.read(actor, 104, 1) == 0
 
 
 def test_access_outside_the_record_is_an_error() -> None:

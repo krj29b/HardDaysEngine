@@ -245,7 +245,7 @@ class FightRuntime:
             "sound_cells": asdict(f.sound_cells),
             "approach": asdict(f.approach),
             "caster": asdict(f.caster),
-            "snatch_flags": f.snatch_flags,
+            "snatcher": asdict(f.snatcher),
             "flyer": asdict(f.flyer),
             "drake": asdict(f.drake),
             "guardian": asdict(f.guardian),
@@ -400,6 +400,7 @@ class FightLoader:
         install_dragon(f, self.dragon_rules, self.knight_rules)
         install_sounds(f, self.sound_rules)
         f.sound_cells = self.sound_cells
+        self.drake.jump_cooldown = 0
         f.drake = self.drake
         f.flyer = self.flyer
         f.shake_rules = self.shake_rules

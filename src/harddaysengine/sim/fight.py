@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from enum import IntEnum
 from typing import TYPE_CHECKING, Final
 
 from harddaysengine.sim.actor import Actor
@@ -143,34 +144,98 @@ class ApproachCells:
     vertical: int = 0
 
 
+class CasterPhase(IntEnum):
+    """Per-actor state machine phases for Ratmen (ARCHITECTURE.md §10.23)."""
+
+    IDLE = 0
+    INITIAL_FLIGHT = 1
+    OUT_FLIGHT = 2
+    QUICK_FLIGHT = 3
+    HOLD = 4
+    GRABBED = 5
+    RELEASE = 6
+    THROW = 7
+    SLAM = 8
+
+
 @dataclass(slots=True)
 class CasterCells:
-    """Shared Ratmen flags, wait and aim results (ARCHITECTURE.md §10.23)."""
+    """Shared Ratmen encounter state, cooldown wait and per-actor phases (§10.23)."""
 
-    flags: int = 0
+    initial_active: bool = False
+    victim_grabbed: bool = False
+    victim_held: bool = False
     wait: int = 0
-    aim_distance: int = 0
-    aim_steps: int = 0
-    aim_arc: int = 0
+    phases: dict[int, CasterPhase] = field(default_factory=dict)
+
+
+class SnatchEncounterPhase(IntEnum):
+    """Encounter-wide Mudmen grab state (ARCHITECTURE.md §10.25)."""
+
+    NONE = 0
+    CARRYING = 1
+    FREED = 2
+    RELEASED = 3
+    GONE = 4
+
+
+class SnatcherPhase(IntEnum):
+    """Per-actor state machine phases for Mudmen (ARCHITECTURE.md §10.25)."""
+
+    HIDDEN = 0
+    APPROACHING = 1
+    READY = 2
+    CARRYING = 3
+    FREED = 4
+    RELEASED = 5
+
+
+@dataclass(slots=True)
+class SnatcherCells:
+    """Shared Mudmen encounter grab state and per-actor phases (§10.25)."""
+
+    encounter: SnatchEncounterPhase = SnatchEncounterPhase.NONE
+    phases: dict[int, SnatcherPhase] = field(default_factory=dict)
+
+
+class DrakePhase(IntEnum):
+    """Balok state machine phases (ARCHITECTURE.md §10.28)."""
+
+    IDLE = 0
+    FLYING = 1
+    GRABBED = 2
+    RECOVER = 3
+    FINISHED = 4
 
 
 @dataclass(slots=True)
 class DrakeCells:
-    """Balok's shared executable cells (ARCHITECTURE.md §10.28)."""
+    """Balok's shared encounter state and cross-fight finisher toggle (§10.28)."""
 
-    flags: int = 0
+    phase: DrakePhase = DrakePhase.IDLE
+    jump_cooldown: int = 0
     remaining: int = 0
     target_x: int = 0
     target_y: int = 0
     toggle: int = 0
 
 
+class DragonPhase(IntEnum):
+    """Dragon ground stance and flight transition phases (ARCHITECTURE.md §10.30)."""
+
+    FAR_GROUND = 0
+    NEAR_GROUND = 1
+    FLYING_TO_NEAR = 2
+    FLYING_TO_FAR = 3
+
+
 @dataclass(slots=True)
 class DragonCells:
-    """Encounter-owned Dragon phases, linked records and saved reach words (§10.30)."""
+    """Encounter-owned Dragon phase, linked records and saved reach words (§10.30)."""
 
-    flags: int = 0
-    spare: int = 0
+    phase: DragonPhase = DragonPhase.FAR_GROUND
+    reduced_reach: bool = False
+    was_hit: bool = False
     distance: int = 0
     link_a: int = 0
     link_b: int = 0
@@ -178,15 +243,26 @@ class DragonCells:
     saved_close: int = 0
 
 
+class GuardianStage(IntEnum):
+    """Guardian grab/strike stage progression (ARCHITECTURE.md §10.29)."""
+
+    IDLE = 0
+    STAGE1 = 1
+    STAGE3 = 2
+    STAGE5 = 3
+    STAGE7 = 4
+    STAGE9 = 5
+
+
 @dataclass(slots=True)
 class GuardianCells:
-    """Encounter-owned Guardian body handles, stages and previous target (§10.29)."""
+    """Encounter-owned Guardian body handles, stage, hold state and target (§10.29)."""
 
     main: int = 0
     body: int = 0
     target: int = 0
-    flags: int = 0
-    spare: int = 0
+    stage: GuardianStage = GuardianStage.IDLE
+    holding: bool = False
     fade: bool = False
 
 
@@ -280,7 +356,7 @@ class Fight:
     gloated: bool = False
     approach: ApproachCells = field(default_factory=ApproachCells)
     caster: CasterCells = field(default_factory=CasterCells)
-    snatch_flags: int = 0
+    snatcher: SnatcherCells = field(default_factory=SnatcherCells)
     flyer: FlyerCells = field(default_factory=FlyerCells)
     drake: DrakeCells = field(default_factory=DrakeCells)
     dragon_cells: DragonCells = field(default_factory=DragonCells)
@@ -335,6 +411,8 @@ class Fight:
             actor = self.actor(handle)
             if actor.active == 0:
                 actor.clear()
+                self.caster.phases.pop(handle, None)
+                self.snatcher.phases.pop(handle, None)
                 actor.active = 1
                 return handle
         raise FightError("all 20 fight records are in use")

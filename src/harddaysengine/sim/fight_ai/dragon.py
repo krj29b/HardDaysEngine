@@ -6,7 +6,14 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
-from harddaysengine.sim.fight import DRAGON, END, KEEP, HandlerResult, restart_from
+from harddaysengine.sim.fight import (
+    DRAGON,
+    END,
+    KEEP,
+    DragonPhase,
+    HandlerResult,
+    restart_from,
+)
 from harddaysengine.sim.fight_ai.approach import abs_word, approach
 from harddaysengine.sim.fight_ai.effects import HitSparkRules, hit_spark
 from harddaysengine.sim.fight_hurt import contact_damage
@@ -21,7 +28,8 @@ if TYPE_CHECKING:
     from harddaysengine.sim.fighter_rules import KnightRules
 
 DRAGON_TYPE, PART_TYPE = 0x14, 0x2C
-FLIGHT, PHASE2, REDUCED, HIT = 0x10, 0x20, 0x40, 0x80
+_FLYING_PHASES = frozenset({DragonPhase.FLYING_TO_NEAR, DragonPhase.FLYING_TO_FAR})
+_NEAR_PHASES = frozenset({DragonPhase.NEAR_GROUND, DragonPhase.FLYING_TO_NEAR})
 
 
 @dataclass(slots=True, frozen=True)
@@ -105,7 +113,7 @@ def dragon_step(rules: DragonRules, fight: Fight, _call: RoutineCall | None = No
     """Approach, bound x and restore reduced reach/close tunables on the actor (§10.30)."""
     actor, cells = fight.actor(DRAGON), fight.dragon_cells
     actor.input = 0
-    reduced = bool(cells.flags & REDUCED)
+    reduced = cells.reduced_reach
     if reduced:
         cells.saved_reach, cells.saved_close = actor.reach_x, actor.too_close_x
         actor.reach_x, actor.too_close_x = rules.reduced_reach, rules.reduced_close
@@ -136,16 +144,17 @@ def _spawn_fire(fight: Fight, rules: DragonRules) -> None:
 
 def _pick(fight: Fight, rules: DragonRules, idle: int) -> HandlerResult:
     cells, actor, target = fight.dragon_cells, fight.actor(DRAGON), fight.actor(fight.first)
-    cells.flags &= ~REDUCED
+    cells.reduced_reach = False
     script = idle
     if s16(target.hp) > 0 and fight.approach.near:
-        if not cells.flags & PHASE2:
+        if cells.phase not in _NEAR_PHASES:
             actor.action, script = 8, rules.scripts.strike8
-        elif s16(cells.distance) <= s16(rules.breath_range) and not cells.flags & HIT:
-            cells.flags &= ~HIT
+        elif s16(cells.distance) <= s16(rules.breath_range) and not cells.was_hit:
+            cells.was_hit = False
             actor.action, script = 4, rules.scripts.bite
         else:
-            cells.flags = (cells.flags & ~HIT) | REDUCED
+            cells.was_hit = False
+            cells.reduced_reach = True
             actor.action, script = 0x20, rules.scripts.breath
             _spawn_fire(fight, rules)
     _links(fight, rules)
@@ -155,8 +164,7 @@ def _pick(fight: Fight, rules: DragonRules, idle: int) -> HandlerResult:
 def _start(fight: Fight, rules: DragonRules, *, far: bool) -> HandlerResult:
     cells, actor = fight.dragon_cells, fight.actor(DRAGON)
     plan = rules.far if far else rules.near
-    cells.flags |= FLIGHT
-    cells.flags = cells.flags & ~PHASE2 if far else cells.flags | PHASE2
+    cells.phase = DragonPhase.FLYING_TO_FAR if far else DragonPhase.FLYING_TO_NEAR
     actor.anim_phase, actor.cooldown = 0, plan.steps
     script = fight.table_long(actor.walk_scripts, plan.block)
     request = fight.flights.request
@@ -181,24 +189,25 @@ def _flight(fight: Fight, rules: DragonRules) -> HandlerResult:
     depth = _tracking_depth(actor.y, target.y, rules.step)
     step_flight(fight.flights, DRAGON, actor)
     actor.y = depth
+    near = cells.phase in _NEAR_PHASES
     if actor.cooldown == 0:
-        cells.flags &= ~FLIGHT
+        cells.phase = DragonPhase.NEAR_GROUND if near else DragonPhase.FAR_GROUND
     actor.anim_phase = u8(actor.anim_phase + 1)
     phase = 7 if s8(actor.anim_phase) >= 8 else actor.anim_phase
-    block = rules.near.block if cells.flags & PHASE2 else rules.far.block
+    block = rules.near.block if near else rules.far.block
     script = fight.table_long(actor.walk_scripts, block + phase * 4)
     _links(fight, rules)
     return _script(actor, script)
 
 
 def _think(fight: Fight, rules: DragonRules, idle: int) -> HandlerResult:
-    if fight.dragon_cells.flags & FLIGHT:
+    if fight.dragon_cells.phase in _FLYING_PHASES:
         return _flight(fight, rules)
     dragon_step(rules, fight)
     actor, cells = fight.actor(DRAGON), fight.dragon_cells
     cells.distance = abs_word(actor.x - fight.actor(fight.first).x)
     far = s16(cells.distance) >= s16(rules.phase_range)
-    if far == bool(cells.flags & PHASE2):
+    if far == (cells.phase in _NEAR_PHASES):
         return _start(fight, rules, far=far)
     return _pick(fight, rules, idle)
 
@@ -212,7 +221,7 @@ def _hurt(
         if job is not None and job.running:
             return KEEP
         return _think(fight, rules, actor.idle_script)
-    fight.dragon_cells.flags |= HIT
+    fight.dragon_cells.was_hit = True
     offset = attacker.action if attacker.type == 0x0C else 12
     amount = (
         contact_damage(fight, knight_rules, attacker)

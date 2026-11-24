@@ -16,8 +16,7 @@ from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.fight_palette import MogVersionError
 from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.snatcher_rules import parse_snatcher_rules
-from harddaysengine.sim.fight import FIGHTER_DIED, Fight, fighter_died
-from harddaysengine.sim.fight_ai.snatcher import GONE
+from harddaysengine.sim.fight import FIGHTER_DIED, Fight, SnatchEncounterPhase, fighter_died
 from harddaysengine.sim.m68k import s16
 
 if TYPE_CHECKING:
@@ -66,7 +65,7 @@ def test_seeded_win_follows_hurt_script_death_and_replays(bundle: GameAssetBundl
 
 def test_idle_knight_is_dragged_under(bundle: GameAssetBundle) -> None:
     fight, _, deaths = _play(bundle, defend=False)
-    assert s16(fight.actor(1).hp) <= 0 and fight.snatch_flags & GONE
+    assert s16(fight.actor(1).hp) <= 0 and fight.snatcher.encounter is SnatchEncounterPhase.GONE
     assert deaths == []
 
 
@@ -75,9 +74,9 @@ def test_decoded_scripts_and_new_encounter_flag_reset(bundle: GameAssetBundle) -
     arena = next(a for a in loader.defs.arenas if a.name == "mudmen")
     assert loader.arena_for(arena.handler_offsets[0]) == arena
     first, second = build_snatcher_audit(bundle), build_snatcher_audit(bundle)
-    first.scene.fight.snatch_flags = GONE
-    assert second.scene.fight.snatch_flags == 0
-    assert "snatch_flags" in FightRuntime(second.scene, 1).snapshot()
+    first.scene.fight.snatcher.encounter = SnatchEncounterPhase.GONE
+    assert second.scene.fight.snatcher.encounter is SnatchEncounterPhase.NONE
+    assert "snatcher" in FightRuntime(second.scene, 1).snapshot()
 
 
 def test_wrong_handler_hunk_instruction_is_rejected(bundle: GameAssetBundle) -> None:

@@ -114,12 +114,12 @@ def test_the_confused_knight_has_both_axes_swapped() -> None:
 def test_walking_right_steps_by_the_new_phase_and_plays_its_walk_script() -> None:
     fight, _ = make_fight()
     knight = fight.actor(1)
-    knight.anim_phase, knight.behaviour_flags = 1, 0x81
+    knight.anim_phase, knight.block_latched = 1, True
     fight.ports[0] = RIGHT
     result = knight_handler(RULES, fight, 1)
     step = RULES.steps.side[2]
     assert (knight.anim_phase, knight.x, knight.facing) == (2, 100 + step, 1)
-    assert knight.behaviour_flags == 0x01
+    assert not knight.block_latched
     assert result == Restart(TABLES.walk_scripts[2], 100 + step, 0, 100, 1)
 
 

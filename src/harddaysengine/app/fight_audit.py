@@ -30,11 +30,11 @@ from harddaysengine.assets.hunk import parse_hunk_executable
 from harddaysengine.assets.mog_code import MogCode
 from harddaysengine.render.scene import palette_fx_to_rgb
 from harddaysengine.sim.actor import Actor
-from harddaysengine.sim.fight import Fight
+from harddaysengine.sim.fight import DrakePhase, Fight
 from harddaysengine.sim.fight_ai.brawler import BRAWLER_TYPES, install_brawler
 from harddaysengine.sim.fight_ai.caster import CASTER_TYPE
 from harddaysengine.sim.fight_ai.dragon import DRAGON_TYPE
-from harddaysengine.sim.fight_ai.drake import DRAKE_TYPE, FLYING
+from harddaysengine.sim.fight_ai.drake import DRAKE_TYPE
 from harddaysengine.sim.fight_ai.guardian import GUARDIAN_TYPE
 from harddaysengine.sim.fight_ai.knight import COMPUTER_KNIGHT_TYPE
 from harddaysengine.sim.fight_ai.snatcher import SNATCHER_TYPE
@@ -144,7 +144,7 @@ def _guardian_input(audit: FightAudit, *, reach: int = 100) -> int:
 def _drake_input(audit: FightAudit) -> int:
     """Audit controller: sidestep a pounce, then close and thrust at a landed Balok."""
     knight = audit.scene.fight.actor(audit.first)
-    if audit.scene.fight.drake.flags & FLYING:
+    if audit.scene.fight.drake.phase is DrakePhase.FLYING:
         if knight.y > 95:
             return UP
         return RIGHT if knight.x < 250 else LEFT

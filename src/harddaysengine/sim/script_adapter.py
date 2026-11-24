@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from harddaysengine.sim.actor import Actor
 
 ACTOR_SIZE = 132
+_BLOCK_LATCH_OFFSET = 104
+_BLOCK_LATCH_BIT = 0x80
 
 # (offset, width, field name or None for unused padding) for every field of §9.2.
 _LAYOUT: tuple[tuple[int, int, str | None], ...] = (
@@ -61,8 +63,8 @@ _LAYOUT: tuple[tuple[int, int, str | None], ...] = (
     (92, 4, "armour"),
     (96, 4, "inventory"),
     (100, 4, "engaged_with"),
-    (104, 1, "behaviour_flags"),
-    (105, 1, "behaviour_flags2"),
+    (104, 1, None),
+    (105, 1, None),
     (106, 2, "cooldown"),
     (108, 4, "name"),
     (112, 2, "box_min_y"),
@@ -95,6 +97,8 @@ def _check_range(offset: int, size: int) -> range:
 
 
 def _read_byte(actor: Actor, byte: int) -> int:
+    if byte == _BLOCK_LATCH_OFFSET:
+        return _BLOCK_LATCH_BIT if actor.block_latched else 0
     name, start, width = _BYTE_OWNER[byte]
     if name is None:
         return 0
@@ -104,6 +108,9 @@ def _read_byte(actor: Actor, byte: int) -> int:
 
 
 def _write_byte(actor: Actor, byte: int, value: int) -> None:
+    if byte == _BLOCK_LATCH_OFFSET:
+        actor.block_latched = bool(value & _BLOCK_LATCH_BIT)
+        return
     name, start, width = _BYTE_OWNER[byte]
     if name is None:
         return

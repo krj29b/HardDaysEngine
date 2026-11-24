@@ -59,11 +59,21 @@ class FlightSlot:
 
 
 @dataclass(slots=True)
+class FlightAim:
+    """Last computed trajectory aim metrics, shared across flight users (§10.23, §10.28)."""
+
+    distance: int = 0
+    steps: int = 0
+    arc: int = 0
+
+
+@dataclass(slots=True)
 class FlightState:
-    """Fight-owned request and slots, shared by every caster and later flight users."""
+    """Fight-owned request, slots and aim summary shared by all flight users."""
 
     request: FlightRequest = field(default_factory=FlightRequest)
     slots: list[FlightSlot] = field(default_factory=list)
+    aim: FlightAim = field(default_factory=FlightAim)
 
 
 def _divide(value: int, divisor: int, *, unsigned: bool = False) -> int:
@@ -166,4 +176,5 @@ def aim_flight(
     if s16(steps) <= s16(rules.step_limit):
         steps, arc = rules.minimum_steps, rules.fallback_arc
     request.steps, request.arc, actor.cooldown = steps, arc, steps
+    state.aim.distance, state.aim.steps, state.aim.arc = distance, steps, arc
     return distance, steps, arc

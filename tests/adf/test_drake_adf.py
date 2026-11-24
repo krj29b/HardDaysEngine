@@ -17,7 +17,14 @@ from harddaysengine.assets.adf import DiskSet
 from harddaysengine.assets.drake_rules import parse_drake_rules
 from harddaysengine.assets.fight_palette import MogVersionError
 from harddaysengine.sim.actor import Actor
-from harddaysengine.sim.fight import FIGHTER_DIED, Fight, HandlerResult, Restart, fighter_died
+from harddaysengine.sim.fight import (
+    FIGHTER_DIED,
+    DrakePhase,
+    Fight,
+    HandlerResult,
+    Restart,
+    fighter_died,
+)
 from harddaysengine.sim.fight_ai.drake import DRAKE_TYPE
 from harddaysengine.sim.inventory import Inventory
 from harddaysengine.sim.m68k import s16
@@ -144,7 +151,7 @@ def test_balok_strike_knocks_knight_away_from_balok(
     balok.x = balok_job.x = balok_x
     balok.y = balok_job.depth = 120
     balok.facing = balok_job.facing = 1 if expected_sign > 0 else 3
-    f.drake.flags = 0
+    f.drake.phase = DrakePhase.IDLE
     balok_job.running = False
     hit_x: int | None = None
     for frame in range(15, 40):

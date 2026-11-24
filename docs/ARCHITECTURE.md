@@ -1016,8 +1016,8 @@ One layout serves knights, the dragon, creatures and fight objects.
 | +92 | u32 | `armour` | Item code `$1B`..`$1E`. Starts at `$1B`. |
 | +96 | u32 | `inventory` | Reference to this actor's Inventory. |
 | +100 | u32 | `engaged_with` | The actor this one is after (dragon's target, a computer knight's opponent). Cleared at turn change. |
-| +104 | u8 | `behaviour_flags` | Bit 7 is the block latch; other bits belong to the script handlers. |
-| +105 | u8 | `behaviour_flags2` | Bits 0 and 2 belong to the script handlers. |
+| +104 | u8 | `block_latched` | Domain boolean replacing bit 7 block latch (adapter bridges bit 7 at +104). |
+| +105 | u8 | *(AI phases)* | Replaced by explicit `IntEnum` AI phase state machines on fight cells (`CasterCells`, `SnatcherCells`, `DrakeCells`, `DragonCells`, `GuardianCells`). |
 | +106 | u16 | `cooldown` | AI action cooldown. Knight steps use the high byte, creature steps the whole word. |
 | +108 | u32 | `name` | Reference to the NUL-terminated name. |
 | +112 | u16 | `box_min_y` | Union screen box, top edge. |

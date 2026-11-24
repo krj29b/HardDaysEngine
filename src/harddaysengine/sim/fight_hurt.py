@@ -31,7 +31,6 @@ ACTION_HEAVY = 0x20
 TYPE_KNIGHT = 0x0C
 TYPE_MAP_KNIGHT = 0x10
 TYPE_FIRST_AXE = 0x18
-_BLOCK_LATCH = 0x80
 _RATMEN_CURSE_ENTRY = 4
 _RATMEN_STRIKE_ENTRY = 8
 _FACING_MIRROR = 0x02
@@ -100,9 +99,9 @@ def block_check(blow: Blow) -> bool:
     if need != me.action:
         return False
     if me.action == ACTION_BLOCK:
-        if me.behaviour_flags & _BLOCK_LATCH:
+        if me.block_latched:
             return False
-        me.behaviour_flags |= _BLOCK_LATCH
+        me.block_latched = True
         return True
     if me.facing == attacker.facing:
         return False

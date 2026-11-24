@@ -1,13 +1,9 @@
-"""Dragon decision boundaries, original job aliases, flights and linked objects (§10.30)."""
+"""Dragon decision boundaries, flights and linked objects (§10.30)."""
 
 import pytest
 
-from harddaysengine.sim.fight import DRAGON, KEEP, FightError, Restart
+from harddaysengine.sim.fight import DRAGON, KEEP, DragonPhase, FightError, Restart
 from harddaysengine.sim.fight_ai.dragon import (
-    FLIGHT,
-    HIT,
-    PHASE2,
-    REDUCED,
     dragon_handler,
     dragon_step,
     linked_jobs,
@@ -26,7 +22,7 @@ def test_near_first_phase_starts_flight_with_exact_request() -> None:
     d = f.actor(DRAGON)
     result = dragon_handler(R, RULES, f, DRAGON)
     assert isinstance(result, Restart) and result.script == 608
-    assert f.dragon_cells.flags == FLIGHT | PHASE2 and d.cooldown == R.near.steps
+    assert f.dragon_cells.phase is DragonPhase.FLYING_TO_NEAR and d.cooldown == R.near.steps
     req = f.flights.request
     assert (req.owner, req.target_x, req.target_height, req.steps, req.arc) == (
         5,
@@ -40,23 +36,25 @@ def test_near_first_phase_starts_flight_with_exact_request() -> None:
 
 
 @pytest.mark.parametrize(
-    ("distance", "flags", "script", "flight"),
+    ("distance", "phase", "script", "expected"),
     [
-        (94, 0, 608, True),
-        (95, 0, SCRIPTS.strike8, False),
-        (94, PHASE2, SCRIPTS.breath, False),
-        (95, PHASE2, 616, True),
+        (94, DragonPhase.FAR_GROUND, 608, DragonPhase.FLYING_TO_NEAR),
+        (95, DragonPhase.FAR_GROUND, SCRIPTS.strike8, DragonPhase.FAR_GROUND),
+        (94, DragonPhase.NEAR_GROUND, SCRIPTS.breath, DragonPhase.NEAR_GROUND),
+        (95, DragonPhase.NEAR_GROUND, 616, DragonPhase.FLYING_TO_FAR),
     ],
 )
-def test_exact_phase_boundary(distance: int, flags: int, script: int, flight: bool) -> None:
+def test_exact_phase_boundary(
+    distance: int, phase: DragonPhase, script: int, expected: DragonPhase
+) -> None:
     f = make_dragon()
     d = f.actor(DRAGON)
     f.actor(1).x = d.x + distance
     d.reach_x = 200
-    f.dragon_cells.flags = flags
+    f.dragon_cells.phase = phase
     result = dragon_handler(R, RULES, f, DRAGON)
     assert isinstance(result, Restart) and result.script == script
-    assert bool(f.dragon_cells.flags & FLIGHT) == flight
+    assert f.dragon_cells.phase is expected
 
 
 @pytest.mark.parametrize(
@@ -73,10 +71,11 @@ def test_second_phase_attack_pick_and_breath_object(
     f = make_dragon()
     d = f.actor(DRAGON)
     f.actor(1).x = d.x + distance
-    f.dragon_cells.flags = PHASE2 | (HIT if hit else 0)
+    f.dragon_cells.phase = DragonPhase.NEAR_GROUND
+    f.dragon_cells.was_hit = hit
     result = dragon_handler(R, RULES, f, DRAGON)
     assert isinstance(result, Restart) and result.script == script and d.action == action
-    assert not f.dragon_cells.flags & HIT
+    assert not f.dragon_cells.was_hit
     if action == 32:
         fire = next(j for j in f.engine.jobs if j.active and j.type == 40)
         assert (fire.x, fire.depth, fire.frame_list, fire.script) == (
@@ -85,23 +84,23 @@ def test_second_phase_attack_pick_and_breath_object(
             2,
             SCRIPTS.fire,
         )
-        assert f.dragon_cells.flags & REDUCED
+        assert f.dragon_cells.reduced_reach
 
 
 def test_depth_mismatch_or_dead_target_keeps_idle_and_clears_reduced() -> None:
     f = make_dragon()
     d = f.actor(DRAGON)
-    f.dragon_cells.flags = PHASE2 | REDUCED
+    f.dragon_cells.phase, f.dragon_cells.reduced_reach = DragonPhase.NEAR_GROUND, True
     f.actor(1).hp = 0
     result = dragon_handler(R, RULES, f, DRAGON)
     assert isinstance(result, Restart) and result.script == d.idle_script
-    assert not f.dragon_cells.flags & REDUCED
+    assert not f.dragon_cells.reduced_reach
 
 
 def test_reduced_step_restores_actor_tunables_without_touching_other_jobs() -> None:
     f = make_dragon()
     d = f.actor(DRAGON)
-    f.dragon_cells.flags = REDUCED
+    f.dragon_cells.reduced_reach = True
     later = f.engine.jobs[2]
     later.width, later.frame_height = 11, 22
     dragon_step(R, f)
@@ -136,7 +135,7 @@ def test_flight_tracks_depth_at_equality_and_discards_trajectory_depth() -> None
     assert result.script == 609 and d.anim_phase == 1
     for _ in range(5):
         dragon_handler(R, RULES, f, DRAGON)
-    assert not f.dragon_cells.flags & FLIGHT
+    assert f.dragon_cells.phase is DragonPhase.NEAR_GROUND
 
 
 def test_ignored_hit_keeps_running_script_and_advances_normal_flight_when_ended() -> None:
@@ -153,7 +152,7 @@ def test_ignored_hit_keeps_running_script_and_advances_normal_flight_when_ended(
     result = dragon_handler(R, RULES, f, DRAGON)
     assert isinstance(result, Restart) and result.script == 609
     assert d.cooldown == 0 and f.engine.jobs[2].x == 77
-    assert not f.dragon_cells.flags & FLIGHT
+    assert f.dragon_cells.phase is DragonPhase.NEAR_GROUND
 
 
 @pytest.mark.parametrize("kind", [0x0C, 0x34])
@@ -163,11 +162,12 @@ def test_hurt_precedes_hit_and_does_not_cancel_flight(kind: int) -> None:
     att = f.actor(1)
     att.type, att.action = kind, 8
     d.attacker = d.hit_target = 1
-    f.dragon_cells.flags = FLIGHT
+    f.dragon_cells.phase = DragonPhase.FLYING_TO_FAR
     before = d.hp
     result = dragon_handler(R, RULES, f, DRAGON)
     assert isinstance(result, Restart) and result.script == (402 if kind == 0x0C else 403)
-    assert d.hp < before and f.dragon_cells.flags == FLIGHT | HIT
+    assert d.hp < before
+    assert f.dragon_cells.phase is DragonPhase.FLYING_TO_FAR and f.dragon_cells.was_hit
     if kind == 0x34:
         assert d.hp == before - R.dagger_damage
     assert any(j.active and j.script == R.spark.script for j in f.engine.jobs)

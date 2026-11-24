@@ -40,12 +40,12 @@ def _walk(
 ) -> HandlerResult:
     actor = fight.actor(handle)
     if actor.input & 0xFF:
-        actor.behaviour_flags &= 0x7F
+        actor.block_latched = False
     return walk(fight, rules.steps, handle, knight.probes, restart_from(actor, actor.idle_script))
 
 
 def _guard(fight: Fight, rules: ComputerKnightRules, actor: Actor, target: Actor, odds: int) -> int:
-    if actor.behaviour_flags & 0x80:
+    if actor.block_latched:
         return 0
     roll = fight.rng.percent()
     if s8(roll) < s8(odds) or actor.facing == target.facing:

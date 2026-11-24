@@ -79,8 +79,7 @@ class Actor:
     armour: int = 0
     inventory: int = 0
     engaged_with: int = 0
-    behaviour_flags: int = 0
-    behaviour_flags2: int = 0
+    block_latched: bool = False
     cooldown: int = 0
     name: int = 0
     box_min_y: int = 0

@@ -2,14 +2,8 @@
 
 import pytest
 
-from harddaysengine.sim.fight import KEEP, Restart
+from harddaysengine.sim.fight import KEEP, GuardianStage, Restart
 from harddaysengine.sim.fight_ai.guardian import (
-    HOLD,
-    STAGE1,
-    STAGE3,
-    STAGE5,
-    STAGE7,
-    STAGE9,
     body_create,
     body_facing,
     body_remove,
@@ -56,76 +50,77 @@ def test_cooldown_decrements_high_byte_and_movement_has_no_clip() -> None:
 
 
 @pytest.mark.parametrize(
-    ("flag", "following", "script"),
+    ("stage", "following", "script"),
     [
-        (STAGE1, STAGE7, SCRIPTS.stage1),
-        (STAGE3, 0, SCRIPTS.stage3),
-        (STAGE9, 0, 11),
+        (GuardianStage.STAGE1, GuardianStage.STAGE7, SCRIPTS.stage1),
+        (GuardianStage.STAGE3, GuardianStage.IDLE, SCRIPTS.stage3),
+        (GuardianStage.STAGE9, GuardianStage.IDLE, 11),
     ],
 )
-def test_stage_priority(flag: int, following: int, script: int) -> None:
+def test_stage_transitions(stage: GuardianStage, following: GuardianStage, script: int) -> None:
     f, owner = make_guardian()
-    f.guardian.flags = flag
+    f.guardian.stage = stage
     result = guardian_handler(GUARDIAN, RULES, f, owner)
     assert isinstance(result, Restart) and result.script == script
-    assert f.guardian.flags == following
+    assert f.guardian.stage is following
 
 
 @pytest.mark.parametrize(
     ("stage", "distance", "grabs"),
     [
-        (STAGE5, 64, False),
-        (STAGE5, 65, True),
-        (STAGE5, 75, True),
-        (STAGE5, 76, False),
-        (STAGE7, 79, False),
-        (STAGE7, 80, True),
-        (STAGE7, 95, True),
-        (STAGE7, 96, False),
+        (GuardianStage.STAGE5, 64, False),
+        (GuardianStage.STAGE5, 65, True),
+        (GuardianStage.STAGE5, 75, True),
+        (GuardianStage.STAGE5, 76, False),
+        (GuardianStage.STAGE7, 79, False),
+        (GuardianStage.STAGE7, 80, True),
+        (GuardianStage.STAGE7, 95, True),
+        (GuardianStage.STAGE7, 96, False),
     ],
 )
-def test_inclusive_grab_windows(stage: int, distance: int, grabs: bool) -> None:
+def test_inclusive_grab_windows(stage: GuardianStage, distance: int, grabs: bool) -> None:
     f, owner = make_guardian(100 + distance)
-    f.guardian.flags = stage
+    f.guardian.stage = stage
     guardian_handler(GUARDIAN, RULES, f, owner)
-    assert bool(f.guardian.flags & HOLD) is grabs
+    assert f.guardian.holding is grabs
     job = f.find_job(1)
     assert job is not None and job.paused == int(grabs)
 
 
-@pytest.mark.parametrize("stage", [STAGE1, STAGE3])
-def test_stage_release_does_not_write_misdirected_script_timer(stage: int) -> None:
+@pytest.mark.parametrize("stage", [GuardianStage.STAGE1, GuardianStage.STAGE3])
+def test_stage_release_does_not_write_misdirected_script_timer(stage: GuardianStage) -> None:
     f, owner = make_guardian()
     me = f.actor(owner)
     me.cooldown = 0x1234
-    f.guardian.flags = stage | HOLD
+    f.guardian.stage, f.guardian.holding = stage, True
     f.toggle_pause(1)
     guardian_handler(GUARDIAN, RULES, f, owner)
     job = f.find_job(1)
     assert job is not None and job.script == SCRIPTS.release and job.paused == 0
-    assert me.cooldown == 0x1234 and not f.guardian.flags & HOLD
+    assert me.cooldown == 0x1234 and not f.guardian.holding
     assert f.hop_facing == me.facing
 
 
-def test_hurt_precedes_hit_and_flags_and_reads_previous_target() -> None:
+def test_hurt_precedes_hit_and_stages_and_reads_previous_target() -> None:
     f, owner = make_guardian(120)
     me = f.actor(owner)
     me.attacker, me.hit_target, me.action = 1, 1, 4
-    f.guardian.flags = STAGE5 | HOLD
+    f.guardian.stage, f.guardian.holding = GuardianStage.STAGE5, True
     f.guardian.target = 2
     f.actor(2).x = 110
     guardian_handler(GUARDIAN, RULES, f, owner)
     assert me.x == 145 and me.hp < 20 and f.guardian.target == 2
-    assert f.guardian.flags == 0 and me.action == 4
+    assert f.guardian.stage is GuardianStage.IDLE and not f.guardian.holding and me.action == 4
 
 
-def test_hit_keeps_script_and_resets_shared_flags() -> None:
+def test_hit_keeps_script_and_resets_stage_and_hold() -> None:
     f, owner = make_guardian()
     me = f.actor(owner)
     me.hit_target, me.cooldown = 1, 0x0055
-    f.guardian.flags, f.guardian.spare = 0xFF, 0xFF
+    f.guardian.stage, f.guardian.holding = GuardianStage.STAGE7, True
     assert guardian_handler(GUARDIAN, RULES, f, owner) is KEEP
-    assert me.cooldown == 0x0855 and f.guardian.flags == f.guardian.spare == 0
+    assert me.cooldown == 0x0855
+    assert f.guardian.stage is GuardianStage.IDLE and not f.guardian.holding
 
 
 def test_body_create_uses_job_depth_and_job_facing() -> None:
@@ -170,13 +165,14 @@ def test_dead_victim_requests_fade_and_fixed_death_script() -> None:
     assert f.guardian.fade and job is not None and job.script == SCRIPTS.victim_death
 
 
-def test_simultaneous_stage_flags_follow_original_order_without_random_draws() -> None:
-    f, owner = make_guardian()
-    f.guardian.flags = STAGE1 | STAGE3 | STAGE9 | STAGE7 | STAGE5
+def test_full_grab_stage_chain_runs_deterministically_without_random_draws() -> None:
+    f, owner = make_guardian(170)
     before = f.rng.state
-    result = guardian_handler(GUARDIAN, RULES, f, owner)
-    assert isinstance(result, Restart) and result.script == SCRIPTS.stage1
-    assert not f.guardian.flags & STAGE1 and f.guardian.flags & STAGE3
+    f.guardian.stage = GuardianStage.STAGE5
+    assert isinstance(guardian_handler(GUARDIAN, RULES, f, owner), Restart)
+    assert f.guardian.stage is GuardianStage.STAGE1 and f.guardian.holding
+    assert isinstance(guardian_handler(GUARDIAN, RULES, f, owner), Restart)
+    assert f.guardian.stage is GuardianStage.STAGE7 and not f.guardian.holding
     assert f.rng.state == before
 
 

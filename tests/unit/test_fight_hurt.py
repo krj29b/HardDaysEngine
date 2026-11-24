@@ -104,7 +104,7 @@ def test_a_wrong_stance_does_not_block() -> None:
 def test_the_block_stance_holds_once_until_the_latch_is_released() -> None:
     blow = _blow(0x1C, 4)
     assert block_check(blow)
-    assert blow.me.behaviour_flags & 0x80
+    assert blow.me.block_latched
     assert not block_check(blow)
     assert blow.fight.sounds == []
 

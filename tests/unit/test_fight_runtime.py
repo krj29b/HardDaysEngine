@@ -140,7 +140,7 @@ def test_guardian_death_fade_advances_on_pal_ticks_and_is_in_snapshot() -> None:
         "main": 0,
         "body": 0,
         "target": 0,
-        "flags": 0,
-        "spare": 0,
+        "stage": 0,
+        "holding": False,
         "fade": True,
     }

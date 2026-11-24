@@ -89,14 +89,14 @@ def test_failed_guard_preserves_true_distance_for_attack_selection(
 
 def test_latched_block_skips_guard_draw_and_walk_releases_latch() -> None:
     fight, actor, target = _fight()
-    actor.behaviour_flags = 0x85
+    actor.block_latched = True
     actor.action, target.x = 4, 110
     actor.too_close_x = 100
     _think(fight)
     expected = Rng(0x2468ACE1)
     expected.percent()
     assert fight.rng.state == expected.state and actor.x == 207
-    assert actor.behaviour_flags == 5 and actor.action == 4
+    assert not actor.block_latched and actor.action == 4
 
 
 def test_declined_attack_consumes_discarded_taunt_draw_and_keeps_action() -> None:
@@ -126,10 +126,10 @@ def test_down_opponent_clears_only_high_cooldown_without_random(
 
 def test_depth_approach_walks_without_random_using_old_phase_and_override() -> None:
     fight, actor, target = _fight()
-    actor.anim_phase, actor.behaviour_flags = 1, 0x80
+    actor.anim_phase, actor.block_latched = 1, True
     target.y, target.x = 130, 10
     _think(fight)
-    assert (actor.x, actor.y, actor.anim_phase, actor.behaviour_flags) == (193, 103, 2, 0)
+    assert (actor.x, actor.y, actor.anim_phase, actor.block_latched) == (193, 103, 2, False)
     assert fight.rng.state == 0x2468ACE1
 
 

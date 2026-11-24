@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
-from harddaysengine.sim.fight import END, KEEP, HandlerResult, restart_from
+from harddaysengine.sim.fight import END, KEEP, CasterPhase, HandlerResult, restart_from
 from harddaysengine.sim.fight_ai.approach import abs_word, advance_phase, face_target
 from harddaysengine.sim.fight_hurt import contact_damage
 from harddaysengine.sim.fight_moves import DOWN, FIRE
@@ -20,13 +20,14 @@ from harddaysengine.sim.trajectory import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from harddaysengine.sim.actor import Actor
     from harddaysengine.sim.fight import Fight
     from harddaysengine.sim.fighter_rules import KnightRules
 
 CASTER_TYPE = 0x24
-OUT, INITIAL, HOLD, THROW, GRABBED, QUICK = 1, 4, 8, 16, 32, 128
-RELEASE, SLAM = 1, 4
+_AIRBORNE_PHASES = frozenset({CasterPhase.INITIAL_FLIGHT, CasterPhase.OUT_FLIGHT})
 
 
 @dataclass(slots=True, frozen=True)
@@ -105,6 +106,16 @@ class _Turn:
     def target(self) -> Actor:
         return self.fight.actor(self.fight.first)
 
+    @property
+    def phase(self) -> CasterPhase:
+        return self.fight.caster.phases.get(self.handle, CasterPhase.IDLE)
+
+    def set_phase(self, phase: CasterPhase) -> None:
+        if phase is CasterPhase.IDLE:
+            self.fight.caster.phases.pop(self.handle, None)
+        else:
+            self.fight.caster.phases[self.handle] = phase
+
     def script(self, script: int) -> HandlerResult:
         return restart_from(self.me, script)
 
@@ -128,26 +139,25 @@ def _walk(turn: _Turn, block: int) -> HandlerResult:
 
 def _aim(turn: _Turn) -> HandlerResult:
     f, me, rules = turn.fight, turn.me, turn.rules
-    distance, steps, arc = aim_flight(f.flights, rules.flight, turn.handle, me, turn.target)
-    f.caster.aim_distance, f.caster.aim_steps, f.caster.aim_arc = distance, steps, arc
+    distance, steps, _ = aim_flight(f.flights, rules.flight, turn.handle, me, turn.target)
     f.flights.request.steps = max(steps >> 1, rules.minimum_steps)
     if s16(distance) <= s16(rules.quick_range):
-        me.behaviour_flags |= QUICK
+        turn.set_phase(CasterPhase.QUICK_FLIGHT)
         f.flights.request.arc = rules.quick_arc
         start_flight(f.flights, rules.flight)
         return _walk(turn, 32)
     start_flight(f.flights, rules.flight)
-    me.behaviour_flags |= OUT
+    turn.set_phase(CasterPhase.OUT_FLIGHT)
     return turn.script(rules.scripts.flight)
 
 
 def _begin(turn: _Turn) -> HandlerResult:
     f, me, rules = turn.fight, turn.me, turn.rules
     me.action = me.anim_phase = 0
-    if f.caster.flags & INITIAL:
+    if f.caster.initial_active:
         return _aim(turn)
-    f.caster.flags |= INITIAL
-    me.behaviour_flags |= INITIAL
+    f.caster.initial_active = True
+    turn.set_phase(CasterPhase.INITIAL_FLIGHT)
     me.cooldown = rules.initial_wait
     job = f.find_job(f.second)
     request = f.flights.request
@@ -158,7 +168,6 @@ def _begin(turn: _Turn) -> HandlerResult:
     request.target_height = 0 if job is None else job.height
     request.steps, request.arc = rules.initial_steps, rules.initial_arc
     start_flight(f.flights, rules.flight)
-    me.behaviour_flags |= OUT
     return turn.script(rules.scripts.flight)
 
 
@@ -167,7 +176,7 @@ def _choose(turn: _Turn) -> HandlerResult:
     face_target(me, target)
     if s16(abs_word(target.y - me.y)) > s16(me.depth_reach):
         return _begin(turn)
-    if f.caster.flags & (GRABBED | HOLD) or s16(target.hp) <= 0:
+    if f.caster.victim_grabbed or f.caster.victim_held or s16(target.hp) <= 0:
         return turn.script(me.idle_script)
     if f.caster.wait:
         f.caster.wait = u16(f.caster.wait - 1)
@@ -186,8 +195,8 @@ def _hold(turn: _Turn) -> HandlerResult:
     me = turn.me
     me.cooldown = u16(me.cooldown - 1)
     if me.cooldown == 0:
-        me.behaviour_flags = 0
-        turn.fight.caster.flags &= ~INITIAL
+        turn.set_phase(CasterPhase.IDLE)
+        turn.fight.caster.initial_active = False
         return _aim(turn)
     near = s16(abs_word(turn.target.x - me.x)) < s16(turn.rules.hold_range)
     scripts = turn.rules.scripts
@@ -197,10 +206,11 @@ def _hold(turn: _Turn) -> HandlerResult:
 def _flight(turn: _Turn) -> HandlerResult:
     me = turn.me
     if step_flight(turn.fight.flights, turn.handle, me):
-        if me.behaviour_flags & INITIAL:
-            me.behaviour_flags = HOLD
+        if turn.phase is CasterPhase.INITIAL_FLIGHT:
+            turn.set_phase(CasterPhase.HOLD)
             return _hold(turn)
-        me.behaviour_flags = me.height = 0
+        turn.set_phase(CasterPhase.IDLE)
+        me.height = 0
         return turn.script(me.idle_script)
     block = 32 if s16(me.height) <= s16(turn.rules.airborne_height) else 0
     return _walk(turn, block)
@@ -213,13 +223,12 @@ def _escape_input(turn: _Turn) -> bool:
 def _grab(turn: _Turn) -> HandlerResult:
     me, scripts = turn.me, turn.rules.scripts
     if _escape_input(turn):
-        me.behaviour_flags = 0
-        me.behaviour_flags2 |= RELEASE
+        turn.set_phase(CasterPhase.RELEASE)
         return turn.script(scripts.escape)
     me.cooldown = u16(me.cooldown - 1)
     if me.cooldown:
         return turn.script(scripts.grab)
-    me.behaviour_flags = THROW
+    turn.set_phase(CasterPhase.THROW)
     return turn.script(scripts.windup)
 
 
@@ -232,13 +241,14 @@ def _release_victim(turn: _Turn, script: int) -> None:
 
 def _release(turn: _Turn) -> HandlerResult:
     _release_victim(turn, turn.target.after_hit_script)
-    turn.fight.caster.flags &= ~GRABBED
+    turn.fight.caster.victim_grabbed = False
+    turn.set_phase(CasterPhase.IDLE)
     return END
 
 
 def _throw(turn: _Turn) -> HandlerResult:
     f, me, rules = turn.fight, turn.me, turn.rules
-    f.caster.flags &= ~GRABBED
+    f.caster.victim_grabbed = False
     me.cooldown = rules.throw_wait
     request = f.flights.request
     request.owner = turn.handle
@@ -248,7 +258,8 @@ def _throw(turn: _Turn) -> HandlerResult:
     request.target_height = me.height
     request.steps, request.arc = rules.throw_steps, rules.throw_arc
     start_flight(f.flights, rules.flight)
-    me.behaviour_flags, me.behaviour_flags2, me.anim_phase = OUT, 0, 0
+    turn.set_phase(CasterPhase.OUT_FLIGHT)
+    me.anim_phase = 0
     me.height = rules.displayed_height
     job = f.find_job(f.first)
     if job is not None:
@@ -264,28 +275,28 @@ def _slam(turn: _Turn) -> HandlerResult:
         if _subtract(turn.me, turn.damage()):
             return turn.script(scripts.struggle)
         _release_victim(turn, scripts.victim_released)
-        turn.fight.caster.flags &= ~HOLD
+        turn.fight.caster.victim_held = False
+        turn.set_phase(CasterPhase.IDLE)
         return turn.script(scripts.drop)
     alive = _subtract(turn.target, turn.rules.squeeze_damage)
     return turn.script(scripts.squeeze if alive else scripts.finish)
 
 
+_THINK_DISPATCH: dict[CasterPhase, Callable[[_Turn], HandlerResult]] = {
+    CasterPhase.INITIAL_FLIGHT: _flight,
+    CasterPhase.OUT_FLIGHT: _flight,
+    CasterPhase.QUICK_FLIGHT: _flight,
+    CasterPhase.GRABBED: _grab,
+    CasterPhase.RELEASE: _release,
+    CasterPhase.THROW: _throw,
+    CasterPhase.HOLD: _hold,
+    CasterPhase.SLAM: _slam,
+}
+
+
 def _think(turn: _Turn) -> HandlerResult:
-    me = turn.me
-    me.action = 0
-    if me.behaviour_flags & (QUICK | OUT):
-        return _flight(turn)
-    if me.behaviour_flags & GRABBED:
-        return _grab(turn)
-    if me.behaviour_flags2 & RELEASE:
-        return _release(turn)
-    if me.behaviour_flags & THROW:
-        return _throw(turn)
-    if me.behaviour_flags & HOLD:
-        return _hold(turn)
-    if me.behaviour_flags2 & SLAM:
-        return _slam(turn)
-    return _choose(turn)
+    turn.me.action = 0
+    return _THINK_DISPATCH.get(turn.phase, _choose)(turn)
 
 
 def _hurt(turn: _Turn) -> HandlerResult:
@@ -293,25 +304,27 @@ def _hurt(turn: _Turn) -> HandlerResult:
     attacker = turn.fight.actor(me.attacker)
     if attacker.type != 0x0C:
         return _think(turn)
-    airborne = bool(me.behaviour_flags & OUT)
+    airborne = turn.phase in _AIRBORNE_PHASES
     lethal = attacker.action == 0x18 if airborne else attacker.action in (0x10, 0x1C)
     if lethal:
-        me.behaviour_flags = me.height = 0
+        turn.set_phase(CasterPhase.IDLE)
+        me.height = 0
         me.hp = turn.rules.dead_hp
         return turn.script(scripts.flight_death if airborne else scripts.death)
     _subtract(me, turn.damage(attacker))
     if airborne:
-        me.behaviour_flags = me.height = 0
+        turn.set_phase(CasterPhase.IDLE)
+        me.height = 0
         return turn.script(scripts.flight_hurt)
     return turn.script(turn.fight.table_long(me.hurt_scripts, attacker.action))
 
 
 def _catch(turn: _Turn, victim: Actor) -> HandlerResult:
     f, me = turn.fight, turn.me
-    if f.caster.flags & GRABBED:
+    if f.caster.victim_grabbed:
         return _flight(turn)
-    me.behaviour_flags = GRABBED
-    f.caster.flags |= GRABBED
+    turn.set_phase(CasterPhase.GRABBED)
+    f.caster.victim_grabbed = True
     me.cooldown = u16(s8(u8(victim.endurance + turn.rules.endurance_bonus)))
     me.height = 0
     f.toggle_pause(me.hit_target)
@@ -323,14 +336,14 @@ def _hit(turn: _Turn) -> HandlerResult:
     victim = f.actor(me.hit_target)
     if victim.type == CASTER_TYPE:
         return _think(turn)
-    if me.behaviour_flags & OUT:
+    if turn.phase in _AIRBORNE_PHASES:
         return _catch(turn, victim)
-    if me.behaviour_flags & HOLD:
-        me.behaviour_flags, me.behaviour_flags2 = 0, SLAM
-        f.caster.flags |= HOLD
+    if turn.phase is CasterPhase.HOLD:
+        turn.set_phase(CasterPhase.SLAM)
+        f.caster.victim_held = True
         f.toggle_pause(me.hit_target)
         return turn.script(turn.rules.scripts.slam_start)
-    me.behaviour_flags = me.behaviour_flags2 = 0
+    turn.set_phase(CasterPhase.IDLE)
     f.caster.wait = turn.rules.shared_wait
     if me.facing == victim.facing:
         turn.target.facing ^= 2
@@ -344,7 +357,7 @@ def _hit(turn: _Turn) -> HandlerResult:
 def caster_handler(
     rules: CasterRules, knight_rules: KnightRules, fight: Fight, handle: int
 ) -> HandlerResult:
-    """Dispatch hurt before hit before flag-driven thinking (§10.23)."""
+    """Dispatch hurt before hit before phase-driven thinking (§10.23)."""
     turn = _Turn(fight, rules, knight_rules, handle)
     if turn.me.attacker:
         return _hurt(turn)

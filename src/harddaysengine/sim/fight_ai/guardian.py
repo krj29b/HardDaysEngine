@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
-from harddaysengine.sim.fight import KEEP, HandlerResult, restart_from
+from harddaysengine.sim.fight import KEEP, GuardianStage, HandlerResult, restart_from
 from harddaysengine.sim.fight_ai.approach import abs_word, approach
 from harddaysengine.sim.fight_hurt import contact_damage
 from harddaysengine.sim.fight_moves import DOWN, LEFT, RIGHT, UP
@@ -19,7 +19,6 @@ if TYPE_CHECKING:
     from harddaysengine.sim.fighter_rules import KnightRules
 
 GUARDIAN_TYPE = 8
-STAGE1, STAGE9, STAGE3, STAGE7, STAGE5, HOLD = 1, 2, 8, 16, 32, 64
 
 
 @dataclass(slots=True, frozen=True)
@@ -110,28 +109,30 @@ def _release(turn: _Turn) -> None:
     f.hop_facing = f.actor(f.guardian.main).facing
     f.toggle_pause(f.first)
     f.restart_job(f.first, turn.rules.scripts.release)
-    f.guardian.flags &= ~HOLD
+    f.guardian.holding = False
+
+
+def _advance_release(turn: _Turn, following: GuardianStage, script: int) -> HandlerResult:
+    cells = turn.fight.guardian
+    cells.stage = following
+    if cells.holding:
+        _release(turn)
+    return turn.result(script)
 
 
 def _stages(turn: _Turn) -> HandlerResult | None:
-    f, rules = turn.fight, turn.rules
-    flags, scripts = f.guardian.flags, rules.scripts
-    if flags & STAGE1:
-        f.guardian.flags = (flags & ~STAGE1) | STAGE7
-        if flags & HOLD:
-            _release(turn)
-        return turn.result(scripts.stage1)
-    if flags & STAGE3:
-        f.guardian.flags = flags & ~STAGE3
-        if flags & HOLD:
-            _release(turn)
-        return turn.result(scripts.stage3)
-    if flags & STAGE9:
-        f.guardian.flags &= ~STAGE9
+    cells, scripts = turn.fight.guardian, turn.rules.scripts
+    stage = cells.stage
+    if stage is GuardianStage.STAGE1:
+        return _advance_release(turn, GuardianStage.STAGE7, scripts.stage1)
+    if stage is GuardianStage.STAGE3:
+        return _advance_release(turn, GuardianStage.IDLE, scripts.stage3)
+    if stage is GuardianStage.STAGE9:
+        cells.stage = GuardianStage.IDLE
         return turn.result(turn.me.idle_script)
-    if flags & STAGE7:
+    if stage is GuardianStage.STAGE7:
         return _grab_stage(turn, stage7=True)
-    if flags & STAGE5:
+    if stage is GuardianStage.STAGE5:
         return _grab_stage(turn, stage7=False)
     return None
 
@@ -139,18 +140,18 @@ def _stages(turn: _Turn) -> HandlerResult | None:
 def _grab_stage(turn: _Turn, *, stage7: bool) -> HandlerResult:
     f, me, r = turn.fight, turn.me, turn.rules
     if stage7:
-        bit, following = STAGE7, STAGE3
+        following = GuardianStage.STAGE3
         low, high, wait = r.grab7_min, r.grab7_max, r.grab7_wait
         script, grabbed = r.scripts.stage7, r.scripts.grab7
     else:
-        bit, following = STAGE5, STAGE1
+        following = GuardianStage.STAGE1
         low, high, wait = r.grab5_min, r.grab5_max, r.grab5_wait
         script, grabbed = r.scripts.stage5, r.scripts.grab5
-    f.guardian.flags = (f.guardian.flags & ~bit) | following
+    f.guardian.stage = following
     distance = s16(abs_word(me.x - f.actor(f.guardian.target).x))
     if s16(low) <= distance <= s16(high):
         f.toggle_pause(f.first)
-        f.guardian.flags |= HOLD
+        f.guardian.holding = True
         _wait(me, wait)
         script = grabbed
     return turn.result(script)
@@ -183,13 +184,13 @@ def _attack(turn: _Turn, distance: int) -> HandlerResult:
         return turn.result(r.scripts.lunge, sync=False)
     if distance <= s16(r.strike8_range):
         me.action = 8
-        f.guardian.flags |= STAGE9
+        f.guardian.stage = GuardianStage.STAGE9
         _wait(me, r.strike8_wait)
         return turn.result(r.scripts.strike8)
     script = me.idle_script
     if distance <= s16(r.strike4_range):
         me.action = 4
-        f.guardian.flags |= STAGE5
+        f.guardian.stage = GuardianStage.STAGE5
         f.hop_facing, f.hop_table = me.facing, r.hop2_table
         _wait(me, r.strike4_wait)
         script = r.scripts.strike4
@@ -205,7 +206,7 @@ def guardian_handler(
     me.input = 0
     _follow(fight, me)
     if me.attacker:
-        cells.flags = cells.spare = 0
+        cells.stage, cells.holding = GuardianStage.IDLE, False
         me.hp = u16(me.hp - contact_damage(fight, knight_rules, fight.actor(me.attacker)))
         target = fight.actor(cells.target)
         if s16(abs_word(me.x - target.x)) <= s16(rules.snap_range):
@@ -214,7 +215,7 @@ def guardian_handler(
         return turn.result(rules.scripts.hurt)
     if me.hit_target:
         _wait(me, rules.hit_wait)
-        cells.flags = cells.spare = 0
+        cells.stage, cells.holding = GuardianStage.IDLE, False
         return KEEP
     cells.target = fight.first
     staged = _stages(turn)

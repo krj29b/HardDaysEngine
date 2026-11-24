@@ -18,9 +18,16 @@ from harddaysengine.app.input import (
     save_replay,
 )
 from harddaysengine.assets.adf import DiskSet
-from harddaysengine.sim.fight import Fight, HandlerResult, Restart
-from harddaysengine.sim.fight_ai.caster import CASTER_TYPE, GRABBED, HOLD, SLAM
-from harddaysengine.sim.fight_ai.snatcher import CARRY, RELEASE, SNATCHER_TYPE
+from harddaysengine.sim.fight import (
+    CasterPhase,
+    Fight,
+    HandlerResult,
+    Restart,
+    SnatchEncounterPhase,
+    SnatcherPhase,
+)
+from harddaysengine.sim.fight_ai.caster import CASTER_TYPE
+from harddaysengine.sim.fight_ai.snatcher import SNATCHER_TYPE
 from harddaysengine.sim.fight_moves import DOWN, FIRE
 from harddaysengine.sim.m68k import s16
 from harddaysengine.sim.overworld import EncounterTrigger, TriggerKind
@@ -238,8 +245,8 @@ def test_campaign_host_ratmen_hung_upward_stab_frees_knight(adf_dir: Path) -> No
 
     ratman = fight.actor(ratman_job.owner)
     ratman.hp = 50
-    ratman.behaviour_flags, ratman.behaviour_flags2 = 0, SLAM
-    fight.caster.flags |= HOLD
+    fight.caster.phases[ratman_job.owner] = CasterPhase.SLAM
+    fight.caster.victim_held = True
     fight.toggle_pause(first)
     scripts = loader.caster_rules.scripts
     fight.restart_job(ratman_job.owner, scripts.slam_start)
@@ -257,7 +264,7 @@ def test_campaign_host_ratmen_hung_upward_stab_frees_knight(adf_dir: Path) -> No
     escape = InputFrame(players={KnightId.RED: PlayerInput(dy=1, fire=True)})
     for _ in range(600):
         session.step_tick(escape)
-        if not (fight.caster.flags & HOLD):
+        if not fight.caster.victim_held:
             break
 
     knight_job = fight.find_job(first)
@@ -266,7 +273,7 @@ def test_campaign_host_ratmen_hung_upward_stab_frees_knight(adf_dir: Path) -> No
     assert scripts.struggle in seen
     assert scripts.drop in seen
     assert s16(ratman.hp) <= 0
-    assert not (fight.caster.flags & HOLD)
+    assert not fight.caster.victim_held
 
 
 def test_campaign_host_ratmen_grab_and_mudmen_carry_escapes(adf_dir: Path) -> None:
@@ -279,17 +286,18 @@ def test_campaign_host_ratmen_grab_and_mudmen_carry_escapes(adf_dir: Path) -> No
     rat_job = next(j for j in rat_fight.engine.jobs if j.active and j.type == CASTER_TYPE)
     _step_until_unpaused(rat_session, rat_job.owner)
     rat = rat_fight.actor(rat_job.owner)
-    rat.behaviour_flags, rat.behaviour_flags2, rat.cooldown = GRABBED, 0, 10
-    rat_fight.caster.flags |= GRABBED
+    rat_fight.caster.phases[rat_job.owner] = CasterPhase.GRABBED
+    rat.cooldown = 10
+    rat_fight.caster.victim_grabbed = True
     rat_fight.toggle_pause(rat_first)
     rat_fight.restart_job(rat_job.owner, rat_loader.caster_rules.scripts.grab)
     for _ in range(180):
         rat_session.step_tick(escape)
-        if not (rat_fight.caster.flags & GRABBED):
+        if not rat_fight.caster.victim_grabbed:
             break
     rat_knight = rat_fight.find_job(rat_first)
     assert rat_knight is not None and rat_knight.paused == 0
-    assert not (rat_fight.caster.flags & GRABBED)
+    assert not rat_fight.caster.victim_grabbed
 
     mud_session = _session(adf_dir, "mudmen")
     mud_active, mud_loader = mud_session.active_encounter, mud_session.fight_loader
@@ -299,14 +307,21 @@ def test_campaign_host_ratmen_grab_and_mudmen_carry_escapes(adf_dir: Path) -> No
     mud_job = next(j for j in mud_fight.engine.jobs if j.active and j.type == SNATCHER_TYPE)
     _step_until_unpaused(mud_session, mud_job.owner)
     mud = mud_fight.actor(mud_job.owner)
-    mud.behaviour_flags, mud.anim_timer = CARRY, 40
-    mud_fight.snatch_flags = CARRY
+    mud_fight.snatcher.phases[mud_job.owner] = SnatcherPhase.CARRYING
+    mud.anim_timer = 40
+    mud_fight.snatcher.encounter = SnatchEncounterPhase.CARRYING
     mud_fight.toggle_pause(mud_first)
     mud_fight.restart_job(mud_job.owner, mud_loader.snatcher_rules.scripts.carry)
     for _ in range(240):
         mud_session.step_tick(escape)
-        if not (mud_fight.snatch_flags & (CARRY | RELEASE)):
+        if mud_fight.snatcher.encounter not in (
+            SnatchEncounterPhase.CARRYING,
+            SnatchEncounterPhase.RELEASED,
+        ):
             break
     mud_knight = mud_fight.find_job(mud_first)
     assert mud_knight is not None and mud_knight.paused == 0
-    assert not (mud_fight.snatch_flags & (CARRY | RELEASE))
+    assert mud_fight.snatcher.encounter not in (
+        SnatchEncounterPhase.CARRYING,
+        SnatchEncounterPhase.RELEASED,
+    )

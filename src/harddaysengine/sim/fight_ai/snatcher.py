@@ -6,19 +6,26 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
-from harddaysengine.sim.fight import HandlerResult, mark_first_dead, restart_from
+from harddaysengine.sim.fight import (
+    HandlerResult,
+    SnatchEncounterPhase,
+    SnatcherPhase,
+    mark_first_dead,
+    restart_from,
+)
 from harddaysengine.sim.fight_ai.approach import abs_word, advance_phase, approach
 from harddaysengine.sim.fight_hurt import contact_damage
 from harddaysengine.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP, movement_mask
 from harddaysengine.sim.m68k import s16, u8, u16
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from harddaysengine.sim.actor import Actor
     from harddaysengine.sim.fight import Fight
     from harddaysengine.sim.fighter_rules import KnightRules
 
 SNATCHER_TYPE = 0x04
-CARRY, FREE, GONE, SHOWN, READY, RELEASE = 1, 2, 4, 8, 16, 64
 
 
 @dataclass(slots=True, frozen=True)
@@ -74,6 +81,16 @@ class _Turn:
     def target(self) -> Actor:
         return self.fight.actor(self.fight.first)
 
+    @property
+    def phase(self) -> SnatcherPhase:
+        return self.fight.snatcher.phases.get(self.handle, SnatcherPhase.HIDDEN)
+
+    def set_phase(self, phase: SnatcherPhase) -> None:
+        if phase is SnatcherPhase.HIDDEN:
+            self.fight.snatcher.phases.pop(self.handle, None)
+        else:
+            self.fight.snatcher.phases[self.handle] = phase
+
     def script(self, script: int) -> HandlerResult:
         return restart_from(self.me, script)
 
@@ -109,36 +126,36 @@ def _walk(turn: _Turn) -> HandlerResult:
 
 
 def _freed(turn: _Turn) -> HandlerResult:
-    if not turn.me.behaviour_flags & FREE:
+    if turn.phase is not SnatcherPhase.FREED:
         return turn.idle()
     turn.fight.kill_job(turn.fight.first)
-    turn.fight.snatch_flags &= ~FREE
-    turn.me.behaviour_flags &= ~FREE
+    turn.fight.snatcher.encounter = SnatchEncounterPhase.NONE
+    turn.set_phase(SnatcherPhase.APPROACHING)
     return turn.script(turn.rules.scripts.swallow)
 
 
 def _carrying(turn: _Turn) -> HandlerResult:
     f, me = turn.fight, turn.me
-    if not me.behaviour_flags & CARRY:
+    if turn.phase is not SnatcherPhase.CARRYING:
         return turn.idle()
     me.anim_timer = u8(me.anim_timer - 1)
     if me.anim_timer == 0:
-        f.snatch_flags = (f.snatch_flags & ~CARRY) | FREE
-        me.behaviour_flags |= FREE
+        f.snatcher.encounter = SnatchEncounterPhase.FREED
+        turn.set_phase(SnatcherPhase.FREED)
         mark_first_dead(f)
         return _freed(turn)
     if f.ports[1] & (FIRE | DOWN) == FIRE | DOWN:
-        f.snatch_flags = (f.snatch_flags & ~CARRY) | RELEASE
-        me.behaviour_flags = (me.behaviour_flags & ~CARRY) | RELEASE
+        f.snatcher.encounter = SnatchEncounterPhase.RELEASED
+        turn.set_phase(SnatcherPhase.RELEASED)
         return turn.script(turn.rules.scripts.release)
     return turn.script(turn.rules.scripts.carry)
 
 
 def _released(turn: _Turn) -> HandlerResult:
-    if not turn.me.behaviour_flags & RELEASE:
+    if turn.phase is not SnatcherPhase.RELEASED:
         return turn.idle()
-    turn.fight.snatch_flags &= ~RELEASE
-    turn.me.behaviour_flags &= ~RELEASE
+    turn.fight.snatcher.encounter = SnatchEncounterPhase.NONE
+    turn.set_phase(SnatcherPhase.APPROACHING)
     turn.fight.toggle_pause(turn.fight.first)
     turn.target.hit_target = turn.target.attacker = 0
     turn.fight.restart_job(turn.fight.first, turn.target.idle_script)
@@ -155,7 +172,7 @@ def _appear(turn: _Turn) -> HandlerResult:
     me.x = u16(target.x + (rules.appear_offset if left else rules.appear_left))
     me.y = target.y
     me.facing = rules.facing_left if left else rules.facing_right
-    me.behaviour_flags |= SHOWN | READY
+    turn.set_phase(SnatcherPhase.READY)
     return turn.script(rules.scripts.appear)
 
 
@@ -164,9 +181,9 @@ def _grab(turn: _Turn) -> HandlerResult:
     if turn.near() and s16(turn.rules.grab_min) <= distance <= s16(turn.rules.grab_max):
         turn.fight.toggle_pause(turn.fight.first)
         mark_first_dead(turn.fight)
-        turn.fight.snatch_flags |= GONE
+        turn.fight.snatcher.encounter = SnatchEncounterPhase.GONE
         return turn.script(turn.rules.scripts.sink)
-    turn.me.behaviour_flags &= ~READY
+    turn.set_phase(SnatcherPhase.APPROACHING)
     return turn.script(turn.rules.scripts.emerge)
 
 
@@ -180,23 +197,31 @@ def _approach(turn: _Turn) -> HandlerResult:
     if distance <= s16(rules.walk_range):
         return _walk(turn)
     if distance < s16(rules.strike_range):
-        turn.me.behaviour_flags = SHOWN | READY
+        turn.set_phase(SnatcherPhase.READY)
         return turn.script(rules.scripts.strike)
     if distance < s16(rules.reach_range) and turn.near():
         return turn.script(rules.scripts.reach)
     return _walk(turn)
 
 
+_ENCOUNTER_DISPATCH: dict[SnatchEncounterPhase, Callable[[_Turn], HandlerResult]] = {
+    SnatchEncounterPhase.CARRYING: _carrying,
+    SnatchEncounterPhase.FREED: _freed,
+    SnatchEncounterPhase.RELEASED: _released,
+}
+
+
 def _decide(turn: _Turn) -> HandlerResult:
-    flags = turn.fight.snatch_flags
-    if flags & GONE:
+    encounter = turn.fight.snatcher.encounter
+    if encounter is SnatchEncounterPhase.GONE:
         return turn.idle()
-    for mask, branch in ((CARRY, _carrying), (FREE, _freed), (RELEASE, _released)):
-        if flags & mask:
-            return branch(turn)
-    if not turn.me.behaviour_flags & SHOWN:
+    shared = _ENCOUNTER_DISPATCH.get(encounter)
+    if shared is not None:
+        return shared(turn)
+    phase = turn.phase
+    if phase is SnatcherPhase.HIDDEN:
         return _appear(turn)
-    if turn.me.behaviour_flags & READY:
+    if phase is SnatcherPhase.READY:
         return _grab(turn)
     return _approach(turn)
 
@@ -215,8 +240,8 @@ def snatcher_handler(
         return turn.script(rules.scripts.hurt)
     if me.hit_target:
         fight.toggle_pause(me.hit_target)
-        fight.snatch_flags |= CARRY
-        me.behaviour_flags |= CARRY
+        fight.snatcher.encounter = SnatchEncounterPhase.CARRYING
+        turn.set_phase(SnatcherPhase.CARRYING)
         me.anim_timer = rules.hold_timer
         return turn.script(rules.scripts.carry)
     return _decide(turn)

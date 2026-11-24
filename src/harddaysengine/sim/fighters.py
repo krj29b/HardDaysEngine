@@ -49,7 +49,6 @@ _FACING_RIGHT = 1
 _FACING_LEFT = 3
 _BLOCK_UP = 0x20
 _BLOCK_DOWN = 0x40
-_BLOCK_LATCH = 0x80
 
 
 def read_port(fight: Fight, actor: Actor) -> int:
@@ -122,7 +121,7 @@ def _walk(fight: Fight, rules: KnightRules, handle: int) -> HandlerResult:
     if block is None:
         actor.anim_phase = saved_phase
         return restart_from(actor, actor.idle_script)
-    actor.behaviour_flags &= ~_BLOCK_LATCH
+    actor.block_latched = False
     offset = block + (actor.anim_phase << 2)
     return restart_from(actor, fight.table_long(actor.walk_scripts, offset))
 

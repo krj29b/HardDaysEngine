@@ -101,7 +101,7 @@ def test_setup_and_operands_match_independent_executable_reads(bundle: GameAsset
     data = loader.mog.hunk_data(40)
     assert loader.guardian_rules.grab_damage == struct.unpack_from(">H", data, 0xBC4)[0]
     before = FightRuntime(audit.scene, 1).snapshot()
-    f.guardian.spare = 1
+    f.guardian.holding = True
     assert FightRuntime(audit.scene, 1).snapshot() != before
 
 

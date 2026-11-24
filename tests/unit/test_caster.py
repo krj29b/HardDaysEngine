@@ -1,21 +1,11 @@
-"""Ratmen state priority, damage quirks and shared-state ownership (§10.23)."""
+"""Ratmen state phases, damage rules and shared-state ownership (§10.23)."""
 
 from dataclasses import replace
 
 import pytest
 
-from harddaysengine.sim.fight import END, KEEP, Fight, Restart
-from harddaysengine.sim.fight_ai.caster import (
-    GRABBED,
-    HOLD,
-    INITIAL,
-    OUT,
-    QUICK,
-    RELEASE,
-    SLAM,
-    THROW,
-    caster_handler,
-)
+from harddaysengine.sim.fight import END, KEEP, CasterPhase, Fight, Restart
+from harddaysengine.sim.fight_ai.caster import caster_handler
 from harddaysengine.sim.fight_moves import DOWN, FIRE
 from harddaysengine.sim.m68k import u16
 from tests.unit.caster_setup import CASTER, SCRIPTS, make_caster
@@ -47,31 +37,33 @@ def test_initial_flight_uses_second_job_and_whole_word_wait() -> None:
     fight, handle = make_caster(200)
     assert _script(_handle(fight, handle)) == SCRIPTS.flight
     actor, request = fight.actor(handle), fight.flights.request
-    assert (actor.cooldown, actor.behaviour_flags) == (CASTER.initial_wait, INITIAL | OUT)
-    assert fight.caster.flags == INITIAL
+    assert actor.cooldown == CASTER.initial_wait
+    assert fight.caster.phases[handle] is CasterPhase.INITIAL_FLIGHT
+    assert fight.caster.initial_active
     assert (request.target_x, request.target_depth, request.target_height) == (170, 104, u16(-30))
 
 
-@pytest.mark.parametrize("flag", [OUT, QUICK])
-def test_flight_has_priority_over_other_states_and_absent_slot_lands(flag: int) -> None:
+@pytest.mark.parametrize("phase", [CasterPhase.OUT_FLIGHT, CasterPhase.QUICK_FLIGHT])
+def test_flight_with_absent_slot_lands_to_idle(phase: CasterPhase) -> None:
     fight, handle = make_caster()
     me = fight.actor(handle)
-    me.behaviour_flags, me.behaviour_flags2 = flag | GRABBED | HOLD, RELEASE | SLAM
+    fight.caster.phases[handle] = phase
     me.height = u16(-50)
     assert _script(_handle(fight, handle)) == me.idle_script
-    assert (me.behaviour_flags, me.height) == (0, 0)
+    assert (fight.caster.phases.get(handle, CasterPhase.IDLE), me.height) == (CasterPhase.IDLE, 0)
 
 
 def test_initial_landing_enters_hold_and_countdown_aims_without_resetting_cooldown() -> None:
     fight, handle = make_caster(130)
     me = fight.actor(handle)
-    me.behaviour_flags, me.cooldown = OUT | INITIAL, 2
-    fight.caster.flags = INITIAL
+    fight.caster.phases[handle] = CasterPhase.INITIAL_FLIGHT
+    me.cooldown = 2
+    fight.caster.initial_active = True
     assert _script(_handle(fight, handle)) == SCRIPTS.hold_near
-    assert (me.behaviour_flags, me.cooldown) == (HOLD, 1)
+    assert (fight.caster.phases[handle], me.cooldown) == (CasterPhase.HOLD, 1)
     _handle(fight, handle)
-    assert me.behaviour_flags == QUICK
-    assert not fight.caster.flags & INITIAL
+    assert fight.caster.phases[handle] is CasterPhase.QUICK_FLIGHT
+    assert not fight.caster.initial_active
     assert fight.flights.request.steps == CASTER.minimum_steps
     assert me.cooldown == CASTER.flight.minimum_steps
 
@@ -90,10 +82,14 @@ def test_special_knight_actions_select_death_without_direct_accounting(
     fight, handle = make_caster()
     me, attacker = fight.actor(handle), fight.actor(1)
     me.attacker, me.hit_target = 1, 2
-    me.behaviour_flags = OUT if airborne else HOLD
+    fight.caster.phases[handle] = CasterPhase.OUT_FLIGHT if airborne else CasterPhase.HOLD
     attacker.action = action
     assert _script(_handle(fight, handle)) == script
-    assert (me.hp, me.height, me.behaviour_flags) == (CASTER.dead_hp, 0, 0)
+    assert (me.hp, me.height, fight.caster.phases.get(handle, CasterPhase.IDLE)) == (
+        CASTER.dead_hp,
+        0,
+        CasterPhase.IDLE,
+    )
     assert fight.alive_now == fight.total == 0
 
 
@@ -110,10 +106,12 @@ def test_catch_sign_extends_endurance_byte_and_pauses_victim() -> None:
     fight, handle = make_caster()
     me, target = fight.actor(handle), fight.actor(1)
     target.endurance = 125
-    me.hit_target, me.behaviour_flags = 1, OUT
+    me.hit_target = 1
+    fight.caster.phases[handle] = CasterPhase.OUT_FLIGHT
     assert _script(_handle(fight, handle)) == SCRIPTS.grab
     assert me.cooldown == u16(-122)
-    assert fight.caster.flags & GRABBED
+    assert fight.caster.victim_grabbed
+    assert fight.caster.phases[handle] is CasterPhase.GRABBED
     job = fight.find_job(1)
     assert job is not None and job.paused
 
@@ -121,16 +119,17 @@ def test_catch_sign_extends_endurance_byte_and_pauses_victim() -> None:
 def test_escape_uses_second_port_then_release_toggles_victim_and_ends() -> None:
     fight, handle = make_caster()
     me = fight.actor(handle)
-    me.behaviour_flags, me.cooldown = GRABBED, 5
+    fight.caster.phases[handle] = CasterPhase.GRABBED
+    me.cooldown = 5
     fight.ports[:] = [FIRE | DOWN, 0]
     assert _script(_handle(fight, handle)) == SCRIPTS.grab
     fight.ports[:] = [0, FIRE | DOWN]
     assert _script(_handle(fight, handle)) == SCRIPTS.escape
-    assert me.behaviour_flags2 & RELEASE
-    fight.caster.flags = GRABBED
+    assert fight.caster.phases[handle] is CasterPhase.RELEASE
+    fight.caster.victim_grabbed = True
     fight.toggle_pause(1)
     assert _handle(fight, handle) == END
-    assert fight.caster.flags == 0
+    assert not fight.caster.victim_grabbed
     job = fight.find_job(1)
     assert job is not None and not job.paused and job.script == fight.actor(1).after_hit_script
 
@@ -138,20 +137,24 @@ def test_escape_uses_second_port_then_release_toggles_victim_and_ends() -> None:
 def test_throw_damage_uses_true_signed_subtraction_and_only_changes_job_facing() -> None:
     fight, handle = make_caster()
     me, target = fight.actor(handle), fight.actor(1)
-    me.behaviour_flags, me.facing = THROW, 3
+    fight.caster.phases[handle] = CasterPhase.THROW
+    me.facing = 3
     target.hp, target.facing = 0x8000, 1
     assert _script(_handle(fight, handle)) == SCRIPTS.thrown
     job = fight.find_job(1)
     assert job is not None and job.script == SCRIPTS.victim_fall and job.facing == 3
     assert target.facing == 1 and target.hp == u16(-32768 - CASTER.throw_damage)
-    assert me.behaviour_flags == OUT
+    assert fight.caster.phases[handle] is CasterPhase.OUT_FLIGHT
 
 
 def test_slam_input_damage_or_squeeze_and_hold_hit_pause() -> None:
     fight, handle = make_caster()
     me = fight.actor(handle)
-    me.behaviour_flags, me.hit_target = HOLD, 1
+    fight.caster.phases[handle] = CasterPhase.HOLD
+    me.hit_target = 1
     assert _script(_handle(fight, handle)) == SCRIPTS.slam_start
+    assert fight.caster.phases[handle] is CasterPhase.SLAM
+    assert fight.caster.victim_held
     me.hit_target = 0
     hp = fight.actor(1).hp
     assert _script(_handle(fight, handle)) == SCRIPTS.squeeze
@@ -159,7 +162,7 @@ def test_slam_input_damage_or_squeeze_and_hold_hit_pause() -> None:
     fight.ports[1] = FIRE | DOWN
     me.hp = 1
     assert _script(_handle(fight, handle)) == SCRIPTS.drop
-    assert not fight.caster.flags & HOLD
+    assert not fight.caster.victim_held
 
 
 def test_normal_hit_keeps_job_or_counters_and_sets_shared_wait() -> None:
@@ -182,7 +185,7 @@ def test_damage_and_hurt_script_come_from_attacker() -> None:
     expected = fight.table_long(me.hurt_scripts, 8)
     assert _script(_handle(fight, handle)) == expected
     assert me.hp == 12
-    me.behaviour_flags = OUT
+    fight.caster.phases[handle] = CasterPhase.OUT_FLIGHT
     assert _script(_handle(fight, handle)) == SCRIPTS.flight_hurt
 
 
@@ -197,15 +200,14 @@ def test_unrecognized_attacker_writes_aim_map_depth_only_to_self() -> None:
     fight, handle = make_caster(200)
     me, other = fight.actor(handle), fight.actor(fight.second)
     me.attacker, me.map_y, other.map_y = fight.second, 77, 55
-    fight.caster.flags = INITIAL
+    fight.caster.initial_active = True
     assert _script(_handle(fight, handle)) == SCRIPTS.flight
     assert (me.map_y, other.map_y) == (fight.actor(1).y, 55)
 
 
 def test_slam_overflow_comparison_uses_flags_before_word_wrap() -> None:
     fight, handle = make_caster()
-    me = fight.actor(handle)
-    me.behaviour_flags2 = SLAM
+    fight.caster.phases[handle] = CasterPhase.SLAM
     fight.actor(1).hp = 0x8000
     rules = replace(CASTER, squeeze_damage=1)
     result = caster_handler(rules, RULES, fight, handle)

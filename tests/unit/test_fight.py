@@ -64,10 +64,10 @@ def test_a_fight_needs_four_knights() -> None:
 def test_records_are_taken_in_order_cleared_on_alloc_and_bounded_to_twenty() -> None:
     fight = _fight()
     dirty = fight.actor(POOL_FIRST)
-    dirty.behaviour_flags, dirty.cooldown, dirty.hp = 0x5A, 17, 99
+    dirty.block_latched, dirty.cooldown, dirty.hp = True, 17, 99
     handles = [fight.alloc_record() for _ in range(POOL_SIZE)]
     assert handles == list(range(POOL_FIRST, POOL_FIRST + POOL_SIZE))
-    assert (dirty.active, dirty.behaviour_flags, dirty.cooldown, dirty.hp) == (1, 0, 0, 0)
+    assert (dirty.active, dirty.block_latched, dirty.cooldown, dirty.hp) == (1, False, 0, 0)
     with pytest.raises(FightError, match="20 fight records"):
         fight.alloc_record()
     with pytest.raises(FightError, match="no actor"):
