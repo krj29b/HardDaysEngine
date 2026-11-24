@@ -80,6 +80,8 @@ if TYPE_CHECKING:
     from harddaysengine.app.scene_assets import GameAssetBundle
     from harddaysengine.assets.cel import DecodedCel
     from harddaysengine.assets.fight_defs import CelFile, CelSet
+    from harddaysengine.assets.fight_palette import FightPaletteTables
+    from harddaysengine.assets.palette import RGBColor
     from harddaysengine.assets.picture import DecodedPicture
     from harddaysengine.sim.actor import Actor
     from harddaysengine.sim.fight import FrameOutput
@@ -346,6 +348,19 @@ class FightLoader:
             raise FightUnavailableError("missing original Guardian backdrop")
         return DecodedArena("valley", 3, False, stage.obstacles, ()), picture
 
+    def _template_palette(
+        self,
+        words: Sequence[int],
+        palettes: FightPaletteTables,
+    ) -> tuple[RGBColor, ...]:
+        template_words = list(words[:32])
+        template_words.extend([0] * (32 - len(template_words)))
+        second_default = self.defs.duel_cels.kind if self.defs.duel_cels.kind is not None else 4
+        second_idx = second_default if 0 <= second_default < 4 else 4
+        template_words[6:9] = palettes.class_rows[0]
+        template_words[9:12] = palettes.class_rows[second_idx]
+        return palette_fx_to_rgb(template_words)
+
     def _scene(
         self,
         arena_cels: CelSet,
@@ -420,6 +435,7 @@ class FightLoader:
             arena_name=hd_bg_name,
             arena_kind=hd_bg_kind,
             arena_variant=region_variant(region_code),
+            template_palette=self._template_palette(words, palettes),
             cel_variant_fn=make_fight_cel_variant_fn(first_kind, is_duel=second != 0),
         )
 

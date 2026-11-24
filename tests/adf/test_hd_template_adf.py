@@ -51,6 +51,10 @@ def _assert_round_trip_and_masks(out_dir: Path, ds: DiskSet) -> None:
     for mask_rel in (
         "cels/kn1.ob/frame_000.mask.png",
         "cels/he1.ob/frame_000.mask.png",
+        "cels/ki.cel/frame_017.mask.png",
+        "cels/dice.cel/frame_006.mask.png",
+        "cels/hen1.c/frame_000.mask.png",
+        "cels/wi1.c/frame_000.mask.png",
         "arenas/fol1.t.mask.png",
         "pictures/test_8.mask.png",
     ):
@@ -62,12 +66,24 @@ def _assert_round_trip_and_masks(out_dir: Path, ds: DiskSet) -> None:
             assert int(arr.max()) <= 31
             assert int((arr > 0).sum()) > 0
 
+    # Non-knight icons / die-face frames must not receive spurious class masks.
+    assert not (out_dir / "cels/ki.cel/frame_000.mask.png").exists()
+    assert not (out_dir / "cels/dice.cel/frame_001.mask.png").exists()
+
     kn1_entry = pack.resolve_cel_frame("kn1.ob", 0)
     he1_entry = pack.resolve_cel_frame("he1.ob", 0)
+    ki17_entry = pack.resolve_cel_frame("ki.cel", 17)
+    dice6_entry = pack.resolve_cel_frame("dice.cel", 6)
+    hen0_entry = pack.resolve_cel_frame("hen1.c", 0)
+    wi0_entry = pack.resolve_cel_frame("wi1.c", 0)
     fol1_entry = pack.resolve_arena("fol1.t")
     test8_entry = pack.resolve_picture("test_8")
     assert kn1_entry is not None and kn1_entry.mode is HdColorMode.MASKED
     assert he1_entry is not None and he1_entry.mode is HdColorMode.MASKED
+    assert ki17_entry is not None and ki17_entry.mode is HdColorMode.MASKED
+    assert dice6_entry is not None and dice6_entry.mode is HdColorMode.MASKED
+    assert hen0_entry is not None and hen0_entry.mode is HdColorMode.MASKED
+    assert wi0_entry is not None and wi0_entry.mode is HdColorMode.MASKED
     assert fol1_entry is not None and fol1_entry.mode is HdColorMode.MASKED
     assert test8_entry is not None and test8_entry.mode is HdColorMode.MASKED
 

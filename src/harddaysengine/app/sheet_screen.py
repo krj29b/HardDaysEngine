@@ -76,6 +76,13 @@ class SheetScreen:
             colors[30:32] = self.data.class_pairs[other.kind]
         return tuple(colors)
 
+    def template_palette(self) -> tuple[int, ...]:
+        """Un-recolored class-0 reference palette matching `--hd-template` export (§14.5)."""
+        colors = list(self.data.palette)
+        if self.data.class_pairs:
+            colors[28:30] = self.data.class_pairs[0]
+        return tuple(colors)
+
     def render(self, renderer: SceneRenderer, world: OverworldState) -> None:
         """Draw stored output without recalculation or random draws (§12.26)."""
         state = self.state

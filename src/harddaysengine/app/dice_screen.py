@@ -54,6 +54,7 @@ class DiceScreen:
         number, kind = knight
         self.run = open_dice(house, engine, number, pointer_y)
         self.round_palette = self._round_palette(house.ramp(kind), house.ramp_entry)
+        self.template_palette = self._round_palette(house.ramp(0), house.ramp_entry)
         self._canvas: FightCanvas | None = None
         self.hd_history: FightHdHistory | None = None
         self._shown: list[Draw] | None = None
@@ -82,7 +83,8 @@ class DiceScreen:
                     arena_variant=None,
                     background=bg,
                     cels=cels,
-                    base_palette=self.round_palette,
+                    base_palette=self.template_palette,
+                    fade_reference=self.round_palette,
                 )
         if self._canvas is not None and self.run.draws is not self._shown:
             self._canvas.accept(self.run.draws)

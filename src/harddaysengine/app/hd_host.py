@@ -106,6 +106,7 @@ class FightHdHistory:
         background: npt.NDArray[np.uint8],
         cels: Mapping[str, DecodedCel],
         base_palette: Sequence[RGBColor],
+        fade_reference: Sequence[RGBColor] | None = None,
         cel_variant_fn: Callable[[Draw], str | None] | None = None,
     ) -> None:
         self.arena_name = arena_name
@@ -114,6 +115,7 @@ class FightHdHistory:
         self.background = background.copy()
         self.cels = dict(cels)
         self.base_palette = tuple(base_palette)
+        self.fade_reference = self.base_palette if fade_reference is None else tuple(fade_reference)
         self.cel_variant_fn = cel_variant_fn
         self.prior_stamps: list[Draw] = []
         self.last_draws: tuple[Draw, ...] = ()
@@ -217,6 +219,7 @@ class HdHostPresenter:
             variant=history.arena_variant,
             palette=live,
             base_palette=history.base_palette,
+            fade_reference=history.fade_reference,
         )
         if history.prior_stamps:
             compositor.accept_fight_draws(

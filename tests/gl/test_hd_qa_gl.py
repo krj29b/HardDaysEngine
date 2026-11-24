@@ -11,6 +11,9 @@ from PIL import Image
 
 from harddaysengine.app.audit import AuditRig
 from harddaysengine.app.fight_audit import TROGG_ARENAS, build_fight_audit, fight_audit_frames
+from harddaysengine.app.fight_runtime import FightLoader
+from harddaysengine.app.game import GameSession
+from harddaysengine.app.hd_host import HdHostPresenter
 from harddaysengine.app.input import InputFrame, PlayerInput
 from harddaysengine.app.inspector import (
     BackgroundItem,
@@ -19,14 +22,32 @@ from harddaysengine.app.inspector import (
     render_inspector_frame_hd,
     run_inspector_headless,
 )
+from harddaysengine.app.scene_assets import GameAssetBundle
 from harddaysengine.assets.adf import DiskSet
-from harddaysengine.assets.cel import CelFrame, CelFrameMeta, DecodedCel
+from harddaysengine.assets.cel import CelFrame, CelFrameMeta, DecodedCel, decode_cel
+from harddaysengine.assets.extract import cel_frame_to_rgba, encode_mask_png_bytes
+from harddaysengine.assets.fight_palette import (
+    REGION_GLEN,
+    SCENE_FLYER,
+    assemble_fight_palette,
+    parse_fight_palette_tables,
+)
 from harddaysengine.assets.hd_pack import HdPack
 from harddaysengine.assets.hit import HitFrame, HitPoint, HitSet
-from harddaysengine.assets.palette import default_combat_palette
-from harddaysengine.assets.picture import DecodedPicture
+from harddaysengine.assets.hunk import parse_hunk_executable
+from harddaysengine.assets.palette import (
+    cell_word_to_rgb,
+    decode_palette_word,
+    default_combat_palette,
+)
+from harddaysengine.assets.picture import DecodedPicture, decode_picture_pack
+from harddaysengine.assets.sheet_data import parse_sheet_data
 from harddaysengine.render.hd_compositor import HdCompositor
 from harddaysengine.render.renderer import HardDaysRenderer
+from harddaysengine.render.scene import SceneRenderer, default_bitmap_font
+from harddaysengine.sim.actor import Actor
+from harddaysengine.sim.inventory import Inventory
+from harddaysengine.sim.rng import Rng
 from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
@@ -209,3 +230,131 @@ def test_real_disk_inspector_headless_hd_and_audit_side_by_side(
         assert int(np.count_nonzero(right_green)) > 20
     finally:
         rig.release()
+
+
+def _save_masked_cel_2x(
+    cel: DecodedCel,
+    pal: tuple[tuple[int, int, int], ...],
+    slots: frozenset[int],
+    out_dir: Path,
+) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for fr in cel.frames:
+        if fr.meta.width == 0 or fr.meta.height == 0:
+            continue
+        rgba = cel_frame_to_rgba(fr, pal)
+        img = Image.fromarray(rgba, mode="RGBA").resize(
+            (fr.meta.width * 2, fr.meta.height * 2), Image.Resampling.NEAREST
+        )
+        img.save(out_dir / f"frame_{fr.meta.index:03d}.png")
+        mask = np.where(np.isin(fr.pixels, sorted(slots)), fr.pixels, 0).astype(np.uint8)
+        if bool(np.any(mask > 0)):
+            mask2 = np.repeat(np.repeat(mask, 2, axis=0), 2, axis=1)
+            (out_dir / f"frame_{fr.meta.index:03d}.mask.png").write_bytes(
+                encode_mask_png_bytes(mask2)
+            )
+
+
+@pytest.mark.adf
+def test_masked_template_knights_match_classic_colors_for_all_players(
+    adf_dir: Path, tmp_path: Path
+) -> None:
+    """Masked Blue-template kn*.ob and ki.cel recolor to exact Classic RGB for all 4 players."""
+    disks = DiskSet.from_directory(adf_dir)
+    mog = parse_hunk_executable("mog", disks.read_file("mog"))
+    tables = parse_fight_palette_tables(mog)
+    test_pics = decode_picture_pack(disks.read_file("test"))
+    base_words = tuple(decode_palette_word(w) for w in test_pics[0].raw_palette)
+    kn_template_pal = tuple(
+        cell_word_to_rgb(w)
+        for w in assemble_fight_palette(
+            base_words, tables, scene=SCENE_FLYER, region=REGION_GLEN, first_kind=0
+        )
+    )
+    sheet_data = parse_sheet_data(mog)
+    ki_words = list(sheet_data.palette)
+    ki_words[28:30] = sheet_data.class_pairs[0]
+    ki_template_pal = tuple(cell_word_to_rgb(w) for w in ki_words)
+
+    pack_dir = tmp_path / "masked_knights_2x"
+    pack_dir.mkdir()
+    (pack_dir / "pack.toml").write_text(
+        'schema_version = 1\nname = "Masked Knights"\nversion = "1.0"\n'
+        'scale = 2\ndefault_mode = "rgba"\nfallback_filter = "nearest"\n',
+        encoding="utf-8",
+    )
+    for kn_name in ("kn1.ob", "kn2.ob", "kn3.ob", "kn4.ob"):
+        _save_masked_cel_2x(
+            decode_cel(disks.read_file(kn_name)),
+            kn_template_pal,
+            frozenset({6, 7, 8}),
+            pack_dir / "cels" / kn_name,
+        )
+    _save_masked_cel_2x(
+        decode_cel(disks.read_file("ki.cel")),
+        ki_template_pal,
+        frozenset({28, 29, 30, 31}),
+        pack_dir / "cels" / "ki.cel",
+    )
+
+    pack = HdPack.load(pack_dir)
+    bundle = GameAssetBundle(disks)
+    loader = FightLoader(bundle)
+    arena = next(a for a in loader.defs.arenas if a.name == TROGG_ARENAS[0])
+
+    ctx = moderngl.create_standalone_context(require=330)
+    renderer = HardDaysRenderer(ctx)
+    scene_renderer = SceneRenderer(renderer)
+    font = default_bitmap_font()
+    hd_host = HdHostPresenter(pack)
+    try:
+        compositor = hd_host.ensure_active(ctx, enabled=True)
+        assert compositor is not None
+        # Verify all 4 player classes (Blue=0, Yellow=1, Green=2, Red=3) match Classic RGB exactly
+        # on masked knight pixels (no dark-blue luma crushing and no frozen Blue colors).
+        for kind in (0, 1, 2, 3):
+            knights = [Actor(kind=i) for i in range(4)]
+            knights[0].kind = kind
+            runtime = loader.creature(
+                arena,
+                "fo1.t",
+                knights,
+                Actor(),
+                {1: Inventory()},
+                Rng(0x13579BDF),
+                first=1,
+            )
+            runtime.scene.advance(0)
+            runtime.scene.render(scene_renderer)
+            scene_renderer.flush_to_fbo()
+            classic_rgb = renderer.read_canvas_rgba()[..., :3]
+            classic_2x = np.repeat(np.repeat(classic_rgb, 2, axis=0), 2, axis=1)
+
+            hd_host.render_fight_history(
+                compositor, runtime.scene.hd_history, live_palette=runtime.scene.palette
+            )
+            hd_rgb = compositor.read_canvas_rgba()[..., :3]
+            max_diff = int(np.max(np.abs(hd_rgb.astype(np.int16) - classic_2x.astype(np.int16))))
+            assert max_diff <= 2, f"kind={kind} fight HD masked RGB drifted by {max_diff}"
+
+        # Verify shared Status sheet (ki.cel) recolors Red knight (kind=3) identically to Classic.
+        session = GameSession(disk_set=disks, players=(KnightId.RED,))
+        session._open_sheet(9)
+        for _ in range(40):
+            session.step_tick(InputFrame())
+        session.render_to_scene(scene_renderer, font)
+        classic_sheet = renderer.read_canvas_rgba()[..., :3]
+        classic_sheet_2x = np.repeat(np.repeat(classic_sheet, 2, axis=0), 2, axis=1)
+
+        hd_tex = hd_host.render_session_hd(session, compositor)
+        assert hd_tex is not None
+        hd_sheet = compositor.read_canvas_rgba()[..., :3]
+        sheet_diff = int(
+            np.max(np.abs(hd_sheet.astype(np.int16) - classic_sheet_2x.astype(np.int16)))
+        )
+        assert sheet_diff <= 2, f"Red knight sheet HD masked RGB drifted by {sheet_diff}"
+    finally:
+        hd_host.release()
+        scene_renderer.release()
+        renderer.release()
+        ctx.release()

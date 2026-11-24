@@ -24,7 +24,7 @@ void main() {
     vec3 live_col = texelFetch(u_live_palette, ivec2(slot, 0), 0).rgb;
     float y_d = dot(d.rgb, vec3(0.2126, 0.7152, 0.0722));
     float y_b = dot(base_col, vec3(0.2126, 0.7152, 0.0722));
-    float shade = clamp(y_d / max(y_b, 0.04), 0.0, 2.0);
+    float shade = (y_b > 0.001) ? clamp(y_d / y_b, 0.0, 2.0) : 1.0;
     vec3 rgb = clamp(live_col * shade, 0.0, 1.0);
     f_color = vec4(rgb, d.a);
 }

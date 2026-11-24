@@ -185,9 +185,10 @@ def render_sheet_hd(
     resolve_palette: _PaletteResolver,
 ) -> moderngl.Texture:
     """Render shared sheet icons (``ki.cel``), text overlay, and ``po.cel`` pointer (§14.7)."""
-    base = palette_fx_to_rgb(screen.palette(session.overworld))
-    live = resolve_palette(session, base)
-    compositor.set_palettes(live, base)
+    steady = palette_fx_to_rgb(screen.palette(session.overworld))
+    template = palette_fx_to_rgb(screen.template_palette())
+    live = resolve_palette(session, steady)
+    compositor.set_palettes(live, template, fade_reference=steady)
     compositor.begin_scene()
     state = screen.state
     for icon in state.icons:

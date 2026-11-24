@@ -6178,9 +6178,14 @@ a ready-to-edit HD pack skeleton from the user's own `.adf` disks:
      `wi1.c`, etc.): their matching screen picture palette (`test_8`, `sheet_data`, `dice.piv`,
      `mys.piv`, `hen1.p`, `wi1.p`).
 3. **Auto-generated 8-bit `.mask.png` files:**
-   - **Knight cels (`kn*.ob`, `he*.ob`):** pixels whose original Amiga index lies in the knight
-     class row (`6..8`, §10.13) write that exact index (`6..8`) into `.mask.png`; all other pixels
-     write `0`.
+   - **Combat knight cels (`kn*.ob`, `he*.ob`):** pixels whose original Amiga index lies in the
+     knight class row (`6..8`, plus `9..11` on `he*.ob` for the second duel knight, §10.13) write
+     that exact index into `.mask.png`; all other pixels write `0`.
+   - **Non-combat class-recolored knight cels (`ki.cel`, `dice.cel`, `hen1.c`, `wi1.c`):** frames
+     containing pixels in their decoded `mog` class-ramp slots (`ki.cel`: `28..31`, `dice.cel`
+     thrower frames `>= 6`: `ramp_entry..`, `hen1.c` / `wi1.c`: `palette_entry..`) write those exact
+     indices into `.mask.png` so one template knight recolors across all player classes on sheets,
+     tavern dice, Stonehenge, and Wizard screens (non-knight frames without ramp pixels omit masks).
    - **Arenas (`*.t`):** pixels whose original Amiga index lies in the region palette range
      (`16..28` and low-tweak `1..4`, §10.13) write that exact index into `.mask.png`; all other
      pixels write `0`.
@@ -6202,7 +6207,12 @@ vertical offset `28 * S`, matching §13.1), where `S = pack.scale` (`2..8`):
 Every draw command supplies:
 - `u_live_palette` (`32×1` RGBA8 texture): current tick's active 32-entry Amiga palette (including
   fades, low-health pulses, hit flashes, and map cycling).
-- `u_base_palette` (`32×1` RGBA8 texture): the scene's un-faded reference 32-entry palette.
+- `u_base_palette` (`32×1` RGBA8 texture): the un-recolored template reference 32-entry palette
+  matching how `--hd-template` exported the diffuse PNGs (class-0 Blue at slots `6..8`, class-4
+  Black at `9..11`, base arena `picture.palette` at `1..4`/`16..28`, class-0 ramps on `ki.cel`,
+  `dice.cel`, `hen1.c`, `wi1.c`). Fade/flash tinting (`u_fade_tint`, `u_flash_mix`) compares
+  `live_palette` against a separate steady `fade_reference` palette (the scene's un-faded active
+  palette) so unmasked RGBA pixels do not shift when knight classes or regions change.
 - `u_fade_tint` (`vec3` RGB multiplier) & `u_flash_mix` (`vec4` RGB + mix factor): computed on CPU
   from `(live_palette, base_palette)` over non-black reference entries:
   - Per-channel scale `ratio_c = mean(live_c) / max(mean(base_c), eps)` clamped to `[0.0, 1.0]`
@@ -6224,10 +6234,11 @@ Every draw command supplies:
      - If `1 <= slot <= 31` (masked): fetch `base_col = texelFetch(u_base_palette, ivec2(slot, 0), 0).rgb`
        and `live_col = texelFetch(u_live_palette, ivec2(slot, 0), 0).rgb`. Compute perceptual
        luminance `Y(c) = dot(c, vec3(0.2126, 0.7152, 0.0722))`. Compute relative shading factor
-       `shade = clamp(Y(d.rgb) / max(Y(base_col), 0.04), 0.0, 2.0)` and output
+       `shade = (Y(base_col) > 0.001) ? clamp(Y(d.rgb) / Y(base_col), 0.0, 2.0) : 1.0` and output
        `rgb = clamp(live_col * shade, 0.0, 1.0)` with diffuse `d.a`.
-       This preserves HD lighting, anti-aliasing, and shading on knight tunics, region foliage, and
-       cycling map water while following the live 50 Hz Amiga palette exactly.
+       Using a `0.001` guard avoids crushing dark-blue template shades (`(0, 0, 68)` / `(0, 0, 17)`),
+       preserving HD lighting, anti-aliasing, and exact Classic brightness across all 5 knight
+       classes, 4 arena regions, and cycling map water.
   4. **Unreplaced 1× Amiga fallback (`fallback_filter`):**
      - Upload the original 1× `uint8` indexed buffer (`0..31`) as an `R8` texture (cached by object
        identity / key).

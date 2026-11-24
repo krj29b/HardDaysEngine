@@ -777,13 +777,18 @@ class HdCompositor:
         variant: str | None = None,
         palette: Sequence[RGBColor] | None = None,
         base_palette: Sequence[RGBColor] | None = None,
+        fade_reference: Sequence[RGBColor] | None = None,
     ) -> None:
         """Initialize ``hd_bg_fbo`` and ``hd_fight_fbo`` with the fight arena (ADR-014)."""
         self._ensure_alive()
         if fallback_bg.shape != (PLAYFIELD_HEIGHT, CANVAS_WIDTH):
             raise ValueError("fight background must be 320 by 200 pixels")
         if palette is not None:
-            self.set_palettes(palette, palette if base_palette is None else base_palette)
+            self.set_palettes(
+                palette,
+                palette if base_palette is None else base_palette,
+                fade_reference=fade_reference,
+            )
         elif base_palette is not None:
             self.set_base_palette(base_palette)
 

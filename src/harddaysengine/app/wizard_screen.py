@@ -72,11 +72,15 @@ class WizardScreen:
         self.canvas: FightCanvas | None = None
         self.hd_history: FightHdHistory | None = None
         self.hd_stage: int | None = None
-        colors = list(tower.palette)
+        self.tower_palette = self._tower_palette_for_kind(kind)
+        self.tower_template_palette = self._tower_palette_for_kind(0)
+
+    def _tower_palette_for_kind(self, kind: int) -> tuple[RGBColor, ...]:
+        colors = list(self.tower.palette)
         shades = next((row for key, row in self.rules.ramps if key == kind), ())
         start = self.rules.palette_entry
         colors[start : start + len(shades)] = palette_fx_to_rgb(shades)
-        self.tower_palette = tuple(colors)
+        return tuple(colors)
 
     def snapshot(self) -> dict[str, object]:
         return {
@@ -123,6 +127,7 @@ class WizardScreen:
         picture = self.gift if stage == 1 else self.tower
         pic_name = self.rules.gift if stage == 1 else self.rules.tower
         base_pal = self.gift.palette if stage == 1 else self.tower_palette
+        template_pal = self.gift.palette if stage == 1 else self.tower_template_palette
         self.hd_stage = stage
         self.hd_history = FightHdHistory(
             arena_name=pic_name,
@@ -130,7 +135,8 @@ class WizardScreen:
             arena_variant=None,
             background=picture.pixels[:200, :320],
             cels=cels,
-            base_palette=base_pal,
+            base_palette=template_pal,
+            fade_reference=base_pal,
         )
         self.animation = open_animation(self.rules, self.engine, stage, rng, vbl)
         self._accept()

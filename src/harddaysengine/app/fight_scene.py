@@ -38,6 +38,7 @@ class FightScene:
         arena_name: str = "arena",
         arena_kind: HdAssetKind = HdAssetKind.ARENA,
         arena_variant: str | None = None,
+        template_palette: Sequence[RGBColor] | None = None,
         cel_variant_fn: Callable[[Draw], str | None] | None = None,
     ) -> None:
         self.fight = fight
@@ -49,7 +50,8 @@ class FightScene:
             arena_variant=arena_variant,
             background=background,
             cels=cels,
-            base_palette=self.palette,
+            base_palette=self.palette if template_palette is None else template_palette,
+            fade_reference=self.palette,
             cel_variant_fn=cel_variant_fn,
         )
 

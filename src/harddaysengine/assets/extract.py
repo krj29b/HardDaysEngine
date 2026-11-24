@@ -495,6 +495,7 @@ class _TemplateContext:
     map_mask_indices: frozenset[int]
     cel_palettes: dict[str, tuple[RGBColor, ...]]
     frame_palettes: dict[tuple[str, int], tuple[RGBColor, ...]]
+    cel_mask_rules: dict[str, tuple[frozenset[int], int]]
 
 
 def encode_mask_png_bytes(mask: npt.NDArray[np.uint8]) -> bytes:
@@ -652,6 +653,7 @@ def _add_fight_palettes(
 def _add_sheet_palettes(
     mog_exec: DecodedHunkExecutable,
     cel_palettes: dict[str, tuple[RGBColor, ...]],
+    cel_mask_rules: dict[str, tuple[frozenset[int], int]],
 ) -> None:
     try:
         sheet = parse_sheet_data(mog_exec)
@@ -662,6 +664,7 @@ def _add_sheet_palettes(
     cel_palettes["small.font"] = base_pal
     if sheet.class_pairs:
         cel_palettes["ki.cel"] = _apply_palette_patch(base_pal, 28, sheet.class_pairs[0])
+        cel_mask_rules["ki.cel"] = (frozenset({28, 29, 30, 31}), 0)
     else:
         cel_palettes["ki.cel"] = base_pal
 
@@ -671,6 +674,7 @@ def _add_dice_palettes(
     mog_exec: DecodedHunkExecutable,
     cel_palettes: dict[str, tuple[RGBColor, ...]],
     frame_palettes: dict[tuple[str, int], tuple[RGBColor, ...]],
+    cel_mask_rules: dict[str, tuple[frozenset[int], int]],
 ) -> None:
     try:
         dice = parse_dice_house(mog_exec)
@@ -678,11 +682,19 @@ def _add_dice_palettes(
         return
     cel_key = normalize_hd_asset_key(dice.cel_file)
     tav_pal = _load_picture_palette(disk_set, dice.tavern)
+    ramp0 = dice.ramp(0)
     if tav_pal is not None:
-        cel_palettes[cel_key] = _apply_palette_patch(tav_pal, dice.ramp_entry, dice.ramp(0))
+        cel_palettes[cel_key] = _apply_palette_patch(tav_pal, dice.ramp_entry, ramp0)
+    if ramp0:
+        slots = frozenset(
+            idx
+            for idx in range(dice.ramp_entry, dice.ramp_entry + len(ramp0))
+            if 0 <= idx <= MAX_PALETTE_INDEX
+        )
+        cel_mask_rules[cel_key] = (slots, 6)
     tbl_pal = _load_picture_palette(disk_set, dice.table)
     if tbl_pal is not None:
-        for idx in range(len(dice.dice_at)):
+        for idx in range(6):
             frame_palettes[(cel_key, idx)] = tbl_pal
 
 
@@ -704,6 +716,7 @@ def _add_ritual_palettes(
     disk_set: DiskSet,
     mog_exec: DecodedHunkExecutable,
     cel_palettes: dict[str, tuple[RGBColor, ...]],
+    cel_mask_rules: dict[str, tuple[frozenset[int], int]],
 ) -> None:
     try:
         stone = parse_stone_rules(mog_exec)
@@ -713,15 +726,22 @@ def _add_ritual_palettes(
     if pal is None:
         return
     ramp = next((words for kind, words in stone.ritual.ramps if kind == 0), ())
-    cel_palettes[normalize_hd_asset_key(stone.ritual.cel)] = _apply_palette_patch(
-        pal, stone.ritual.palette_entry, ramp
-    )
+    cel_key = normalize_hd_asset_key(stone.ritual.cel)
+    cel_palettes[cel_key] = _apply_palette_patch(pal, stone.ritual.palette_entry, ramp)
+    if ramp:
+        slots = frozenset(
+            idx
+            for idx in range(stone.ritual.palette_entry, stone.ritual.palette_entry + len(ramp))
+            if 0 <= idx <= MAX_PALETTE_INDEX
+        )
+        cel_mask_rules[cel_key] = (slots, 0)
 
 
 def _add_wizard_palettes(
     disk_set: DiskSet,
     mog_exec: DecodedHunkExecutable,
     cel_palettes: dict[str, tuple[RGBColor, ...]],
+    cel_mask_rules: dict[str, tuple[frozenset[int], int]],
 ) -> None:
     try:
         wiz = parse_wizard_rules(mog_exec)
@@ -731,9 +751,15 @@ def _add_wizard_palettes(
     if pal is None:
         return
     ramp = next((words for kind, words in wiz.ramps if kind == 0), ())
-    cel_palettes[normalize_hd_asset_key(wiz.cel)] = _apply_palette_patch(
-        pal, wiz.palette_entry, ramp
-    )
+    cel_key = normalize_hd_asset_key(wiz.cel)
+    cel_palettes[cel_key] = _apply_palette_patch(pal, wiz.palette_entry, ramp)
+    if ramp:
+        slots = frozenset(
+            idx
+            for idx in range(wiz.palette_entry, wiz.palette_entry + len(ramp))
+            if 0 <= idx <= MAX_PALETTE_INDEX
+        )
+        cel_mask_rules[cel_key] = (slots, 0)
 
 
 def _add_menu_palettes(
@@ -827,14 +853,15 @@ def _build_template_context(disk_set: DiskSet) -> _TemplateContext:
     prog_exec = _try_parse_hunk(disk_set, "program")
     cel_palettes: dict[str, tuple[RGBColor, ...]] = {}
     frame_palettes: dict[tuple[str, int], tuple[RGBColor, ...]] = {}
+    cel_mask_rules: dict[str, tuple[frozenset[int], int]] = {}
 
     if mog_exec is not None:
         _add_fight_palettes(mog_exec, test_pics, cel_palettes)
-        _add_sheet_palettes(mog_exec, cel_palettes)
-        _add_dice_palettes(disk_set, mog_exec, cel_palettes, frame_palettes)
+        _add_sheet_palettes(mog_exec, cel_palettes, cel_mask_rules)
+        _add_dice_palettes(disk_set, mog_exec, cel_palettes, frame_palettes, cel_mask_rules)
         _add_service_palettes(disk_set, mog_exec, cel_palettes)
-        _add_ritual_palettes(disk_set, mog_exec, cel_palettes)
-        _add_wizard_palettes(disk_set, mog_exec, cel_palettes)
+        _add_ritual_palettes(disk_set, mog_exec, cel_palettes, cel_mask_rules)
+        _add_wizard_palettes(disk_set, mog_exec, cel_palettes, cel_mask_rules)
         _add_menu_palettes(disk_set, mog_exec, cel_palettes, frame_palettes)
 
     _add_program_cel_palettes(disk_set, prog_exec, cel_palettes)
@@ -848,6 +875,7 @@ def _build_template_context(disk_set: DiskSet) -> _TemplateContext:
         map_mask_indices=map_mask_indices,
         cel_palettes=cel_palettes,
         frame_palettes=frame_palettes,
+        cel_mask_rules=cel_mask_rules,
     )
 
 
@@ -867,14 +895,26 @@ def _resolve_cel_palette(
     return default_combat_palette()
 
 
-def _build_cel_mask(norm_key: str, pixels: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8] | None:
+def _build_cel_mask(
+    ctx: _TemplateContext,
+    norm_key: str,
+    frame_index: int,
+    pixels: npt.NDArray[np.uint8],
+) -> npt.NDArray[np.uint8] | None:
     if norm_key.startswith("kn") and norm_key.endswith(".ob"):
         keep = (pixels >= 6) & (pixels <= 8)
         return np.where(keep, pixels, 0).astype(np.uint8)
     if norm_key.startswith("he") and norm_key.endswith(".ob"):
         keep = ((pixels >= 6) & (pixels <= 8)) | ((pixels >= 9) & (pixels <= 11))
         return np.where(keep, pixels, 0).astype(np.uint8)
-    return None
+    rule = ctx.cel_mask_rules.get(norm_key)
+    if rule is None:
+        return None
+    slots, min_frame = rule
+    if frame_index < min_frame or not slots:
+        return None
+    mask = np.where(np.isin(pixels, sorted(slots)), pixels, 0).astype(np.uint8)
+    return mask if bool(np.any(mask > 0)) else None
 
 
 def _build_arena_mask(pixels: npt.NDArray[np.uint8]) -> npt.NDArray[np.uint8]:
@@ -1027,7 +1067,7 @@ def _export_hd_cel_entry(
             encode_rgba_png_bytes(rgba),
         )
         exported_frames += 1
-        mask = _build_cel_mask(key, frame.pixels)
+        mask = _build_cel_mask(ctx, key, frame.meta.index, frame.pixels)
         if mask is not None:
             _write_output_file(
                 output_dir,

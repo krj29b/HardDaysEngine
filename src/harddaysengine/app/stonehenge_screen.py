@@ -88,14 +88,17 @@ class StoneScreen:
             colors[1 : 1 + len(self.rules.recolor)] = palette_fx_to_rgb(self.rules.recolor)
         return tuple(colors)
 
-    def ritual_palette(self) -> tuple[RGBColor, ...]:
+    def _ritual_palette_for_kind(self, kind: int) -> tuple[RGBColor, ...]:
         if self.picture is None:
             raise ValueError("Stonehenge ritual picture missing")
         colors = list(self.picture.palette)
-        ramp = next((words for kind, words in self.rules.ritual.ramps if kind == self.kind), ())
+        ramp = next((words for key, words in self.rules.ritual.ramps if key == kind), ())
         first = self.rules.ritual.palette_entry
         colors[first : first + len(ramp)] = palette_fx_to_rgb(ramp)
         return tuple(colors)
+
+    def ritual_palette(self) -> tuple[RGBColor, ...]:
+        return self._ritual_palette_for_kind(self.kind)
 
     def start_ritual(self, rng: Rng) -> None:
         if self.picture is None or self.cel is None:
@@ -109,7 +112,8 @@ class StoneScreen:
             arena_variant=None,
             background=self.picture.pixels,
             cels=cels,
-            base_palette=self.ritual_palette(),
+            base_palette=self._ritual_palette_for_kind(0),
+            fade_reference=self.ritual_palette(),
         )
 
     def advance_ritual(self, vbl: int) -> bool:
