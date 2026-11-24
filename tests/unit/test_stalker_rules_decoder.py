@@ -34,8 +34,8 @@ def _mog(*, right: int = 0x800, reload: int = 2, last: int = 0xFFFF) -> MogCode:
     )
 
 
-def test_steps_read_eight_pairs_including_the_original_overread_extent() -> None:
-    assert _steps(_mog()) == tuple(range(100, 116))
+def test_steps_read_four_pairs_without_overread() -> None:
+    assert _steps(_mog()) == tuple(range(100, 108))
     with pytest.raises(MogVersionError, match="tables differ"):
         _steps(_mog(right=0x802))
 

@@ -44,7 +44,7 @@ def _mog(*, corrupt: str = "") -> MogCode:
     )
 
 
-def test_decodes_synthetic_ranges_odds_and_overlapping_step_tables() -> None:
+def test_decodes_synthetic_ranges_bounded_odds_and_four_pair_step_tables() -> None:
     rules = _rules(_mog())
     assert (rules.strike8_range, rules.heavy_range, rules.strike4_range, rules.guard_range) == (
         13,
@@ -52,14 +52,26 @@ def test_decodes_synthetic_ranges_odds_and_overlapping_step_tables() -> None:
         15,
         16,
     )
-    assert rules.steps.side == tuple(range(101, 117))
-    assert rules.steps.up == tuple(range(111, 127))
-    assert rules.steps.down == tuple(range(119, 135))
+    assert rules.steps.side == tuple(range(101, 109))
+    assert rules.steps.up == tuple(range(111, 119))
+    assert rules.steps.down == tuple(range(119, 127))
     assert rules.steps.up_override == 65533 and rules.steps.down_override == 3
-    assert rules.odds == bytes(range(7, 128))
+    assert rules.odds == bytes(range(7, 27))
 
 
 @pytest.mark.parametrize("corrupt", ["range", "odds", "instruction"])
 def test_corrupt_instructions_and_paired_operands_raise(corrupt: str) -> None:
     with pytest.raises(MogVersionError):
         _rules(_mog(corrupt=corrupt))
+
+
+def test_truncated_odds_hunk_raises() -> None:
+    mog = _mog()
+    sections = list(mog.executable.sections)
+    sections[4] = HunkSection(4, HUNK_DATA, 20, bytes(20), {})
+    truncated = MogCode(
+        DecodedHunkExecutable("synthetic", tuple(sections)),
+        supported=(zlib.crc32(sections[0].data),),
+    )
+    with pytest.raises(MogVersionError, match="outside its data hunk"):
+        _rules(truncated)

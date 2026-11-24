@@ -122,6 +122,8 @@ def test_duel_selects_computer_jobs_ports_black_palette_and_reach(
     assert rules.heavy_range == int.from_bytes(words[0xEBC:0xEBE], "big")
     assert rules.strike4_range == int.from_bytes(words[0xEE0:0xEE2], "big")
     assert rules.guard_range == int.from_bytes(words[0xE06:0xE08], "big")
+    assert len(rules.odds) == 20
+    assert len(rules.steps.side) == len(rules.steps.up) == len(rules.steps.down) == 8
 
 
 def test_two_computers_are_rejected(bundle: GameAssetBundle) -> None:

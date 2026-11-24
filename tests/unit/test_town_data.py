@@ -154,19 +154,22 @@ def test_strings_reject_wrong_hunks_bounds_and_invalid_text(
 
 
 @pytest.mark.parametrize("highwood", [False, True])
-def test_space_sheet_preserves_translated_key_when_no_sheet_load(highwood: bool) -> None:
+def test_space_sheet_uses_highwood_status_sheet_for_both_towns(highwood: bool) -> None:
     start = 0x14AE if highwood else 0x1366
-    code = bytearray(start)
-    code.extend(struct.pack(">HHHH", 0xB07C, 32, 0x6600, 0))
+    code = bytearray(0x14AE + 32)
+    struct.pack_into(">HHHH", code, start, 0xB07C, 32, 0x6600, 0)
     calls = []
+    pos = start + 8
     for target in (0x8B26, 0xC5F4):
-        calls.append(len(code) + 2)
-        code.extend(struct.pack(">HI", 0x4EB9, target))
+        calls.append(pos + 2)
+        struct.pack_into(">HI", code, pos, 0x4EB9, target)
+        pos += 6
     if highwood:
-        code.extend(struct.pack(">HI", 0x203C, 17))
-    calls.append(len(code) + 2)
-    code.extend(struct.pack(">HI", 0x4EB9, 0xABEC))
-    assert _space_sheet(_mog(bytes(code), {0: tuple(calls)}), highwood) == (17 if highwood else 32)
+        pos += 6
+    calls.append(pos + 2)
+    struct.pack_into(">HI", code, pos, 0x4EB9, 0xABEC)
+    struct.pack_into(">HI", code, 0x14AE + 20, 0x203C, 9)
+    assert _space_sheet(_mog(bytes(code), {0: tuple(calls)}), highwood) == 9
     code[start + 3] = 31
     with pytest.raises(MogVersionError, match="not Space"):
         _space_sheet(_mog(bytes(code), {0: tuple(calls)}), highwood)

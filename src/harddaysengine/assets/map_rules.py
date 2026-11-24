@@ -30,14 +30,6 @@ def _bytes(mog: MogCode, pointer: Pointer, count: int) -> bytes:
     return data[pointer.offset : pointer.offset + count]
 
 
-def _grid_tail(mog: MogCode, load: int, sizes: tuple[tuple[int, int], ...]) -> bytes:
-    """Retain original bytes addressed by legal bottom-edge positions (§11.21)."""
-    width, height = sizes[0]
-    end = ((190 + height) >> 3) * 40 + ((310 + (width >> 1)) >> 3) + 1
-    pointer = _pointer(mog, 36, load, 0x41F9, 4)
-    return _bytes(mog, pointer, max(1000, end))[1000:]
-
-
 def _nodes(mog: MogCode) -> tuple[MapNode, ...]:
     pointer = _pointer(mog, 0, 0xE7E, 0x41F9, 2)
     data = mog.hunk_data(pointer.hunk)
@@ -143,6 +135,4 @@ def parse_map_rules(
         cycle_start=mog.operand(0x604, 0x303C, "map cycle start", hunk=36),
         cycle_end=mog.operand(0x608, 0x323C, "map cycle end", hunk=36),
         cycle_period=cycle_period,
-        terrain_tail=_grid_tail(mog, 0x8BA, sizes),
-        region_tail=_grid_tail(mog, 0x13FE, sizes),
     )

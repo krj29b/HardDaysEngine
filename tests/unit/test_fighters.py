@@ -56,6 +56,30 @@ def test_fire_picks_the_action_of_the_facing_table(direction: int) -> None:
     assert result == Restart(TABLES.action_scripts[action // 4], 100, 0, 100, 1)
 
 
+@pytest.mark.parametrize(
+    "direction",
+    [
+        LEFT | RIGHT,
+        DOWN | LEFT | RIGHT,
+        UP | LEFT | RIGHT,
+        UP | DOWN,
+        UP | DOWN | RIGHT,
+        UP | DOWN | LEFT,
+        UP | DOWN | LEFT | RIGHT,
+    ],
+)
+@pytest.mark.parametrize("facing", [1, 3])
+def test_opposing_or_out_of_range_fire_inputs_fall_back_to_idle_action(
+    direction: int, facing: int
+) -> None:
+    fight, _ = make_fight()
+    fight.actor(1).facing = facing
+    fight.ports[0] = FIRE | direction
+    result = knight_handler(RULES, fight, 1)
+    assert fight.actor(1).action == 0
+    assert result == Restart(TABLES.action_scripts[0], 100, 0, 100, facing)
+
+
 def test_an_action_outside_the_table_raises() -> None:
     fight, _ = make_fight()
     fight.actor(1).facing = 3

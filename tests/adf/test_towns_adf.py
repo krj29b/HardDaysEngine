@@ -125,7 +125,7 @@ def test_space_uses_decoded_sheet_and_exit_consumes_turn(adf_dir: Path, waterdee
     session = _session(adf_dir, waterdeep)
     session.step_tick(InputFrame(key=32))
     assert session.sheet_screen is not None
-    assert session.sheet_screen.state.number == (32 if waterdeep else 9)
+    assert session.sheet_screen.state.number == 9
     _close_sheet(session)
     assert session.scene == GameScene.LOCATION
     _click(session, 5)

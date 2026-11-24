@@ -5,14 +5,14 @@ from dataclasses import replace
 import pytest
 
 from harddaysengine.sim.actor import Actor
-from harddaysengine.sim.fight import KEEP, Fight, FightError, HandlerResult, Restart
+from harddaysengine.sim.fight import KEEP, Fight, HandlerResult, Restart
 from harddaysengine.sim.fight_ai.approach import ApproachRules
 from harddaysengine.sim.fight_ai.knight import ComputerKnightRules, computer_knight_handler
 from harddaysengine.sim.rng import Rng
 from tests.unit.knight_setup import RULES as KNIGHT, make_fight
 
 RULES = ComputerKnightRules(
-    ApproachRules((7, 0) * 8, (0, 3) * 8, (0, 9) * 8, 65533, 3),
+    ApproachRules((7, 0) * 4, (0, 3) * 4, (0, 9) * 4, 65533, 3),
     bytes([0, 100, 255]),
     73,
     81,
@@ -131,12 +131,13 @@ def test_depth_approach_walks_without_random_using_old_phase_and_override() -> N
     assert fight.rng.state == 0x2468ACE1
 
 
-def test_down_step_masks_last_action_horizontal_word_without_side_input() -> None:
+def test_down_step_uses_bounded_four_phase_table_without_last_action_overlap() -> None:
     fight, actor, target = _fight()
     actor.anim_phase, actor.action = 4, 0x14
     target.y = 130
     _think(fight)
-    assert actor.x == 200 and actor.y == 109 and fight.ai_last_action == 0x14
+    assert actor.x == 200 and actor.y == 109 and actor.anim_phase == 1
+    assert fight.ai_last_action == 0x14
 
 
 @pytest.mark.parametrize(
@@ -178,14 +179,20 @@ def test_first_computer_targets_second_instead_of_itself() -> None:
     assert actor.action == 8
 
 
-def test_invalid_day_is_reported_and_signed_odds_are_used() -> None:
+def test_day_is_clamped_to_odds_bounds_and_signed_odds_are_used() -> None:
     fight, actor, _ = _fight()
-    fight.ai_day = 3
-    with pytest.raises(FightError, match="day index"):
-        _think(fight)
-    fight.ai_day = 2
+    # Day past table end clamps to final entry (255 -> signed -1, always attacks).
+    fight.ai_day = 99
     _think(fight)
     assert actor.action == 8
+    # Negative day clamps to index 0 (odds = 0).
+    fight, actor, _ = _fight()
+    fight.ai_day = 0xFFFF
+    _think(fight, replace(RULES, odds=bytes([100, 0])))
+    assert actor.action == 0
+    # Empty odds table is rejected at construction.
+    with pytest.raises(ValueError, match="non-empty"):
+        replace(RULES, odds=b"")
 
 
 @pytest.mark.parametrize(("distance", "action"), [(111, 16), (112, 8)])

@@ -116,13 +116,18 @@ def test_end_key_and_status_order() -> None:
     assert world.turn_over and world.spent == world.budget
 
 
-def test_tile_uses_bottom_centre_and_bounds_are_checked() -> None:
+def test_tile_uses_bottom_centre_and_clamps_to_grid_bounds() -> None:
     world = make_world()
     world.current_actor.map_x, world.current_actor.map_y = 5, 1
     assert world.tile() == 41
-    world.current_actor.map_y = 400
+    world.current_actor.map_x, world.current_actor.map_y = 400, 400
+    assert world.tile() == 999
+    assert (world.current_actor.tile_x, world.current_actor.tile_y) == (39, 24)
+    world.current_actor.map_x, world.current_actor.map_y = 65520, 65520
+    assert world.tile() == 0
+    assert (world.current_actor.tile_x, world.current_actor.tile_y) == (0, 0)
     with pytest.raises(ValueError, match="outside loaded grid"):
-        world.grid_byte(RULES.terrain)
+        world.grid_byte(b"")
 
 
 def test_proximity_rows_and_highlights_follow_table_order() -> None:

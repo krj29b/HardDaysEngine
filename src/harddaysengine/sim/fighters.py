@@ -71,7 +71,9 @@ def _confuse(word: int) -> int:
 
 def _fire(fight: Fight, rules: KnightRules, actor: Actor) -> HandlerResult:
     table = rules.actions_left if actor.facing == _FACING_LEFT else rules.actions_right
-    actor.action = table[actor.input & ~FIRE]
+    direction = actor.input & ~FIRE
+    opposing = direction & _HORIZONTAL == _HORIZONTAL or direction & _VERTICAL == _VERTICAL
+    actor.action = 0 if opposing or direction >= len(table) else table[direction]
     return restart_from(actor, fight.table_long(actor.action_scripts, actor.action))
 
 

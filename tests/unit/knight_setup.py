@@ -52,8 +52,8 @@ _HURT = {
 
 RULES = KnightRules(
     steps=WalkSteps(side=(5, 6, 7, 8), up=(1, 2, 3, 4), down=(9, 10, 11, 12)),
-    actions_right=tuple((i % 9) * 4 for i in range(16)),
-    actions_left=tuple(((i + 3) % 9) * 4 for i in range(16)),
+    actions_right=tuple((i % 9) * 4 for i in range(11)),
+    actions_left=tuple(((i + 3) % 9) * 4 for i in range(11)),
     clip=ArenaClip(reach=20, left=5, right=300, foot=4, bottom=150, top=25),
     probes=Probes(vertical_reach=15, obstacle_reach=40, wall_top=25),
     clang_sound=7,

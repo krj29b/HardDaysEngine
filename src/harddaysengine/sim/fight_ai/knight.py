@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
-from harddaysengine.sim.fight import KEEP, FightError, HandlerResult, restart_from
+from harddaysengine.sim.fight import KEEP, HandlerResult, restart_from
 from harddaysengine.sim.fight_ai.approach import ApproachRules, abs_word, approach, walk
 from harddaysengine.sim.fight_hurt import Blow, knight_duel_hurt
 from harddaysengine.sim.m68k import s8, s16
@@ -21,7 +21,7 @@ COMPUTER_KNIGHT_TYPE = 0x10
 
 @dataclass(slots=True, frozen=True)
 class ComputerKnightRules:
-    """Checked ranges, overlapping step words and day-indexed odds (§10.31)."""
+    """Checked ranges, bounded step tables and day-indexed odds (§10.31)."""
 
     steps: ApproachRules
     odds: bytes
@@ -30,18 +30,18 @@ class ComputerKnightRules:
     strike4_range: int
     guard_range: int
 
+    def __post_init__(self) -> None:
+        if not self.odds:
+            raise ValueError("computer knight odds table must be non-empty")
+
 
 def _walk(
     fight: Fight, rules: ComputerKnightRules, knight: KnightRules, handle: int
 ) -> HandlerResult:
     actor = fight.actor(handle)
-    down = list(rules.steps.down)
-    # Hunk41 +52 overlaps the fifth pair of the down table at +36.
-    down[8] = fight.ai_last_action
-    steps = replace(rules.steps, down=tuple(down))
     if actor.input & 0xFF:
         actor.behaviour_flags &= 0x7F
-    return walk(fight, steps, handle, knight.probes, restart_from(actor, actor.idle_script))
+    return walk(fight, rules.steps, handle, knight.probes, restart_from(actor, actor.idle_script))
 
 
 def _guard(
@@ -85,9 +85,7 @@ def _decide(
         if s16(distance) <= s16(rules.strike8_range) and not fight.gloated:
             return 0x08
         return 0
-    day = s16(fight.ai_day)
-    if not 0 <= day < len(rules.odds):
-        raise FightError(f"computer knight day index {day} outside loaded odds hunk")
+    day = max(0, min(s16(fight.ai_day), len(rules.odds) - 1))
     odds = rules.odds[day]
     action, distance = _guard(fight, rules, actor, target, distance, odds)
     return action or _attack(fight, rules, actor, distance, odds)

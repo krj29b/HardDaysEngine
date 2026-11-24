@@ -7,7 +7,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from harddaysengine.sim.fight import HandlerResult, restart_from
-from harddaysengine.sim.fight_ai.approach import abs_word, approach, take_step
+from harddaysengine.sim.fight_ai.approach import STEP_TABLE_WORDS, abs_word, approach, take_step
 from harddaysengine.sim.fight_ai.effects import HitSparkRules, hit_spark
 from harddaysengine.sim.fight_hurt import contact_damage
 from harddaysengine.sim.fight_moves import DOWN, LEFT, RIGHT, UP
@@ -38,12 +38,16 @@ class StalkerRules:
     hop_table: int
     spark: HitSparkRules
 
+    def __post_init__(self) -> None:
+        if len(self.steps) != STEP_TABLE_WORDS:
+            raise ValueError(f"stalker step table holds {STEP_TABLE_WORDS} words")
+
 
 def _walk(
     fight: Fight, handle: int, rules: StalkerRules, knight_rules: KnightRules
 ) -> HandlerResult:
     me, cells = fight.actor(handle), fight.approach
-    phase = me.anim_phase
+    phase = me.anim_phase & 3
     if me.input & (RIGHT | LEFT):
         cells.dx, cells.dy = rules.steps[phase * 2 : phase * 2 + 2]
         if not me.input & RIGHT:

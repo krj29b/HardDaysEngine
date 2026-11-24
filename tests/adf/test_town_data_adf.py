@@ -72,6 +72,7 @@ def test_towns_match_independent_instruction_walker_and_string_reads(adf_dir: Pa
         # The real picture and pointer names must resolve without fallback aliases.
         disks = DiskSet.from_directory(adf_dir)
         assert disks.has_file(town.picture) and disks.has_file(town.pointer)
-    assert towns[0].space_sheet == struct.unpack_from(">I", code, 0x14C4)[0]
-    assert towns[1].space_sheet == struct.unpack_from(">H", code, 0x1368)[0]
-    assert code[0x137A:0x137C] == b"\x4e\xb9"  # Waterdeep calls directly with translated D0.
+    expected_sheet = struct.unpack_from(">I", code, 0x14C4)[0]
+    assert expected_sheet == 9
+    assert towns[0].space_sheet == expected_sheet
+    assert towns[1].space_sheet == expected_sheet

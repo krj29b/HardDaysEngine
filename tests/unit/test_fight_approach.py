@@ -35,10 +35,19 @@ def test_abs_word_is_the_68000_negate() -> None:
     assert abs_word(0x8000) == 0x8000
 
 
-def test_a_step_table_must_hold_sixteen_words() -> None:
-    with pytest.raises(ValueError, match="16 words"):
+def test_a_step_table_must_hold_eight_words() -> None:
+    with pytest.raises(ValueError, match="8 words"):
         dataclasses.replace(APPROACH, up=(1, 2))
+    with pytest.raises(ValueError, match="8 words"):
+        dataclasses.replace(APPROACH, side=(1, 2) * 8)
     assert isinstance(APPROACH, ApproachRules)
+
+
+def test_out_of_range_phase_wraps_cleanly_to_four_phase_table() -> None:
+    result, x, _, phase = _walk(200, LEFT, phase=5)
+    # Phase 5 & 3 == 1 (side step dx = 6), advancing +1 -> phase 2.
+    assert (x, phase) == (194, 2)
+    assert result.script == SIDE_SCRIPTS[2]
 
 
 @pytest.mark.parametrize(("x", "facing"), [(200, 3), (50, 1), (100, 3)])

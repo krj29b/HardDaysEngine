@@ -14,6 +14,7 @@ from harddaysengine.assets.mog_code import (
     Pointer,
     StoreRun,
 )
+from harddaysengine.sim.fight_ai.approach import STEP_TABLE_WORDS
 from harddaysengine.sim.fight_ai.effects import HitSparkRules
 from harddaysengine.sim.fight_ai.stalker import STALKER_TYPE, StalkerRules
 from harddaysengine.sim.m68k import s16
@@ -69,7 +70,7 @@ def _steps(mog: MogCode) -> tuple[int, ...]:
     table = _pointer(mog, 0x58A, 0x43F9, HUNK)
     if _pointer(mog, 0x5B4, 0x43F9, HUNK) != table:
         raise MogVersionError("mog: stalker left and right step tables differ")
-    return tuple(mog.hunk_word(HUNK, table + i * 2) for i in range(16))
+    return tuple(mog.hunk_word(HUNK, table + i * 2) for i in range(STEP_TABLE_WORDS))
 
 
 def _spark(mog: MogCode, frame_lists: tuple[int, ...]) -> HitSparkRules:

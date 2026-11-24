@@ -131,7 +131,6 @@ def _dragon(mog: MogCode) -> MapDragonRules:
         stores=stores,
         scripts=tuple(p.offset for p in scripts),
         hover=hover.offset,
-        initial_job=struct.unpack(">HHH", _bytes(mog, Pointer(4, scripts[0].offset + 4), 6)),
         speed_x=operand(0x74A, 0x33FC),
         speed_y=struct.unpack(">h", _bytes(mog, speed, 2))[0],
         timer=operand(0x752, 0x33FC),

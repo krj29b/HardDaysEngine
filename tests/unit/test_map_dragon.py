@@ -86,7 +86,13 @@ def test_spawn_uses_shared_rng_for_live_record_order_and_real_job() -> None:
     assert world.dragon.engaged_with == int(KnightId.GREEN) + 1
     assert world.dragon.type == 40 and world.dragon.frame_list == 3
     job = fight.engine.jobs[0]
-    assert (job.script, job.x, job.height, job.depth) == (DRAGON.scripts[0], *DRAGON.initial_job)
+    assert (job.script, job.x, job.height, job.depth) == (
+        DRAGON.scripts[0],
+        world.dragon.x,
+        world.dragon.height,
+        world.dragon.y,
+    )
+    assert (job.x, job.height, job.depth) == (20, 0, 40)
     assert job.owner == 5 and job.type == 40
     assert not spawn(world, fight, DRAGON)
 

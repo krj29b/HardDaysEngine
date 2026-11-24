@@ -78,7 +78,8 @@ def spawn(world: OverworldState, fight: Fight, rules: MapDragonRules) -> bool:
         actor.write(offset, size, value)
     actor.frame_list = 3
     bind_flight(world, fight, rules)
-    if fight.start_job(rules.scripts[0], DRAGON, 3, rules.initial_job, actor.facing, 40) is None:
+    position = (actor.x, actor.height, actor.y)
+    if fight.start_job(rules.scripts[0], DRAGON, 3, position, actor.facing, 40) is None:
         raise FightError("no free map-dragon job")
     world.flight.timer, world.flight.speed_x, world.flight.speed_y = (
         rules.timer,

@@ -1358,8 +1358,9 @@ Default next script: `idle_script`. Then, first match wins:
 4. If this knight is the confused one (a failed scroll gamble), swap up with down and left with
    right.
 5. **Fire held**: look up the direction bits (fire bit removed) in the action table for the
-   knight's facing (`kActionRight` / `kActionLeft`, §7.2); the result is the new `action`, and
-   the next script is `action_scripts[action]`.
+   knight's facing (right-facing or left-facing, §7.2); opposing direction bits or out-of-range
+   indices fall back to action `0` (idle). The result is the new `action`, and the next script is
+   `action_scripts[action]`.
 6. **Otherwise walk.** `anim_phase = (anim_phase + 1) & 3`. Step sizes come from three 4-entry
    tables in `mog` indexed by the phase: up moves `y` by minus the up step, down by the down
    step; right sets facing 1 and moves `x` by the side step, left sets facing 3 and moves by its
@@ -1817,9 +1818,10 @@ raises.
 4. The confused knight, while the on-flag is set: if either vertical bit is set both vertical bits
    are flipped, then the same for the two horizontal bits.
 5. Fire (bit 4): the index `input` without bit 4 picks a word from the action table of the
-   facing (the left table when `facing` is 3, else the right table; 16 words each, and the right
-   table's words 11..15 are the left table's first five, as they lie in memory). That word is the
-   new `action` and the next script is `action_scripts[action]`.
+   facing (the left table when `facing` is 3, else the right table; 11 words each, indices `0..10`,
+   with no overlap into the opposite-facing table). Opposing direction bits (`LEFT | RIGHT` or
+   `UP | DOWN`) or any index `>= len(table)` fall back cleanly to action `0` (idle). That word is
+   the new `action` and the next script is `action_scripts[action]`.
 6. Otherwise walk. The phase is saved, then `phase = (phase + 1) & 3`. With the step tables of
    §10.9 indexed by the new phase: up gives `dy = -up[phase]`, else down gives `dy = down[phase]`;
    right sets `facing = 1` and `dx = side[phase]`, else left sets `facing = 3` and
@@ -1830,8 +1832,8 @@ raises.
    restored and the script is idle. Otherwise bit 7 of `behaviour_flags` is cleared and the next
    script is `walk_scripts[block + phase * 4]`.
 
-A joystick cannot press left and right together; the action tables give `$16` and `$40` for such
-words, which the original cannot use (above).
+A joystick cannot press opposing directions together; guarding those combinations in `_fire`
+prevents out-of-range table reads and falls back cleanly to action `0`.
 
 **Movement probe** (exact form of §10.10). The mask starts as `$1F`; `f = facing & 3`. For each
 active job in table order whose owner is not the mover, has a non-zero `box_min_x` and `hp > 0`
@@ -2050,10 +2052,10 @@ branch's quirk, where stale bits of the last move stay set.
 
 **Walk.** If the low byte of `input` is 0, the next script stands. Otherwise the **step
 helpers** run for the bits that are set, in the order up (bit 3), down (bit 2), right (bit 0),
-left (bit 1). Each helper reads the walk phase `p` and the entry of its step table at byte offset
-`p * 4`, an `{x, y}` word pair. The tables are three 16-byte runs of `{x, y}` pairs in `mog`'s code
-hunk: side, up, down. They lie back to back, so an entry past a table's end reads the next table,
-or the code after the last one. Each helper sets a **block** (0, 32 or 64) and a phase step `s`:
+left (bit 1). Each helper reads the walk phase masked to `0..3` (`p & 3`) and the entry of its step
+table at byte offset `(p & 3) * 4`, an `{x, y}` word pair. Each of the three step tables (side, up,
+down) is bounded to 8 words (4 valid `{x, y}` pairs) with no reads past the table into adjacent
+tables or code. Each helper sets a **block** (0, 32 or 64) and a phase step `s`:
 
 | Helper | `dx`, `dy` | Also | Block | `s` |
 |---|---|---|---|---|
@@ -2067,9 +2069,9 @@ facing 1, left otherwise), so the record walks forwards. It is −1 otherwise: t
 away and the walk cycle runs backwards. A later helper replaces the block and `s` of an
 earlier one. Then the **step** runs:
 
-1. Phase advance: `p = (p + s) & 7`, repeated until `walk_scripts[block + p * 4]` is not 0. The
-   axe Troggs' sideways block has three phase scripts, so phase 3 is skipped. The original loops
-   for ever on a block with no script. The implementation raises after eight tries.
+1. Phase advance: `p = (p + s) & 3`, repeated until `walk_scripts[block + p * 4]` is not 0. The
+   axe Troggs' sideways block has three phase scripts, so phase 3 is skipped. The implementation
+   raises after four tries on a block with no script.
 2. The block is stored. `input` is masked by the movement probe of §10.19, using `dx` and the
    record's facing. No arena clip and no obstacle probe run.
 3. Nothing left in `input`: the phase becomes 0 and the next script is `idle_script`.
@@ -2509,9 +2511,9 @@ otherwise), or -1 if not. Then use the existing move-apply helper (§10.20):
 advance phase with that increment until there is a script, apply the movement
 probe, clear blocked components, add wrapped coordinates and select the new
 phase's walk script. All-zero input resets phase and returns idle. There is
-no arena clipping. The step table is read as sixteen words: the original has
-only four pairs, so phases 4..7 read the following sound-id and instruction
-bytes. Those words stay runtime data, including their unusual signed values.
+no arena clipping. The step table is read as 8 words (four `{dx, dy}` pairs
+for phases `0..3`), and phase indexing is masked to `0..3` so movement never
+reads past the table into adjacent bytes.
 
 **Hit spark** (shared by later creature handlers): restore the decoded idle
 object type's handler to the idle handler, then spawn its fixed script with
@@ -2833,20 +2835,18 @@ consume one discarded full draw (the debug taunt), then walk. Attack tests in or
 signed distance <=90 and last action !=$08 selects $08; <=95 and last !=$20 selects
 $20; <=100 and (no daggers or last !=$04) selects $04; otherwise with daggers select
 $0C, else walk. Every selected action uses own action script table. Odds are indexed
-by the original zero-based day word, not a new difficulty setting. The decoder
-retains bytes following the relocated odds pointer, including adjacent data when
-a late day reads past the nominal table; an index outside the loaded hunk raises.
-Calendar wiring remains T11.12/13; independent duels accept the original day index.
+by the zero-based day word, clamped to `0 .. len(odds) - 1`. The decoder slices
+the `odds` table to its nominal 20-byte length rather than reading adjacent hunk data.
+Calendar wiring remains T11.12/13; independent duels accept the day index.
 
-Walking clears the block latch. Use §10.20 step helpers in up/down/right/left order,
-but their table pointers are hunk41 +20/+36/+0. Eight pairs per pointer are read
-from the user's executable: these overlap subsequent tables, the mutable last-action
-word at +52, and text. Substitute the current shared action word at +52 before a
-down step reads it. Up/down overrides are -5/+5 from checked operands. The old
-phase supplies movement; phase advancement and probes follow §10.20. No arena
-clip or obstacle probe is added. The original leaves stale high D0 bits when
-a down opponent is at least256 pixels away and can index far memory: use the
-bounded phase index instead (ADR-011), without emulating arbitrary memory reads.
+Walking clears the block latch. Use §10.20 step helpers in up/down/right/left order
+with table pointers at hunk41 +20/+36/+0. Each pointer supplies 8 words (4 valid
+`{dx, dy}` pairs for phases `0..3`), cleanly bounded without overlapping subsequent
+tables or the shared last-action word at +52; `rules.steps` is passed directly to
+`walk()`. Up/down overrides are -5/+5 from checked operands. The old
+phase (masked to `0..3`) supplies movement; phase advancement and probes follow §10.20. No arena
+clip or obstacle probe is added. Bounded phase indexing keeps all lookups inside the
+4-pair tables.
 
 The decoder checks the type table entry ($10 -> hunk40 $0CAA), helper destinations,
 operand instructions, paired ranges, step pointers and odds pointers. Distances,
@@ -3082,10 +3082,11 @@ The move step does nothing to the position when the move word is zero. Otherwise
 Then, always: recompute the tile and run the proximity scan (§11.7).
 
 **Tile.** With `w`, `h` the size of frame 0 of the map sprite set (§11.15):
-`tile_x = (map_x + (w >> 1)) >> 3`, `tile_y = (map_y + h) >> 3` (unsigned shifts). The tile is
-the 8 x 8 cell under the middle of the sprite's bottom edge. The **tile index** is
-`tile_y * 40 + tile_x`, used as a signed word index into two byte tables of `mog` data, one byte
-per cell of the 40 x 25 grid:
+`tile_x = clamp((s16(map_x) + (w >> 1)) >> 3, 0, 39)`,
+`tile_y = clamp((s16(map_y) + h) >> 3, 0, 24)`. The tile is the 8 x 8 cell under the middle of the
+sprite's bottom edge, clamped to the 40 x 25 map grid. The **tile index** is
+`tile_y * 40 + tile_x` (`0..999`), indexing two 1,000-byte tables of `mog` data, one byte per cell
+of the 40 x 25 grid:
 
 - the **terrain mask** table (§11.6);
 - the **region** table: the region code (0, 4, 8, `$C`; §10.2) of the cell. It is read into
@@ -3552,9 +3553,8 @@ $07DA. The handler identity stored at $06B8 points to $07B8. Timer, speed and ed
 operands are checked at $074A, $0752, $07C6, $07CE, $0820/$0828,
 $083A/$0842, $0854/$085C/$0868; y speed is the data word referenced by $07FE.
 Spawning clears map jobs and starts a real job in the existing Fight/ScriptEngine
-with all five frame-list slots naming mi.c. The original takes that job's initial
-x/height/depth from words at first-script+4/+6/+8, despite having just set the
-record to (10,0,100); preserve these initial job words and its first write-back.
+with all five frame-list slots naming mi.c, starting at the dragon actor's initialized
+position `(actor.x, actor.height, actor.y)` (e.g., `(10, 0, 100)`).
 The subsequent type28 handler selects a flight/hover script and restarts at the
 record position/facing. Retain the actual script draw offsets and mirroring.
 A map entry runs existing jobs before trying to spawn, as §11.4 specifies.
@@ -4013,12 +4013,8 @@ read.
 | 4 | Market (sheet 6) | Mythral the mystic (§12.19) |
 | 5 | Exit: pointer off, spent exit | Exit |
 
-**Space key:** in Highwood it opens the status sheet (sheet 9). In Waterdeep the original
-does not load a sheet number and opens the number the key translation left behind, the space
-character's code 32. The sheet loop treats an unknown number as a sheet with the left panel
-only, the narrow layout and the plain tables: the knight's panel can be looked at, nothing
-can be used. The sheet loop therefore accepts any number, and Waterdeep's space key passes 32
-(quirk kept).
+**Space key:** in both Highwood and Waterdeep, Space opens the status sheet (sheet `9`, decoded
+from Highwood's status sheet load).
 
 A town visit always ends the turn (the only way out is the exit button).
 
@@ -4310,14 +4306,14 @@ and $2DFE. Town names come from the relocated immediates at $2D96 and $2DD2,
 whose store destinations must also match in the two loaders. Require bounded,
 nonempty ASCII strings within hunk4.
 
-Both towns compare the translated key with Space. Highwood then loads the
-sheet number as a checked long immediate at $14C2 before the sheet call at
-$14C8. Waterdeep calls that same sheet entry at $137A without loading D0;
-its decoded Space sheet is the key operand at $1366. Check the intervening
-fade/pointer calls, the relocated sheet entry and the instruction forms, so
-this difference remains an explicit decoded property. Button action meanings
-remain the control-flow rules of ?12.15, rather than strings inferred from the
-painted pictures.
+Both towns compare the translated key with Space and check the intervening
+fade/pointer and relocated sheet calls. Highwood loads the status sheet number
+(`9`) as a checked long immediate at `$14C2` before its sheet call at `$14C8`;
+Waterdeep's Space branch calls `$ABEC` at `$137A` directly, so the decoder uses
+Highwood's decoded status sheet number (`9`) consistently for both towns rather
+than passing the Space character code. Button action meanings remain the
+control-flow rules of §12.15, rather than strings inferred from the painted
+pictures.
 
 Frozen records in sim/town_types.py form the data boundary for T11.16b.
 assets/town_data.py performs the checked reads without adding an alternate
@@ -4414,20 +4410,14 @@ rolls or replenishes stock. This closes the initialization follow-up recorded
 by T11.12/13, and preserves the PRNG order before market and later gameplay.
 
 
-### 11.21 Bottom-edge map grid reads (T11.17 verification correction)
+### 11.21 Bottom-edge map grid bounds
 
-The corrected startup random sequence reaches a legal computer position
-(305,190), whose frame-0 bottom edge yields tile index 1038. The original
-signed-index byte read has no 1000-cell bounds test. Keep the nominal 40x25
-terrain and region arrays, and also load their immediately following bytes
-from the same hunk. Bound this extension by the largest tile reachable at
-(310,190) using the actual decoded frame-0 size (for the supported image,
-one additional 40-cell row). Lookup first addresses the nominal grid, then
-this retained suffix; negative indices or reads beyond the suffix still raise.
-Do not clamp the knight, tile or table values and do not invent padding.
-This corrects the earlier §11.18 model of a 1000-byte allocation without
-changing movement, clipping, PRNG calls or map scheduling. Synthetic rules may
-omit the suffix and continue to reject accesses outside their supplied data.
+A legal bottom-edge position such as `(305, 190)` or `(310, 190)` with frame-0
+height `10` produces a raw tile row of `25`, just past the 40x25 grid. Keep only
+the nominal 1,000-byte (40x25) terrain and region arrays in `MapRules` and clamp
+`tile_x` to `0..39` and `tile_y` to `0..24` inside `OverworldState.tile()`.
+`OverworldState.grid_byte()` indexes only the 1,000-byte grid so lookups stay
+within bounds without loading trailing bytes past the tables.
 
 ### 12.30 Service rule boundary (T11.18a)
 

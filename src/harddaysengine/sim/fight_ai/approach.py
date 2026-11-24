@@ -20,9 +20,9 @@ if TYPE_CHECKING:
     from harddaysengine.sim.fight import Fight
     from harddaysengine.sim.fighter_rules import Probes
 
-STEP_TABLE_WORDS = 16
-_PHASE_MASK = 7
-_PHASES = 8
+STEP_TABLE_WORDS = 8
+_PHASE_MASK = 3
+_PHASES = 4
 _FACING_RIGHT = 1
 _FACING_LEFT = 3
 _BLOCK_SIDE = 0
@@ -37,9 +37,7 @@ _LOW_BYTE = 0xFF
 class ApproachRules:
     """The three step tables and the two depth overrides of the step helpers (§10.20).
 
-    Each table is the 16 words that follow its start in ``mog``'s code hunk: eight ``{x, y}``
-    pairs. Phases past a table's own entries therefore read the words after it, as in the
-    original.
+    Each table holds 8 words: four ``{x, y}`` pairs for phases ``0..3``.
     """
 
     side: tuple[int, ...]
@@ -92,7 +90,8 @@ def approach(fight: Fight, actor: Actor, target: Actor) -> tuple[bool, int]:
 
 
 def _pair(table: tuple[int, ...], phase: int) -> tuple[int, int]:
-    return table[phase * 2], table[phase * 2 + 1]
+    idx = phase & _PHASE_MASK
+    return table[idx * 2], table[idx * 2 + 1]
 
 
 def _side_sign(actor: Actor) -> int:

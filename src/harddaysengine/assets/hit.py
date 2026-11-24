@@ -88,7 +88,7 @@ def compute_cel_hurtbox(frame: CelFrame) -> HurtBox:
 
 
 class _DigitStream:
-    """Character stream over a collide.hit section body matching `hitParse` (`loaders.cpp`)."""
+    """Character stream over a `collide.hit` section body (ARCHITECTURE.md §4.2)."""
 
     def __init__(self, text: str, start: int = 0) -> None:
         self._text = text
@@ -173,7 +173,7 @@ def parse_collide_hit(data: bytes | str) -> dict[str, HitSet]:
 
 
 def encode_hit_frame_binary(frame: HitFrame) -> bytes:
-    """Encode a HitFrame into the exact in-memory binary record produced by `hitParse`."""
+    """Encode a HitFrame into its compact in-memory binary record (ARCHITECTURE.md §4.2)."""
     if frame.count == 0:
         return b"\x00"
     out = bytearray(
@@ -186,5 +186,5 @@ def encode_hit_frame_binary(frame: HitFrame) -> bytes:
 
 
 def encode_hit_set_binary(hit_set: HitSet) -> bytes:
-    """Encode an entire HitSet into the concatenated binary representation used by `contactTest`."""
+    """Encode an entire HitSet into its concatenated binary contact-check table (§4.2)."""
     return b"".join(encode_hit_frame_binary(f) for f in hit_set.frames)

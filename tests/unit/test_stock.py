@@ -40,16 +40,17 @@ def test_key_group_shape_fails_instead_of_indexing_unmodeled_memory() -> None:
         initialize(world, STOCK, GIFTS)
 
 
-def test_legal_bottom_edge_uses_supplied_grid_suffix_and_still_checks_bounds() -> None:
+def test_legal_bottom_edge_clamps_within_nominal_grid() -> None:
     world, _ = sheet()
-    world.rules = replace(world.data(), sizes=((8, 10), *world.data().sizes[1:]))
+    terrain = bytearray(1000)
+    terrain[999] = 3
+    world.rules = replace(
+        world.data(),
+        terrain=bytes(terrain),
+        sizes=((8, 10), *world.data().sizes[1:]),
+    )
     actor = world.current_actor
     actor.map_x, actor.map_y = 310, 190
-    index = world.tile()
-    assert index >= 1000
-    with pytest.raises(ValueError, match="outside loaded grid"):
-        world.grid_byte(world.data().terrain)
-    suffix = bytes([3] * (index - 1000 + 1))
-    assert world.grid_byte(world.data().terrain, suffix) == 3
-    with pytest.raises(ValueError, match="outside loaded grid"):
-        world.grid_byte(world.data().terrain, suffix[:-1])
+    assert world.tile() == 999
+    assert (actor.tile_x, actor.tile_y) == (39, 24)
+    assert world.grid_byte(world.data().terrain) == 3

@@ -48,9 +48,6 @@ def test_loaded_calendar_flight_and_gift_tables_match_independent_reads(adf_dir:
         struct.unpack_from(">I", mog.hunk_data(pointer.hunk), pointer.offset + i * 4)[0]
         for i in range(16)
     )
-    assert rules.dragon.initial_job == struct.unpack_from(
-        ">HHH", mog.hunk_data(4), rules.dragon.scripts[0] + 4
-    )
     pointer = mog.pointer(0x9AA2, "independent item bands")
     assert rules.gifts.bands == tuple(
         struct.iter_unpack(">II", mog.hunk_data(pointer.hunk)[pointer.offset : pointer.offset + 80])
@@ -191,19 +188,18 @@ def test_calendar_and_flight_rendering_never_advance_replay_state(adf_dir: Path)
         rig.release()
 
 
-def test_initial_map_job_writes_back_its_loaded_position(adf_dir: Path) -> None:
+def test_initial_map_job_starts_at_actor_position(adf_dir: Path) -> None:
     session = _session(adf_dir)
     world = session.overworld
     world.day = 2
     session._reenter_map()
     assert world.turn_rules is not None and session.map_runtime is not None
     assert (world.dragon.x, world.dragon.height, world.dragon.y) == (10, 0, 100)
+    job = session.map_runtime.scene.fight.find_job(5)
+    assert job is not None
+    assert (job.x, job.height, job.depth) == (10, 0, 100)
     _ticks(session, 2)
-    assert (
-        world.dragon.x,
-        world.dragon.height,
-        world.dragon.y,
-    ) == world.turn_rules.dragon.initial_job
+    assert (world.dragon.x, world.dragon.height, world.dragon.y) == (10, 0, 100)
 
 
 def test_changed_map_handler_instruction_is_rejected(adf_dir: Path) -> None:

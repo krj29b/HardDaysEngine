@@ -27,7 +27,6 @@ class MapDragonRules:
     stores: tuple[tuple[int, int, int], ...]
     scripts: tuple[int, ...]
     hover: int
-    initial_job: tuple[int, int, int]
     speed_x: int
     speed_y: int
     timer: int

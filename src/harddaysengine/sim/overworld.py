@@ -296,18 +296,18 @@ class OverworldState:
         self.enter()
 
     def tile(self) -> int:
-        """Wrapped cell under the sprite's bottom centre (§11.5)."""
+        """Clamped 40x25 cell under the sprite's bottom centre (§11.5)."""
         actor = self.current_actor
         width, height = self.data().size(0)
-        actor.tile_x = u16(actor.map_x + (width >> 1)) >> 3
-        actor.tile_y = u16(actor.map_y + height) >> 3
-        return u16(actor.tile_y * 40 + actor.tile_x)
+        raw_x = (s16(actor.map_x) + (width >> 1)) >> 3
+        raw_y = (s16(actor.map_y) + height) >> 3
+        actor.tile_x = max(0, min(39, raw_x))
+        actor.tile_y = max(0, min(24, raw_y))
+        return actor.tile_y * 40 + actor.tile_x
 
-    def grid_byte(self, table: bytes, suffix: bytes = b"") -> int:
-        """Signed indexing into the grid and its bounded executable suffix (§11.21)."""
-        index = s16(self.tile())
-        if len(table) <= index < len(table) + len(suffix):
-            return suffix[index - len(table)]
+    def grid_byte(self, table: bytes) -> int:
+        """Index the 1,000-byte map grid at the clamped tile (§11.5)."""
+        index = self.tile()
         if not 0 <= index < len(table):
             raise ValueError(f"map tile {index} outside loaded grid")
         return table[index]
@@ -319,7 +319,7 @@ class OverworldState:
         if actor.kind != 4:
             actor.type = 12
         self.budget = u16(actor.derived_endurance << 4)
-        self.region_code = self.grid_byte(self.data().regions, self.data().region_tail)
+        self.region_code = self.grid_byte(self.data().regions)
 
     def enter(self) -> None:
         """Recompute turn cells and apply stale move without charging (§11.4)."""
@@ -333,7 +333,7 @@ class OverworldState:
         self.blocked = False
         if self.travel or self.ambush:
             return
-        mask = self.grid_byte(self.data().terrain, self.data().terrain_tail)
+        mask = self.grid_byte(self.data().terrain)
         if mask:
             self.terrain_counter = u16(self.terrain_counter + 1)
             self.blocked = bool(self.terrain_counter & u16(s8(mask)))

@@ -116,6 +116,7 @@ def test_the_rules_cover_every_attacker_and_every_action(setup: Setup) -> None:
     rules = setup.rules
     assert set(ATTACKER_TYPES) <= set(rules.hurt_rules)
     assert rules.hurt_rules[0x34] is HurtRule.CONTACT
+    assert len(rules.actions_right) == len(rules.actions_left) == 11
     assert set(ACTIONS) <= set(rules.actions_right)
     assert set(ACTIONS) <= set(rules.actions_left)
     assert len(rules.steps.side) == len(rules.steps.up) == len(rules.steps.down) == 4

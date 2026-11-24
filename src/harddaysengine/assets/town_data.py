@@ -107,19 +107,21 @@ def _cursor(mog: MogCode, start: int) -> tuple[int, int, Pointer]:
     return x, y, target
 
 
+_HIGHWOOD_SPACE = 0x14AE
+_WATERDEEP_SPACE = 0x1366
+
+
 def _space_sheet(mog: MogCode, highwood: bool) -> int:
-    start = 0x14AE if highwood else 0x1366
+    start = _HIGHWOOD_SPACE if highwood else _WATERDEEP_SPACE
     mog.expect(start + 4, (0x6600,), "town Space branch")
     key = mog.operand(start, 0xB07C, "town Space comparison")
     if key != 32:
         raise MogVersionError("mog: town status key is not Space")
     _call(mog, start + 8, 0x8B26)
     _call(mog, start + 14, 0xC5F4)
-    if highwood:
-        mog.expect(start + 20, (0x203C,), "town status sheet number")
-        key = mog.long(start + 22)
     _call(mog, start + (26 if highwood else 20), 0xABEC)
-    return key
+    mog.expect(_HIGHWOOD_SPACE + 20, (0x203C,), "town status sheet number")
+    return mog.long(_HIGHWOOD_SPACE + 22)
 
 
 def _town(mog: MogCode, *, highwood: bool) -> tuple[TownData, Pointer, Pointer]:

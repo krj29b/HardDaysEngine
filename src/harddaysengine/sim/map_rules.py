@@ -54,8 +54,6 @@ class MapRules:
     cycle_start: int
     cycle_end: int
     cycle_period: int
-    terrain_tail: bytes = b""
-    region_tail: bytes = b""
 
     def __post_init__(self) -> None:
         if len(self.terrain) != 1000 or len(self.regions) != 1000:

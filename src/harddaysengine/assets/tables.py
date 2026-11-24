@@ -222,7 +222,7 @@ def _read_cstr(data: bytes, offset: int) -> str:
 
 
 def parse_combat_action_tables(mog_exec: DecodedHunkExecutable) -> CombatActionTables:
-    """Read `kActionRight` and `kActionLeft` offset tables from `mog` `S_4`."""
+    """Read right-facing and left-facing combat action offset tables from `mog` `S_4`."""
     min_len = MOG_ACTION_LEFT_OFFSET + MOG_ACTION_COUNT * 2
     s4 = _require_section(mog_exec, MOG_TABLES_SECTION, min_len).data
     fmt = f">{MOG_ACTION_COUNT}H"
@@ -399,7 +399,7 @@ def _step_actor_init_op(
 
 
 def _scan_actor_init_blocks(s0: HunkSection) -> list[dict[int | str, int]]:
-    """Scan `mog` `S_0` `RTS`-delimited actor initializers writing `22(A1)` (`ulIdleScript`)."""
+    """Scan `mog` `S_0` `RTS`-delimited actor initializers writing idle-script (`22(A1)`)."""
     data = s0.data
     r1 = set(s0.relocs.get(1, ()))
     r4 = set(s0.relocs.get(4, ()))

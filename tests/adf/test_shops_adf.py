@@ -222,7 +222,7 @@ def test_reset_recreates_original_stock_and_hash_covers_stock(adf_dir: Path) -> 
     assert (world.market.counts, world.prng.state, world.gifts.last) == expected
 
 
-def test_bottom_edge_suffix_matches_original_adjacent_bytes(adf_dir: Path) -> None:
+def test_bottom_edge_clamps_to_nominal_grid(adf_dir: Path) -> None:
     disks = DiskSet.from_directory(adf_dir)
     exe = parse_hunk_executable("mog", disks.read_file("mog"))
     session = GameSession(disk_set=disks)
@@ -230,15 +230,15 @@ def test_bottom_edge_suffix_matches_original_adjacent_bytes(adf_dir: Path) -> No
     actor = world.current_actor
     actor.map_x, actor.map_y = 305, 190
     index = world.tile()
-    assert index == 1038
+    assert index == 998
+    assert (actor.tile_x, actor.tile_y) == (38, 24)
     code, data = exe.sections[36].data, exe.sections[4].data
-    for load, grid, tail in (
-        (0x8BA, world.data().terrain, world.data().terrain_tail),
-        (0x13FE, world.data().regions, world.data().region_tail),
+    for load, grid in (
+        (0x8BA, world.data().terrain),
+        (0x13FE, world.data().regions),
     ):
         start = int.from_bytes(code[load + 2 : load + 6], "big")
-        assert tail == data[start + 1000 : start + 1040]
-        assert world.grid_byte(grid, tail) == data[start + index]
+        assert world.grid_byte(grid) == data[start + index]
 
 
 @pytest.mark.gl

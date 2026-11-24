@@ -341,8 +341,6 @@ def test_hd_template_map_rules_mask_and_scene_palettes(
         cycle_start=18,
         cycle_end=20,
         cycle_period=1,
-        terrain_tail=b"",
-        region_tail=b"",
     )
     monkeypatch.setattr(
         "harddaysengine.assets.extract.parse_map_rules",

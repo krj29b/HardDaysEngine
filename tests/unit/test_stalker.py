@@ -10,7 +10,7 @@ from tests.unit.brawler_setup import make_trogg_fight
 from tests.unit.knight_setup import RULES
 
 STALKER = StalkerRules(
-    steps=(2, 1, 8, 3, 5, 4, 9, 6, 11, 0xFFFF, 13, 2, 17, 4, 19, 6),
+    steps=(2, 1, 8, 3, 5, 4, 9, 6),
     up=u16(-7),
     down=7,
     strike_near=45,
@@ -35,6 +35,13 @@ def _handle(fight: Fight, handle: int) -> int:
     assert isinstance(result, Restart)
     assert fight.rng.state == state
     return result.script
+
+
+def test_stalker_rejects_wrong_step_table_length() -> None:
+    from dataclasses import replace
+
+    with pytest.raises(ValueError, match="8 words"):
+        replace(STALKER, steps=(1, 2) * 8)
 
 
 def test_hit_takes_priority_over_hurt_even_when_both_links_are_set() -> None:
@@ -95,9 +102,9 @@ def test_attack_thresholds_and_heavy_alternation(
 
 
 @pytest.mark.parametrize(
-    ("phase", "expected_x", "script"), [(0, 218, 71), (1, 212, 72), (6, 203, 70)]
+    ("phase", "expected_x", "script"), [(0, 218, 71), (1, 212, 72), (6, 215, 70)]
 )
-def test_walk_reads_old_phase_then_selects_new_phase_script(
+def test_walk_reads_old_phase_masked_then_selects_new_phase_script(
     phase: int, expected_x: int, script: int
 ) -> None:
     f, handle = _fight(220)

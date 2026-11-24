@@ -11,11 +11,11 @@ from harddaysengine.sim.fight_ai.approach import ApproachRules
 from harddaysengine.sim.fight_ai.brawler import AXE_TYPE, BrawlerRules, install_brawler
 from tests.unit.knight_setup import RULES, make_fight
 
-# Eight {x, y} pairs per table; phases past the third pair are distinct too.
+# Four {x, y} pairs per table (phases 0..3).
 APPROACH = ApproachRules(
-    side=(2, 0xFFFF, 6, 1, 20, 0, 9, 2, 3, 3, 4, 4, 5, 5, 6, 6),
-    up=(1, 11, 0, 4, 2, 8, 0xFFFF, 4, 7, 7, 8, 8, 9, 9, 10, 10),
-    down=(4, 12, 3, 5, 2, 5, 5, 3, 11, 11, 12, 12, 13, 13, 14, 14),
+    side=(2, 0xFFFF, 6, 1, 20, 0, 9, 2),
+    up=(1, 11, 0, 4, 2, 8, 0xFFFF, 4),
+    down=(4, 12, 3, 5, 2, 5, 5, 3),
     up_override=0xFFFA,
     down_override=6,
 )

@@ -6,13 +6,14 @@ from typing import TYPE_CHECKING
 
 from harddaysengine.assets.fight_palette import MogVersionError
 from harddaysengine.assets.mog_code import OP_LEA_A0, MogCode, Pointer, StoreRun
-from harddaysengine.sim.fight_ai.approach import ApproachRules
+from harddaysengine.sim.fight_ai.approach import STEP_TABLE_WORDS, ApproachRules
 from harddaysengine.sim.fight_ai.knight import COMPUTER_KNIGHT_TYPE, ComputerKnightRules
 
 if TYPE_CHECKING:
     from harddaysengine.assets.hunk import DecodedHunkExecutable
 
 HUNK = 40
+_ODDS_LENGTH = 20
 _RANGES = {
     "strike8_range": 0xE96,
     "heavy_range": 0xEBA,
@@ -61,7 +62,10 @@ def _steps(mog: MogCode) -> list[tuple[int, ...]]:
         or _pointer(mog, 0xD6E, 0x43F9, 41) != pointers[0]
     ):
         raise MogVersionError("mog: unexpected computer knight step layout")
-    return [tuple(mog.hunk_word(p.hunk, p.offset + i * 2) for i in range(16)) for p in pointers]
+    return [
+        tuple(mog.hunk_word(p.hunk, p.offset + i * 2) for i in range(STEP_TABLE_WORDS))
+        for p in pointers
+    ]
 
 
 def _rules(mog: MogCode) -> ComputerKnightRules:
@@ -78,6 +82,9 @@ def _rules(mog: MogCode) -> ComputerKnightRules:
     odds = _pointer(mog, 0xDD2, 0x4BF9, 4)
     if _pointer(mog, 0xE60, 0x4BF9, 4) != odds:
         raise MogVersionError("mog: computer knight odds pointers disagree")
+    odds_hunk = mog.hunk_data(odds.hunk)
+    if not 0 <= odds.offset <= len(odds_hunk) - _ODDS_LENGTH:
+        raise MogVersionError("mog: computer knight odds table outside its data hunk")
     return ComputerKnightRules(
         steps=ApproachRules(
             side=steps[0],
@@ -86,7 +93,7 @@ def _rules(mog: MogCode) -> ComputerKnightRules:
             up_override=mog.operand(0x1072, 0x33FC, "computer knight up override", hunk=HUNK),
             down_override=mog.operand(0x1094, 0x33FC, "computer knight down override", hunk=HUNK),
         ),
-        odds=mog.hunk_data(odds.hunk)[odds.offset :],
+        odds=odds_hunk[odds.offset : odds.offset + _ODDS_LENGTH],
         **values,
     )
 
