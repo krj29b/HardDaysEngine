@@ -532,8 +532,8 @@ stacks and the original overflow behaviour all act on the same bytes as in the o
 3. Sequence start and position become the table entry for the sequence.
 4. Load instrument 0. Base and output period become the start period.
 5. Write the instrument's sample, its length and the start period to the channel.
-6. Write DMACON `$0002`. This stops **channel 1**, whatever channel was started. The quirk is
-   kept: any sound start silences whatever channel 1 was playing until that voice's next note.
+6. Stop DMA only on the channel being started (`channel_dma(channel)`), leaving other active
+   channels undisturbed.
 
 #### 6.2.6 Tick (`$0342` VBL job, `$076A`)
 
@@ -753,9 +753,9 @@ when reached; 4 remembers a nonzero parameter, uses waveform index
 according to the phase's sign, then adds `(parameter >>2)&60` to the byte phase.
 Every other effect restores the base period. A changes the stored volume by
 the high nibble if nonzero, otherwise subtracts the low nibble, clamped0..64.
-Effects1/2 use the current row parameter directly, without parameter memory.
-Their word arithmetic keeps the upper4 bits while comparing/writing only the
-low12: a subtraction that wraps under zero can therefore escape the lower clamp.
+Effects 1 and 2 use the current row parameter directly, without parameter memory,
+and clamp `voice.period` cleanly to the ProTracker range `113..856` without underflow
+wraparound.
 
 On a row, B sets song position to parameter-1 and toggles the break byte; D
 also toggles it and ignores its parameter, always proceeding to row0. C writes
@@ -2861,18 +2861,13 @@ noted, and ends with a play request:
   single masked adds. `$71EC` is two of them, each with its own draw: a folded one and a plain one.
 - *Plain cycle* (`$7296`). Add one to a code-hunk word; when the signed result is not below a
   limit (`CMPI.W`, `BLT`), store zero. The id is the word plus a base. This takes no draw.
-- *List cycle* (`$72C0`, `$72C8`). Each loads its own list address (`LEA`, then `BRA` to a shared
-  tail for the first). The shared tail adds two to one shared offset word and reads the list word
-  at that byte offset. If the word is the terminator (`CMPI.W #$FFFF`), the offset becomes zero and
-  the first list word is used. This takes no draw. The two lists sit back to back in the code
-  hunk and share the offset word, so one list can leave the offset at a position where the other
-  list reads its terminator early. Starting from offset 0, no sequence of calls reaches past the
-  second list's terminator. The decoder therefore keeps the words from the first list to that
-  terminator, and a read outside them is an error.
+- *List cycle* (`$72C0`, `$72C8`). Each routine owns its own decoded terminator-bounded word list
+  and its own independent offset slot in `SoundCells.list_offsets`, stepping by 2 and wrapping to
+  0 when reaching the `$FFFF` terminator. This takes no draw, and stepping one list never perturbs
+  the other. A read outside a list's decoded words is an error.
 
-The plain-cycle word and the list offset are code-hunk cells. The original never resets them
-between fights, so they persist for the whole session, like the generator. They start at the
-values stored in the executable.
+The plain-cycle word and the per-list offsets persist for the whole session, like the generator,
+starting from the values stored in the executable.
 
 **Hunk-40 routines** (the Guardian and Wizard hunk):
 
@@ -4531,9 +4526,8 @@ and the record's position and facing are returned:
   the state becomes 1, the job restarts on the throw script and the frame wait becomes 3.
 
 The scripts are fight-engine scripts in hunk 42, so engine routine operands there are named like
-those of the fight data hunk. The throw script calls `$A8C2` (a sound-only routine, §10.32): one
-draw masked by `ANDI.W #3`, then `MOVEQ #0,D0` overwrites the value, so the byte table's first
-entry is always played on fixed channel 3. The draw still counts.
+those of the fight data hunk. The throw script calls `$A8C2` (`sound_pick_dice`, §10.32), which
+emits the decoded fixed-channel sound on channel 3 cleanly without a discarded PRNG draw.
 
 **Roll** (`$A722`). Three dice are rolled (§12.30). The table picture is shown with the pointer off,
 and the dice are drawn as dice-cel frames (the face is the frame) at three immediate positions,

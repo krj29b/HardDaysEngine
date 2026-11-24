@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from harddaysengine.app.campaign_save import (
     CampaignCheckpoint,
+    FightCheckpoint,
     MapCheckpoint,
     PaletteCheckpoint,
     WorldCheckpoint,
@@ -19,6 +20,7 @@ from harddaysengine.app.campaign_save import (
 from harddaysengine.app.input import InputFrame, ReplayRecording, load_replay, save_replay
 from harddaysengine.sim.actor import Actor
 from harddaysengine.sim.ai_map_state import MapAiCells
+from harddaysengine.sim.fight import DrakeCells, FlyerCells
 from harddaysengine.sim.fight_script import BoxCells, Draw, Job, ListEntry
 from harddaysengine.sim.inventory import Inventory
 from harddaysengine.sim.location_state import KnightState
@@ -26,6 +28,7 @@ from harddaysengine.sim.map_dragon import DragonFlight
 from harddaysengine.sim.map_rules import MapColors
 from harddaysengine.sim.overworld import Arrival
 from harddaysengine.sim.rewards import GiftState
+from harddaysengine.sim.sound import SoundCells
 from harddaysengine.sim.turns import TurnCells
 from harddaysengine.sim.types import KnightId
 
@@ -110,7 +113,9 @@ def _sample_checkpoint() -> CampaignCheckpoint:
         world=world,
         palette=palette,
         map_jobs=map_jobs,
-        fights=None,
+        fights=FightCheckpoint(
+            flyer=FlyerCells(), drake=DrakeCells(), sound=SoundCells(plain=1, list_offsets=[2, 4])
+        ),
         legacy={KnightId.RED: KnightState(KnightId.RED)},
         paused=False,
         selected_players=1,

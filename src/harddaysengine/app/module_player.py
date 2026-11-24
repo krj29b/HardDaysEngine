@@ -200,8 +200,6 @@ class ModulePlayer:
     @staticmethod
     def _portamento(voice: ModuleVoice) -> int:
         delta = -voice.argument if voice.effect == 1 else voice.argument
-        voice.period = u16(voice.period + delta)
-        period = voice.period & 4095
-        clipped = max(113, period) if voice.effect == 1 else min(856, period)
-        voice.period = (voice.period & 0xF000) | clipped
+        clipped = max(113, min(856, voice.period + delta))
+        voice.period = clipped
         return clipped

@@ -32,7 +32,6 @@ DECAY_LIMIT = 0x40
 _INIT_DMA = 0x800F
 _ALL_DMA = 0x000F
 _AUDIO_INTERRUPTS = 0x0780
-_START_QUIRK_DMA = 0x0002
 _TREMOLO_STAGES = 2
 _VIBRATO_STAGES = 3
 _ROW_WORDS = 15
@@ -295,7 +294,7 @@ class Synth:
         paula.location(channel, voice.sample)
         paula.length(channel, voice.words)
         paula.period(channel, data.start_period)
-        paula.dmacon(_START_QUIRK_DMA)
+        paula.dmacon(channel_dma(channel))
 
     def tick(self) -> None:
         """One VBL: voice steps, envelope steps, then the register pass (§6.2.6)."""

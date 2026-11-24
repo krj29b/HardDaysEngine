@@ -12,7 +12,7 @@ that persist for the session (:class:`SoundCells`).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
 from functools import partial
 from typing import TYPE_CHECKING
@@ -62,10 +62,10 @@ def play(sound: int) -> SoundRequest:
 
 @dataclass(slots=True)
 class SoundCells:
-    """The persistent picker cells: hunk-0 plain cycle and list offset, hunk-40 counter."""
+    """The persistent picker cells: plain cycle, per-list offsets and counter."""
 
     plain: int = 0
-    list_offset: int = 0
+    list_offsets: list[int] = field(default_factory=lambda: [0, 0])
     counter: int = 0
 
 
@@ -96,16 +96,14 @@ class CycleStep:
 
 @dataclass(slots=True, frozen=True)
 class ListStep:
-    """The list cycle over a shared window of words and one shared offset word.
-
-    ``start`` is the byte offset of this list inside ``words``.
-    """
+    """A list cycle over decoded words with its own independent offset slot."""
 
     start: int
     words: tuple[int, ...]
     step: int
     terminator: int
     reset: int
+    slot: int = 0
 
 
 @dataclass(slots=True, frozen=True)
@@ -129,7 +127,7 @@ class SoundRules:
 
     def initial_cells(self) -> SoundCells:
         """A fresh copy of the executable's cell values, for one session."""
-        return SoundCells(self.cells.plain, self.cells.list_offset, self.cells.counter)
+        return SoundCells(self.cells.plain, list(self.cells.list_offsets), self.cells.counter)
 
 
 def _list_word(step: ListStep, offset: int) -> int:
@@ -140,12 +138,14 @@ def _list_word(step: ListStep, offset: int) -> int:
 
 
 def _list_pick(step: ListStep, cells: SoundCells) -> int:
-    offset = u16(cells.list_offset + step.step)
+    if step.slot >= len(cells.list_offsets):
+        cells.list_offsets.extend([0] * (step.slot + 1 - len(cells.list_offsets)))
+    offset = u16(cells.list_offsets[step.slot] + step.step)
     word = _list_word(step, offset)
     if word == step.terminator:
         offset = step.reset
         word = _list_word(step, offset)
-    cells.list_offset = offset
+    cells.list_offsets[step.slot] = offset
     return word
 
 

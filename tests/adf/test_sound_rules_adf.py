@@ -79,5 +79,7 @@ def test_requests_name_valid_channels_and_cells_start_in_range(rules: SoundRules
     releases = [r for r in emits if r.kind == SoundKind.RELEASE]
     assert [r.channel for r in releases] == [0, 1]
     assert all(r.mask & (1 << r.channel) == 0 and r.mask & 0xF0 == 0 for r in releases)
-    (window,) = {s.words for _n, steps in rules.routines for s in steps if isinstance(s, ListStep)}
-    assert window[-1] == 0xFFFF and rules.cells.list_offset % 2 == 0
+    list_steps = [s for _n, steps in rules.routines for s in steps if isinstance(s, ListStep)]
+    assert len(list_steps) == 2 and {s.slot for s in list_steps} == {0, 1}
+    assert all(s.start == 0 and s.words[-1] == 0xFFFF for s in list_steps)
+    assert len(rules.cells.list_offsets) == 2 and all(o % 2 == 0 for o in rules.cells.list_offsets)

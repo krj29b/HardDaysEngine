@@ -29,10 +29,9 @@ from harddaysengine.sim.sound import (
 
 FIXED = SoundRequest(SoundKind.FIXED, 9, 2)
 RELEASE = SoundRequest(SoundKind.RELEASE, 200, 1, 0x0D)
-# Two lists back to back, sharing one offset: A = 11, 12, end, end; B = 21, 22, 23, end.
-WINDOW = (11, 12, 0xFFFF, 0xFFFF, 21, 22, 23, 0xFFFF)
-LIST_A = ListStep(0, WINDOW, 2, 0xFFFF, 0)
-LIST_B = ListStep(8, WINDOW, 2, 0xFFFF, 0)
+# Two independent lists with their own slots: A = 11, 12, end; B = 21, 22, 23, end.
+LIST_A = ListStep(0, (11, 12, 0xFFFF), 2, 0xFFFF, 0, slot=0)
+LIST_B = ListStep(0, (21, 22, 23, 0xFFFF), 2, 0xFFFF, 0, slot=1)
 
 
 def _run(
@@ -77,23 +76,26 @@ def test_cycle_wraps_at_a_signed_limit_without_drawing() -> None:
 def test_list_cycles_restart_at_the_terminator() -> None:
     cells = SoundCells()
     ids = [_run((LIST_B,), cells)[0][0].sound for _ in range(4)]
-    assert ids == [22, 23, 21, 22] and cells.list_offset == 2
+    assert ids == [22, 23, 21, 22] and cells.list_offsets == [0, 2]
 
 
-def test_lists_share_one_offset_so_a_long_list_cuts_the_short_one() -> None:
+def test_lists_keep_independent_offsets() -> None:
     cells = SoundCells()
     for _ in range(2):
         _run((LIST_B,), cells)
-    assert cells.list_offset == 4
+    assert cells.list_offsets == [0, 4]
     out, _ = _run((LIST_A,), cells)
-    assert out == [play(11)] and cells.list_offset == 0
+    assert out == [play(12)] and cells.list_offsets == [2, 4]
+    extended = ListStep(0, (31, 32, 0xFFFF), 2, 0xFFFF, 0, slot=3)
+    out, _ = _run((extended,), cells)
+    assert out == [play(32)] and cells.list_offsets == [2, 4, 0, 2]
 
 
 def test_a_list_read_outside_the_decoded_words_is_an_error() -> None:
     with pytest.raises(SoundError, match="outside"):
-        _run((LIST_B,), SoundCells(list_offset=6))
+        _run((LIST_B,), SoundCells(list_offsets=[0, 6]))
     with pytest.raises(SoundError, match="outside"):
-        _run((LIST_A,), SoundCells(list_offset=0xFFFC))
+        _run((LIST_A,), SoundCells(list_offsets=[0xFFFC, 0]))
 
 
 def test_counter_plays_only_when_the_masked_word_returns_to_zero() -> None:
@@ -147,7 +149,8 @@ def test_installed_routines_share_the_fight_cells_and_generator() -> None:
 
 
 def test_rules_hand_out_a_fresh_copy_of_the_executable_cells() -> None:
-    rules = SoundRules((), SoundCells(1, 2, 3))
+    rules = SoundRules((), SoundCells(1, [2, 4], 3))
     first = rules.initial_cells()
     first.plain = 9
-    assert rules.initial_cells() == SoundCells(1, 2, 3)
+    first.list_offsets[0] = 99
+    assert rules.initial_cells() == SoundCells(1, [2, 4], 3)

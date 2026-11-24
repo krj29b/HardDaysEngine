@@ -57,7 +57,7 @@ def test_init_writes_the_chip_and_wipes_the_stacks() -> None:
     ]
 
 
-def test_start_resets_the_voice_and_switches_channel_one_off() -> None:
+def test_start_resets_the_voice_and_stops_only_its_own_channel_dma() -> None:
     synth, paula = _synth({5: TEMPO_1})
     old = synth.voices[2]
     old.interrupts, old.transpose, old.fade = 5, 3, ATTENUATION
@@ -79,8 +79,9 @@ def test_start_resets_the_voice_and_switches_channel_one_off() -> None:
         ("location", 2, sample),
         ("length", 2, 4),
         ("period", 2, START_PERIOD),
-        ("dmacon", 2),
+        ("dmacon", 4),
     ]
+    assert ("dmacon", 2) not in paula.log
 
 
 def test_note_reads_the_pitch_table_with_transpose_and_retriggers() -> None:

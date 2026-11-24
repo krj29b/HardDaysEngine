@@ -143,9 +143,14 @@ def test_arpeggio_and_signed_vibrato_use_the_decoded_tables(
     assert actual == expected
 
 
-def test_portamento_word_underflow_keeps_the_original_upper_bits() -> None:
+def test_portamento_clamps_cleanly_to_protracker_bounds_without_underflow() -> None:
     paula = PeriodPaula()
     player = ModulePlayer(_module(((0, 0, 500, 1, 255),)), RULES, paula)
     _ticks(player, 11)
-    assert player.voices[0].period == (500 - 5 * 255) & 65535
-    assert paula.periods[0] == player.voices[0].period & 4095
+    assert player.voices[0].period == 113
+    assert paula.periods[0] == 113
+    paula_down = PeriodPaula()
+    player_down = ModulePlayer(_module(((0, 0, 800, 2, 255),)), RULES, paula_down)
+    _ticks(player_down, 11)
+    assert player_down.voices[0].period == 856
+    assert paula_down.periods[0] == 856

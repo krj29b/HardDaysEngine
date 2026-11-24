@@ -204,11 +204,11 @@ def test_cycles_counters_and_initial_cells_come_from_the_executable() -> None:
     r = dict(rules.routines)
     assert r["sound_pick_5"] == (CycleStep(1, 6, 0, 40),)
     assert r["sound_pick_11"] == (CounterStep(1, 1, 90),)
-    assert rules.cells == SoundCells(plain=2, list_offset=4, counter=1)
+    assert rules.cells == SoundCells(plain=2, list_offsets=[4, 4], counter=1)
     (a,), (b,) = r["sound_pick_7"], r["sound_pick_6"]
     assert isinstance(a, ListStep) and isinstance(b, ListStep)
-    assert (a.start, b.start) == (0, 8) and a.words == b.words
-    assert a.words == (61, 62, 0xFFFF, 0xFFFF, 71, 72, 73, 0xFFFF)
+    assert (a.start, a.slot, a.words) == (0, 1, (61, 62, 0xFFFF))
+    assert (b.start, b.slot, b.words) == (0, 0, (71, 72, 73, 0xFFFF))
 
 
 def test_fixed_release_and_tables_keep_channels_signs_and_loop_counts() -> None:
@@ -224,10 +224,7 @@ def test_fixed_release_and_tables_keep_channels_signs_and_loop_counts() -> None:
     assert r["sound_release_0"] == (Emit(SoundRequest(SoundKind.RELEASE, 300, 0, 0x0E)),)
     assert r["sound_release_1"] == (Emit(SoundRequest(SoundKind.RELEASE, 300, 1, 0x0D)),)
     assert _pick(r["guardian_sound"]) == ((10,), (0xFF90,), (12,), (13,))
-    assert r["sound_pick_dice"] == (
-        DrawPick(3, ((),) * 4),
-        Emit(SoundRequest(SoundKind.FIXED, 101, 3)),
-    )
+    assert r["sound_pick_dice"] == (Emit(SoundRequest(SoundKind.FIXED, 101, 3)),)
     loop = r["sound_pick_12"]
     assert len(loop) == 3 and _pick(loop[:1])[7] == (207,)
 

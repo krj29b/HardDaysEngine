@@ -332,21 +332,19 @@ def _list_starts(mog: MogCode) -> tuple[list[int], int]:
     return starts, tails.pop()
 
 
-def _list_window(mog: MogCode, starts: list[int], terminator: int) -> tuple[int, tuple[int, ...]]:
-    first, pos = min(starts), max(starts)
+def _list_words(mog: MogCode, start: int, terminator: int) -> tuple[int, ...]:
+    pos = start
     while mog.hunk_word(CODE_HUNK, pos) != terminator:
         pos += 2
-    words = tuple(mog.hunk_word(CODE_HUNK, p) for p in range(first, pos + 2, 2))
-    return first, words
+    return tuple(mog.hunk_word(CODE_HUNK, p) for p in range(start, pos + 2, 2))
 
 
 def _lists(mog: MogCode) -> tuple[list[tuple[str, tuple[SoundStep, ...]]], Pointer]:
     starts, tail = _list_starts(mog)
     step, terminator, reset, cell = _list_tail(mog, tail)
-    first, words = _list_window(mog, starts, terminator)
     routines: list[tuple[str, tuple[SoundStep, ...]]] = [
-        (name, (ListStep(start - first, words, step, terminator, reset),))
-        for (name, _), start in zip(_LISTS, starts, strict=True)
+        (name, (ListStep(0, _list_words(mog, start, terminator), step, terminator, reset, slot),))
+        for slot, ((name, _), start) in enumerate(zip(_LISTS, starts, strict=True))
     ]
     return routines, cell
 
@@ -390,10 +388,10 @@ def _table_pick(reader: _Reader, *, signed: bool) -> DrawPick:
 
 
 def _discarded(mog: MogCode, start: int) -> tuple[SoundStep, ...]:
-    """A draw whose value ``MOVEQ #0`` overwrites, then the table's first byte (§12.32)."""
+    """Emit the decoded fixed-channel dice sound cleanly without a discarded draw (§12.32)."""
     reader = _Reader(mog, CODE_HUNK, start, "dice sound")
     reader.generator()
-    mask = _check_mask(reader.immediate(_OP_ANDI_W_D0), reader.what)
+    _check_mask(reader.immediate(_OP_ANDI_W_D0), reader.what)
     reader.words(OP_LEA_A0)
     table = reader.pointer()
     reader.words(_OP_MOVEQ_0, *_OP_READ_BYTE)
@@ -402,8 +400,7 @@ def _discarded(mog: MogCode, start: int) -> tuple[SoundStep, ...]:
         raise MogVersionError("mog: dice sound: expected a fixed-channel call")
     reader.words(OP_RTS)
     sound = mog.hunk_data(table.hunk)[table.offset]
-    discard = DrawPick(mask, ((),) * (mask + 1))
-    return (discard, Emit(SoundRequest(SoundKind.FIXED, sound, channel)))
+    return (Emit(SoundRequest(SoundKind.FIXED, sound, channel)),)
 
 
 def _signed_table(mog: MogCode, start: int) -> tuple[SoundStep, ...]:
@@ -476,7 +473,8 @@ def sound_rules(mog: MogCode) -> SoundRules:
     counter, counter_cell = _counter(mog, _COUNTER[1])
     routines.append((_COUNTER[0], (counter,)))
     routines.append((_LOOP_TABLE[0], _loop_table(mog, _LOOP_TABLE[1])))
+    initial_offset = _cell_word(mog, offset)
     cells = SoundCells(
-        _cell_word(mog, plain), _cell_word(mog, offset), _cell_word(mog, counter_cell)
+        _cell_word(mog, plain), [initial_offset] * len(_LISTS), _cell_word(mog, counter_cell)
     )
     return SoundRules(tuple(routines), cells)
