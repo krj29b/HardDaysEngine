@@ -90,6 +90,7 @@ and confirm each with Enter. Keyboard slots follow portrait selection order.
 | Cycle filter preset (not recorded in replays) | F9 (Shift+F9 backwards) |
 | Open live display preview | F10 |
 | Toggle fullscreen (not recorded in replays) | F11 or Alt+Enter |
+| Save runtime debug state snapshot — no ADF data (not recorded in replays) | F12 |
 
 Player 2 uses WASD/F, player 3 IJKL/U, and player 4 the numeric keypad/Keypad 0 for
 movement/fire. Practice uses two human knights. All nine creature handlers, loot, shops, services,
@@ -137,12 +138,18 @@ Useful CLI flags:
 - `--hd-pack <DIR>`: external HD asset pack directory (overrides `HARDDAYSENGINE_HD_PACK_DIR` and `[display] hd_pack_dir`)
 - `--hd-mode off|auto|on`: HD asset pack activation mode (default `auto`: active whenever a pack directory is configured)
 - `--control-mode auto|standard|shared-pad`: host gamepad routing mode (default `[input] mode` or `auto`)
+- `--debug-dump-dir <DIR>`: output folder for `F12` and automatic crash state snapshots (overrides `HARDDAYSENGINE_DEBUG_DUMP_DIR` and `[debug] dump_dir`, default `./debug-dumps`)
+- `--crash-dumps` / `--no-crash-dumps`: enable or disable automatic crash state snapshots on unhandled errors (default `[debug] crash_dumps` or `true`)
 
 Display and input settings can also live in `config.toml` (CLI flags win; unknown keys are an error):
 
 ```toml
 [input]
 mode = "auto"               # auto, standard, shared-pad
+
+[debug]
+# dump_dir = "debug-dumps"  # folder for F12 / crash JSON snapshots (no ADF data)
+crash_dumps = true          # write crash-dump-*.json on unhandled exceptions
 
 [display]
 scale = 4

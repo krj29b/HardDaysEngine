@@ -14,6 +14,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from harddaysengine.app.debug_dump import DEFAULT_DUMP_DIR_NAME, DebugDumpSettings
 from harddaysengine.app.input import ControlMode
 from harddaysengine.render.presentation import (
     DEFAULT_SURROUND_COLOR_HEX,
@@ -47,9 +48,12 @@ ADF_IMAGE_SIZE = 901_120
 
 ENV_ADF_DIR = "HARDDAYSENGINE_ADF_DIR"
 ENV_HD_PACK_DIR = "HARDDAYSENGINE_HD_PACK_DIR"
+ENV_DEBUG_DUMP_DIR = "HARDDAYSENGINE_DEBUG_DUMP_DIR"
 DISPLAY_TABLE = "display"
 INPUT_TABLE = "input"
+DEBUG_TABLE = "debug"
 _INPUT_KEYS = frozenset({"mode"})
+_DEBUG_KEYS = frozenset({"dump_dir", "crash_dumps"})
 _DISPLAY_KEYS = frozenset(
     {
         "scale",
@@ -208,6 +212,60 @@ def resolve_control_mode(
     return _resolve_enum(
         cli_mode, table, ControlMode, "mode", "--control-mode", ControlMode.AUTO, file_source
     )
+
+
+def _resolve_debug_dump_dir(
+    cli_dump_dir: str | None,
+    table: Mapping[str, object],
+    *,
+    environ: Mapping[str, str],
+    config_path: Path,
+    file_source: str,
+) -> Path:
+    if cli_dump_dir:
+        return Path(cli_dump_dir)
+    env_value = environ.get(ENV_DEBUG_DUMP_DIR, "")
+    if env_value:
+        return Path(env_value)
+    raw = table.get("dump_dir")
+    if raw is None:
+        return config_path.parent / DEFAULT_DUMP_DIR_NAME
+    if not isinstance(raw, str):
+        raise ConfigError(f"{file_source}: dump_dir must be a string, got {type(raw).__name__}")
+    if not raw:
+        return config_path.parent / DEFAULT_DUMP_DIR_NAME
+    candidate = Path(raw)
+    return candidate if candidate.is_absolute() else config_path.parent / candidate
+
+
+def resolve_debug_settings(
+    config_path: Path,
+    *,
+    cli_dump_dir: str | None = None,
+    crash_dumps: bool | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> DebugDumpSettings:
+    """Resolve ``[debug]`` dump settings: CLI, env, config file, then defaults (§13.14.2)."""
+    table = load_config_file(config_path).get(DEBUG_TABLE, {})
+    if not isinstance(table, dict):
+        raise ConfigError(f"{config_path}: [{DEBUG_TABLE}] must be a table")
+    unknown = sorted(set(table) - _DEBUG_KEYS)
+    if unknown:
+        raise ConfigError(f"{config_path}: unknown [{DEBUG_TABLE}] key(s): {', '.join(unknown)}")
+    file_source = f"{config_path}: [{DEBUG_TABLE}]"
+    resolved_dir = _resolve_debug_dump_dir(
+        cli_dump_dir,
+        table,
+        environ={} if environ is None else environ,
+        config_path=config_path,
+        file_source=file_source,
+    )
+    resolved_crash = (
+        _bool_setting(crash_dumps, "crash_dumps", "--crash-dumps")
+        if crash_dumps is not None
+        else _bool_setting(table.get("crash_dumps", True), "crash_dumps", file_source)
+    )
+    return DebugDumpSettings(dump_dir=resolved_dir, crash_dumps=resolved_crash)
 
 
 def _float_setting(

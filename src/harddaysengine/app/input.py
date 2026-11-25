@@ -14,7 +14,7 @@ from harddaysengine.sim.fight_moves import DOWN, FIRE, LEFT, RIGHT, UP
 from harddaysengine.sim.types import KnightId
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
 REPLAY_FORMAT_VERSION = 1
@@ -297,6 +297,43 @@ class _PadState:
     edge_buttons: set[int] = field(default_factory=set)
 
 
+def _safe_joystick_str(fn: Callable[[], object]) -> str | None:
+    try:
+        value = fn()
+    except (pygame.error, AttributeError, NotImplementedError):
+        return None
+    return value if isinstance(value, str) and value else None
+
+
+def _safe_joystick_int(fn: Callable[[], object]) -> int | None:
+    try:
+        value = fn()
+    except (pygame.error, AttributeError, NotImplementedError):
+        return None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _query_gamepad_info(
+    slot: int, instance_id: int, joystick: pygame.joystick.JoystickType
+) -> dict[str, object]:
+    info: dict[str, object] = {"slot": slot, "instance_id": instance_id}
+    name = _safe_joystick_str(joystick.get_name)
+    if name is not None:
+        info["name"] = name
+    guid = _safe_joystick_str(joystick.get_guid)
+    if guid is not None:
+        info["guid"] = guid
+    for key, fn in (
+        ("axes", joystick.get_numaxes),
+        ("buttons", joystick.get_numbuttons),
+        ("hats", joystick.get_numhats),
+    ):
+        count = _safe_joystick_int(fn)
+        if count is not None:
+            info[key] = count
+    return info
+
+
 class InputRouter:
     """4-player keyboard and ``pygame.joystick`` router producing :class:`InputFrame`."""
 
@@ -330,6 +367,11 @@ class InputRouter:
     def configured_control_mode(self) -> ControlMode:
         """Configured control mode (``auto``, ``standard``, or ``shared-pad``)."""
         return self._configured_control_mode
+
+    def connected_gamepads_info(self) -> list[dict[str, object]]:
+        """Return safe SDL metadata for open gamepads ordered by player slot (§13.14.4)."""
+        ordered = sorted(self._joysticks.items(), key=lambda item: item[1][0])
+        return [_query_gamepad_info(slot, inst_id, joy) for inst_id, (slot, joy) in ordered]
 
     def init_joysticks(self) -> int:
         """Open startup gamepads and return the detected count (ARCHITECTURE.md §13.8)."""

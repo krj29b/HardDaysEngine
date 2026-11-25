@@ -5940,6 +5940,76 @@ in `config.toml` or `--control-mode` on `harddaysengine` (CLI overrides config; 
 All routing occurs before `InputFrame` emission; `sim/`, replay recordings, and state hashes
 are unchanged.
 
+### 13.14 Runtime debug state snapshots (not original; Phase 20, T20.1, ADR-073)
+
+To support bug reports and post-mortem debugging without exposing copyrighted Amiga disk data, the
+host provides read-only runtime state snapshots triggered on demand (`F12`) or automatically on an
+unhandled exception during a windowed session.
+
+#### 13.14.1 Triggers, pre-router isolation, and atomicity
+
+- **On-demand hotkey (`F12`):** `DebugDumpController.consume_event()` intercepts `pygame.K_F12`
+  (`KEYDOWN` ignoring key-repeat, plus its matching `KEYUP`) before `CampaignMenu`,
+  `WindowController`, and `InputRouter`. Pressing `F12` therefore works in every scene (including
+  while `F8` campaign saves or `F10` display preview is open), never enters `InputFrame` or replay
+  recordings, and never mutates `GameSession` or `state_hash()`.
+- **Automatic crash dump:** `run_game_window()` wraps host execution in `except Exception as exc:`
+  (excluding `KeyboardInterrupt` / `SystemExit`). When `[debug] crash_dumps` is enabled (default
+  `true`), the host captures a snapshot with `trigger = "crash"` and formatted exception/traceback
+  details, writes it atomically, logs the saved path to `stderr`, and re-raises the original
+  exception. Any secondary failure during crash-dump creation is caught and reported to `stderr` so
+  it never masks the original exception. Partial startup contexts (`session is None`, `gl_ctx is None`,
+  etc.) are handled gracefully.
+- **Host-only feedback:** After an `F12` capture, the host appends a short-lived caption suffix
+  (3 seconds) and prints one line to `stderr`. It never mutates `GameSession.last_status`, which is
+  part of campaign checkpoints.
+- **Atomic file output:** Files are created lazily inside the resolved dump directory only when a
+  dump is triggered:
+  - `debug-dump-YYYYMMDDTHHMMSSZ-tick<N>.json` (`hotkey_f12` / `manual`)
+  - `crash-dump-YYYYMMDDTHHMMSSZ-tick<N>.json` (`crash`)
+  Collisions within the same second and tick append `-2`, `-3`, etc. Output is UTF-8 LF JSON
+  (`indent=2`, `sort_keys=True`), written via `NamedTemporaryFile` + `os.replace`.
+
+#### 13.14.2 Configuration and precedence
+
+- Directory priority: `--debug-dump-dir <DIR>` > `HARDDAYSENGINE_DEBUG_DUMP_DIR` >
+  `[debug] dump_dir` in `config.toml` (relative to the config file's directory) >
+  `<config_dir>/debug-dumps`.
+- Crash-dump toggle priority: `--crash-dumps` / `--no-crash-dumps` > `[debug] crash_dumps` in
+  `config.toml` > `true`.
+- Unknown keys in `[debug]` raise `ConfigError`, matching `[display]` and `[input]`.
+
+#### 13.14.3 Strict no-ADF-data allowlist (ADR-001)
+
+Every field written to a debug snapshot is selected through an explicit allowlist of clean-room
+engine telemetry and numeric/enum runtime state (`contains_adf_data: false`). The snapshot must
+**never** embed:
+
+- raw `.adf` bytes, OFS file catalogues, or disk asset filenames (`*.ob`, `*.cel`, `*.p`, `*.piv`,
+  `*.t`, `*.a`, `*.cmp`, `*.f`, `*.font`, including `Lair.arena` and `Engine.mirrored`);
+- decoded strings from `mog` or `program` (`overworld.names`, `Arrival` labels, town/sheet/service/
+  dice/meeting/valley/wizard/stonehenge dialogue or hover text, or `.cmp` module titles);
+- decoded executable tables (`Fight.tables`, script bytecodes, hitboxes, prices, creature rules);
+- raw 12-bit `$0RGB` or RGB888 disk palettes, pixel buffers, or audio PCM samples.
+
+Disk identity is represented solely by `loaded` (`bool`), `adf_image_count` (`int`), and the
+non-reversible SHA-256 digest `program_mog_sha256` (from `campaign_save.disk_signature()`).
+
+#### 13.14.4 Schema (`schema_version: 1`)
+
+Top-level JSON object:
+
+| Key | Contents |
+|---|---|
+| `schema_version` | Integer `1`. |
+| `contains_adf_data` | Always `false`. |
+| `trigger` | `"hotkey_f12"`, `"crash"`, or `"manual"`. |
+| `captured_at_utc` | ISO-8601 UTC timestamp (`YYYY-MM-DDTHH:MM:SSZ`). |
+| `environment` | `engine_version`, `python_version`, `platform`, `sys_platform`, `pygame_version`, `sdl_version`, optional `video_driver`, optional `gl` (`vendor`, `renderer`, `version`), allowlisted `sdl_env` (§13.12.2). |
+| `host` | `display` (settings, window size, refresh Hz, preview/save-menu flags, `hd_pack_configured`, `hd_active`), `pacing` (`refresh_hz`, `vsync`, `lockstep_refreshes`, `total_ticks`, `alpha_permille`), `audio` (`headless`, `mixer_initialized`, `sample_rate`, `is_music_playing`, `synth_attached`, `banks_loaded`), `input` (configured/active control mode, connected gamepad metadata via `InputRouter.connected_gamepads_info()`, `control_targets`, replay/recording flags, bounded rolling window of up to 60 recent `InputFrame` dicts), `disks` (`loaded`, `adf_image_count`, `program_mog_sha256`). |
+| `session` | `null` if unavailable, else strictly numeric/enum state: `tick`, `scene` (`id`, `name`), `state_hash`, `seed`, `paused`, `players`, `selected_player_count`, `menu_cursor`, `gore_enabled`, `practice_mode`, `knight_pick`, `rng_state`, `loading_cycle`, `last_sheet_item`, `spawn_lanes_counter`, `bad_luck`, `last_defeat_mask`, `calendar_phase`, `map_key`, `sound_fade`, `palette_fx` (status flags & counters only, no colour words), `actors` (4 knights + dragon numeric fields only), `inventories` (integer counts), `overworld` (turn/day/moon/position/flags + numeric lair records without `arena`), `combat` (when active: numeric trigger, counters, active actor/job summaries, encounter AI flags — no `tables`/`mirrored`), `active_subscreen` (numeric/enum phase/pointer/wait/counter state only). |
+| `crash` | Present only when `trigger == "crash"`: `exception_type`, `exception_message`, `traceback` (`list[str]`). |
+
 ---
 
 ## 14. External HD Asset Packs & GPU HD Compositor (not original; Phase 19, ADR-071)

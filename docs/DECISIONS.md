@@ -1479,3 +1479,42 @@ time.
 speedup), with identical test counts (`1958 passed`) and coverage (`87%`). CI workflows
 (`ci.yml`, `publish.yml`) run `uv sync --frozen` followed by `uv run python scripts/quality_gate.py`
 and require no YAML changes; no gate rule or check is weakened.
+
+## ADR-073: On-demand (`F12`) and crash runtime state snapshots with strict no-ADF-data allowlist
+
+**Status:** ACCEPTED (2026-11-25, T20.1; extends ADR-001, ADR-065)
+
+**Context:** Phase 16 (ADR-065) added standalone SDL input diagnostics (`harddaysengine-input-diagnostics`)
+for hardware-level input issues. Investigating gameplay, rendering, or crash bug reports also benefits
+from a structured snapshot of the live engine runtime state (environment, OpenGL/display/audio/input
+state, recent `InputFrame` ring buffer, and simulation state) captured either on demand via hotkey or
+automatically when an unhandled exception crashes the game loop. However, naively dumping internal
+`GameSession.state_hash()` or screen snapshot dictionaries would leak copyrightable Amiga disk data
+(`overworld.names`, `Arrival` place names, decoded dialogue lines, disk asset filenames such as
+`Lair.arena` / `mirrored`, `Fight.tables` offsets, `audio.current_music_title`, and 12-bit `$0RGB`
+disk palettes), violating ADR-001 and making dumps unsafe to share publicly.
+
+**Decision:**
+1. Add `app/debug_dump.py` (`DebugDumpSettings`, `DebugDumpContext`, `DebugDumpController`,
+   `build_debug_dump`, `write_debug_dump`) strictly inside the `app/` layer (`sim/` remains untouched
+   and I/O-free).
+2. Intercept `F12` (`KEYDOWN` ignoring repeats + matching `KEYUP`) in `DebugDumpController` before
+   `CampaignMenu`, `WindowController`, and `InputRouter`. Captures are read-only, never enter
+   `InputFrame` or `ReplayRecording`, never mutate `GameSession` (including `last_status`), and use a
+   host-only temporary window caption notice plus `stderr` output.
+3. Wrap `run_game_window()` in `except Exception as exc:` so unhandled crashes (excluding
+   `KeyboardInterrupt`/`SystemExit`) atomically write `crash-dump-<UTC>-tick<N>.json` with formatted
+   traceback lines before re-raising, catching any secondary I/O error so the original crash is never
+   masked.
+4. Build every snapshot via an explicit allowlist (`contains_adf_data: false`, `schema_version: 1`)
+   covering only clean-room environment/GL/SDL metadata, host display/pacing/audio/input telemetry,
+   a bounded rolling buffer of the last 60 `InputFrame`s, non-reversible `program`/`mog` SHA-256
+   fingerprint (`disk_signature()`), and strictly numeric/enum simulation state — excluding all disk
+   bytes, asset filenames, decoded strings, executable tables, palettes, pixels, and PCM samples.
+5. Configure via `--debug-dump-dir` / `HARDDAYSENGINE_DEBUG_DUMP_DIR` / `[debug] dump_dir` (default
+   `./debug-dumps`, created lazily) and `--crash-dumps` / `--no-crash-dumps` / `[debug] crash_dumps`
+   (default `true`), with strict `ConfigError` validation.
+
+**Consequences:** Players and developers can press `F12` at any time (or collect an automatic crash
+dump) and safely attach the resulting JSON file to bug reports without exposing Amiga disk data or
+perturbing replay hashes. Added `debug-dumps/` to `.gitignore` so local captures are never committed.

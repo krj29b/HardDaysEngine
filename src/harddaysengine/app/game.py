@@ -7,6 +7,7 @@ import json
 import time
 from dataclasses import asdict, dataclass
 from enum import IntEnum
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import moderngl
@@ -26,6 +27,12 @@ from harddaysengine.app.campaign_save import (
     write_checkpoint,
 )
 from harddaysengine.app.config import find_adf_images
+from harddaysengine.app.debug_dump import (
+    DEFAULT_DUMP_DIR_NAME,
+    DebugDumpContext,
+    DebugDumpController,
+    DebugDumpSettings,
+)
 from harddaysengine.app.dice_screen import DiceScreen
 from harddaysengine.app.ending_screen import EndingScreen
 from harddaysengine.app.fight_runtime import FightLoader, FightRuntime, FightUnavailableError
@@ -131,7 +138,6 @@ from harddaysengine.sim.wizard import WizardPhase
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from pathlib import Path
 
     import numpy.typing as npt
 
@@ -2722,6 +2728,7 @@ def _step_window_ticks(
     max_ticks: int | None,
     *,
     menu_open: bool = False,
+    debug_dumper: DebugDumpController | None = None,
 ) -> tuple[bool, int]:
     if menu_open:
         return not router.sample_frame().quit_requested, replay_idx
@@ -2735,11 +2742,19 @@ def _step_window_ticks(
             frame = router.sample_frame(targets=session.control_targets())
         if frame.quit_requested:
             return False, replay_idx
+        if debug_dumper is not None:
+            debug_dumper.record_input(frame)
         session.step_tick(frame)
         recorded.append(frame)
         if max_ticks is not None and session.tick_count >= max_ticks:
             return False, replay_idx
     return True, replay_idx
+
+
+def _window_caption(session: GameSession, debug_dumper: DebugDumpController | None) -> str:
+    caption = f"HardDaysEngine | {session.scene.name} | {session.last_status}"
+    notice = debug_dumper.caption_notice() if debug_dumper is not None else None
+    return f"{caption} | {notice}" if notice is not None else caption
 
 
 def _present_game_frame(
@@ -2752,6 +2767,8 @@ def _present_game_frame(
     panel: DisplayPanel,
     campaign_menu: CampaignMenu,
     hd_host: HdHostPresenter | None = None,
+    *,
+    debug_dumper: DebugDumpController | None = None,
 ) -> None:
     cur_w, cur_h = pygame.display.get_window_size()
     effective = window.apply_display_settings(settings)
@@ -2781,7 +2798,7 @@ def _present_game_frame(
             )
         elif preview is not None:
             panel.draw(base_renderer.ctx.screen, (cur_w, cur_h), preview.rows(), preview.selected)
-    pygame.display.set_caption(f"HardDaysEngine | {session.scene.name} | {session.last_status}")
+    pygame.display.set_caption(_window_caption(session, debug_dumper))
     pygame.display.flip()
 
 
@@ -2791,9 +2808,13 @@ def _pump_game_events(
     pacer: RefreshPacer,
     campaign_menu: CampaignMenu,
     session: GameSession,
+    *,
+    debug_dumper: DebugDumpController | None = None,
 ) -> None:
     prev_mode = window.mode
     for event in pygame.event.get():
+        if debug_dumper is not None and debug_dumper.consume_event(event):
+            continue
         if campaign_menu.consume_event(
             event,
             available=session.has_save_menu and window.display_preview is None,
@@ -2813,30 +2834,35 @@ def _build_hd_host(settings: DisplaySettings, hd_pack: HdPack | None) -> HdHostP
     return HdHostPresenter(loaded)
 
 
-def run_game_window(
-    adf_dir: Path,
-    *,
-    display: DisplaySettings | None = None,
-    seed: int = DEFAULT_SEED,
-    record_path: Path | None = None,
-    replay_path: Path | None = None,
-    max_ticks: int | None = None,
-    save_path: Path | None = None,
-    control_mode: ControlMode = ControlMode.AUTO,
-    hd_pack: HdPack | None = None,
-) -> int:
-    """Open the interactive ``pygame-ce`` + ModernGL 3.3 Moonstone game window (§13, §14)."""
-    settings = display if display is not None else DisplaySettings()
-    hd_host = _build_hd_host(settings, hd_pack)
-    replay_rec = load_replay(replay_path) if replay_path is not None else None
-    origin = replay_rec or ReplayRecording(seed, (KnightId.RED,), ())
-    active_seed, active_players, checkpoint = origin.seed, origin.players, origin.start_checkpoint
-    campaign_menu = CampaignMenu(save_path if replay_rec is None else None)
+@dataclass(slots=True)
+class _WindowHost:
+    """Live windowed host handles owned and released by :func:`run_game_window`."""
 
-    disk_set = _open_optional_disk_set(adf_dir)
-    audio = AudioEngine(headless=False)
-    session = _new_session(active_seed, active_players, disk_set, checkpoint, audio=audio)
+    hd_host: HdHostPresenter | None = None
+    audio: AudioEngine | None = None
+    base_renderer: HardDaysRenderer | None = None
+    scene_renderer: SceneRenderer | None = None
+    panel: DisplayPanel | None = None
+    pygame_ready: bool = False
 
+    def release(self) -> None:
+        if self.hd_host is not None:
+            self.hd_host.release()
+        if self.panel is not None:
+            self.panel.release()
+        if self.scene_renderer is not None:
+            self.scene_renderer.release()
+        if self.base_renderer is not None:
+            self.base_renderer.release()
+        if self.audio is not None:
+            self.audio.close()
+        if self.pygame_ready:
+            pygame.quit()
+
+
+def _init_pygame_gl_window(
+    settings: DisplaySettings, hd_host: HdHostPresenter
+) -> tuple[WindowController, moderngl.Context]:
     pygame.init()
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
     pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
@@ -2851,55 +2877,163 @@ def run_game_window(
         vsync=settings.vsync,
     )
     window.open()
+    return window, moderngl.create_context(require=330)
 
-    ctx = moderngl.create_context(require=330)
-    base_renderer = HardDaysRenderer(ctx)
-    scene_renderer = SceneRenderer(base_renderer)
-    scene_renderer.set_palette(default_combat_palette())
-    font = default_bitmap_font()
-    panel = DisplayPanel(base_renderer, font)
-    router = InputRouter(init_joysticks=True, control_mode=control_mode)
-    pacer = RefreshPacer(refresh_hz=window.get_refresh_rate(), vsync=settings.vsync)
-    recorded: list[InputFrame] = []
+
+def _run_window_loop(
+    *,
+    session: GameSession,
+    audio: AudioEngine,
+    window: WindowController,
+    router: InputRouter,
+    pacer: RefreshPacer,
+    campaign_menu: CampaignMenu,
+    scene_renderer: SceneRenderer,
+    base_renderer: HardDaysRenderer,
+    font: BitmapFont,
+    settings: DisplaySettings,
+    panel: DisplayPanel,
+    hd_host: HdHostPresenter,
+    debug_dumper: DebugDumpController,
+    dump_ctx: DebugDumpContext,
+    replay_rec: ReplayRecording | None,
+    max_ticks: int | None,
+    recorded: list[InputFrame],
+    checkpoint: str | None,
+) -> tuple[GameSession, str | None]:
     prev_ns = time.perf_counter_ns()
     replay_idx = 0
+    running = True
+    while running:
+        _pump_game_events(window, router, pacer, campaign_menu, session, debug_dumper=debug_dumper)
+        session, loaded = _apply_campaign_request(campaign_menu, session, audio)
+        if loaded is not None:
+            checkpoint = loaded
+            recorded.clear()
+        dump_ctx.session = session
+        dump_ctx.recorded_frame_count = len(recorded)
+        debug_dumper.flush_manual_dump(dump_ctx)
+        now_ns = time.perf_counter_ns()
+        step = pacer.step(now_ns - prev_ns)
+        prev_ns = now_ns
+        running, replay_idx = _step_window_ticks(
+            step.ticks,
+            session,
+            router,
+            replay_rec,
+            replay_idx,
+            recorded,
+            max_ticks,
+            menu_open=campaign_menu.is_open,
+            debug_dumper=debug_dumper,
+        )
+        dump_ctx.recorded_frame_count = len(recorded)
+        if step.should_present:
+            _present_game_frame(
+                session,
+                scene_renderer,
+                base_renderer,
+                font,
+                settings,
+                window,
+                panel,
+                campaign_menu,
+                hd_host,
+                debug_dumper=debug_dumper,
+            )
+        elif not settings.vsync:
+            pygame.time.wait(1)
+    return session, checkpoint
+
+
+def run_game_window(
+    adf_dir: Path,
+    *,
+    display: DisplaySettings | None = None,
+    seed: int = DEFAULT_SEED,
+    record_path: Path | None = None,
+    replay_path: Path | None = None,
+    max_ticks: int | None = None,
+    save_path: Path | None = None,
+    control_mode: ControlMode = ControlMode.AUTO,
+    hd_pack: HdPack | None = None,
+    debug_settings: DebugDumpSettings | None = None,
+) -> int:
+    """Open the interactive ``pygame-ce`` + ModernGL 3.3 Moonstone game window (§13, §14)."""
+    settings = display if display is not None else DisplaySettings()
+    resolved_debug = (
+        debug_settings
+        if debug_settings is not None
+        else DebugDumpSettings(dump_dir=Path(DEFAULT_DUMP_DIR_NAME))
+    )
+    debug_dumper = DebugDumpController(resolved_debug)
+    dump_ctx = DebugDumpContext(
+        display=settings,
+        adf_image_count=len(find_adf_images(adf_dir)),
+        replay_active=replay_path is not None,
+        recording_active=record_path is not None,
+    )
+    host = _WindowHost()
+    recorded: list[InputFrame] = []
+    active_seed, active_players, checkpoint = seed, (KnightId.RED,), None
 
     try:
-        running = True
-        while running:
-            _pump_game_events(window, router, pacer, campaign_menu, session)
-            session, loaded = _apply_campaign_request(campaign_menu, session, audio)
-            if loaded is not None:
-                checkpoint = loaded
-                active_seed, active_players = session.seed, session.players
-                recorded.clear()
-            now_ns = time.perf_counter_ns()
-            step = pacer.step(now_ns - prev_ns)
-            prev_ns = now_ns
-            running, replay_idx = _step_window_ticks(
-                step.ticks,
-                session,
-                router,
-                replay_rec,
-                replay_idx,
-                recorded,
-                max_ticks,
-                menu_open=campaign_menu.is_open,
-            )
-            if step.should_present:
-                _present_game_frame(
-                    session,
-                    scene_renderer,
-                    base_renderer,
-                    font,
-                    settings,
-                    window,
-                    panel,
-                    campaign_menu,
-                    hd_host,
-                )
-            elif not settings.vsync:
-                pygame.time.wait(1)
+        hd_host = _build_hd_host(settings, hd_pack)
+        host.hd_host = dump_ctx.hd_host = hd_host
+        replay_rec = load_replay(replay_path) if replay_path is not None else None
+        origin = replay_rec or ReplayRecording(seed, (KnightId.RED,), ())
+        active_seed, active_players, checkpoint = (
+            origin.seed,
+            origin.players,
+            origin.start_checkpoint,
+        )
+        campaign_menu = CampaignMenu(save_path if replay_rec is None else None)
+        dump_ctx.campaign_menu = campaign_menu
+
+        disk_set = _open_optional_disk_set(adf_dir)
+        audio = AudioEngine(headless=False)
+        host.audio = dump_ctx.audio = audio
+        session = _new_session(active_seed, active_players, disk_set, checkpoint, audio=audio)
+        dump_ctx.session = session
+
+        window, ctx = _init_pygame_gl_window(settings, hd_host)
+        host.pygame_ready = True
+        dump_ctx.window, dump_ctx.gl_ctx = window, ctx
+        base_renderer = HardDaysRenderer(ctx)
+        scene_renderer = SceneRenderer(base_renderer)
+        scene_renderer.set_palette(default_combat_palette())
+        font = default_bitmap_font()
+        panel = DisplayPanel(base_renderer, font)
+        host.base_renderer, host.scene_renderer, host.panel = base_renderer, scene_renderer, panel
+        router = InputRouter(init_joysticks=True, control_mode=control_mode)
+        pacer = RefreshPacer(refresh_hz=window.get_refresh_rate(), vsync=settings.vsync)
+        dump_ctx.router, dump_ctx.pacer = router, pacer
+
+        session, checkpoint = _run_window_loop(
+            session=session,
+            audio=audio,
+            window=window,
+            router=router,
+            pacer=pacer,
+            campaign_menu=campaign_menu,
+            scene_renderer=scene_renderer,
+            base_renderer=base_renderer,
+            font=font,
+            settings=settings,
+            panel=panel,
+            hd_host=hd_host,
+            debug_dumper=debug_dumper,
+            dump_ctx=dump_ctx,
+            replay_rec=replay_rec,
+            max_ticks=max_ticks,
+            recorded=recorded,
+            checkpoint=checkpoint,
+        )
+        active_seed, active_players = session.seed, session.players
+    except Exception as exc:
+        dump_ctx.recorded_frame_count = len(recorded)
+        debug_dumper.write_crash_dump(dump_ctx, exc)
+        raise
     finally:
         if record_path is not None:
             save_replay(
@@ -2911,10 +3045,5 @@ def run_game_window(
                     start_checkpoint=checkpoint,
                 ),
             )
-        hd_host.release()
-        panel.release()
-        scene_renderer.release()
-        base_renderer.release()
-        audio.close()
-        pygame.quit()
+        host.release()
     return 0

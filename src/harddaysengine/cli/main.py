@@ -14,6 +14,7 @@ from harddaysengine.app.config import (
     find_adf_images,
     resolve_adf_dir,
     resolve_control_mode,
+    resolve_debug_settings,
     resolve_display_settings,
     resolve_save_path,
 )
@@ -38,6 +39,7 @@ from harddaysengine.sim.rng import DEFAULT_SEED
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from harddaysengine.app.debug_dump import DebugDumpSettings
     from harddaysengine.render.presentation import DisplaySettings
 
 REQUIRED_DISK_COUNT = 3
@@ -200,6 +202,18 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="DIR",
         help="validate an external HD asset pack directory and exit",
     )
+    parser.add_argument(
+        "--debug-dump-dir",
+        default=None,
+        metavar="DIR",
+        help="directory for F12 and crash runtime state snapshots (default: ./debug-dumps)",
+    )
+    parser.add_argument(
+        "--crash-dumps",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="enable or disable crash state snapshots (default: [debug] crash_dumps or true)",
+    )
     return parser
 
 
@@ -293,42 +307,51 @@ def _dispatch_utility_command(
     return None
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Entry point. Returns the process exit code."""
-    parser = build_parser()
-    args = _parse_args(parser, argv)
-    try:
-        adf_dir = resolve_adf_dir(
-            args.adf_dir,
-            environ=os.environ,
-            config_path=Path(args.config),
-            default=Path("disks"),
-        )
-        display = resolve_display_settings(
-            Path(args.config),
-            scale=args.scale,
-            filter_name=args.filter,
-            scale_mode=args.scale_mode,
-            aspect=args.aspect,
-            crop=args.crop,
-            fullscreen=args.fullscreen,
-            vsync=args.vsync,
-            surround=args.surround,
-            hd_pack=args.hd_pack,
-            hd_mode=args.hd_mode,
-            environ=os.environ,
-        )
-        save_path = resolve_save_path(Path(args.config))
-        control_mode = resolve_control_mode(Path(args.config), cli_mode=args.control_mode)
-    except ConfigError as exc:
-        parser.error(str(exc))
-    utility_rc = _dispatch_utility_command(args, adf_dir, display)
-    if utility_rc is not None:
-        return utility_rc
-    if not _should_launch_game(argv, args):
-        parser.print_help()
-        return 0
+def _resolve_cli_config(
+    args: argparse.Namespace,
+) -> tuple[Path, DisplaySettings, Path | None, ControlMode, DebugDumpSettings]:
+    config_path = Path(args.config)
+    adf_dir = resolve_adf_dir(
+        args.adf_dir,
+        environ=os.environ,
+        config_path=config_path,
+        default=Path("disks"),
+    )
+    display = resolve_display_settings(
+        config_path,
+        scale=args.scale,
+        filter_name=args.filter,
+        scale_mode=args.scale_mode,
+        aspect=args.aspect,
+        crop=args.crop,
+        fullscreen=args.fullscreen,
+        vsync=args.vsync,
+        surround=args.surround,
+        hd_pack=args.hd_pack,
+        hd_mode=args.hd_mode,
+        environ=os.environ,
+    )
+    save_path = resolve_save_path(config_path)
+    control_mode = resolve_control_mode(config_path, cli_mode=args.control_mode)
+    debug_settings = resolve_debug_settings(
+        config_path,
+        cli_dump_dir=args.debug_dump_dir,
+        crash_dumps=args.crash_dumps,
+        environ=os.environ,
+    )
+    return adf_dir, display, save_path, control_mode, debug_settings
 
+
+def _launch_playable(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    *,
+    adf_dir: Path,
+    display: DisplaySettings,
+    save_path: Path | None,
+    control_mode: ControlMode,
+    debug_settings: DebugDumpSettings,
+) -> int:
     record_path = Path(args.record) if args.record is not None else None
     replay_path = Path(args.replay) if args.replay is not None else None
     seed = DEFAULT_SEED if args.seed is None else args.seed
@@ -360,4 +383,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         save_path=save_path,
         control_mode=control_mode,
         hd_pack=hd_pack,
+        debug_settings=debug_settings,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Entry point. Returns the process exit code."""
+    parser = build_parser()
+    args = _parse_args(parser, argv)
+    try:
+        adf_dir, display, save_path, control_mode, debug_settings = _resolve_cli_config(args)
+    except ConfigError as exc:
+        parser.error(str(exc))
+    utility_rc = _dispatch_utility_command(args, adf_dir, display)
+    if utility_rc is not None:
+        return utility_rc
+    if not _should_launch_game(argv, args):
+        parser.print_help()
+        return 0
+    return _launch_playable(
+        parser,
+        args,
+        adf_dir=adf_dir,
+        display=display,
+        save_path=save_path,
+        control_mode=control_mode,
+        debug_settings=debug_settings,
     )

@@ -30,6 +30,7 @@ consumed by `GameSession.step_tick` and serialized by `--record` / `--replay`.
   - `F9` / `Shift+F9` — cycle presentation filter preset (ADR-053)
   - `F10` — live display preview and CRT tuning panel (ADR-062)
   - `F11` / `Alt+Enter` — fullscreen toggle (T13.3)
+  - `F12` — runtime debug state snapshot (no ADF data, ADR-073)
 - **Original Amiga joystick word:** `PlayerInput.to_joystick_word()` packs directional and fire
   state into the original bitmask (`RIGHT`, `LEFT`, `DOWN`, `UP`, `FIRE`) with opposite directions
   excluded (`ARCHITECTURE.md` §10.19).
@@ -304,3 +305,24 @@ or Xbox Series X|S gamepad):
    - When reporting a bug, attach both `.jsonl` files (or paste their `session_start`,
      `device_discovered`, and differing `event` lines) along with your OS version and controller
      model/firmware. Never commit generated files under `build/`.
+
+---
+
+## 4. Runtime Debug State Snapshots (`F12` and Automatic Crash Dumps)
+
+HardDaysEngine also provides shareable JSON runtime snapshots (`docs/ARCHITECTURE.md` §13.14,
+ADR-073) for gameplay, rendering, and crash bug reports:
+
+- **On demand (`F12`):** Press `F12` in any scene (including while `F8` or `F10` is open) to write
+  `debug-dump-YYYYMMDDTHHMMSSZ-tick<N>.json` atomically into `./debug-dumps/` (created lazily).
+  `F12` is consumed pre-router and never alters simulation state, `last_status`, or replay hashes.
+- **On crash:** Unhandled exceptions in the game window automatically write
+  `crash-dump-YYYYMMDDTHHMMSSZ-tick<N>.json` with formatted traceback lines before re-raising
+  (disable with `--no-crash-dumps` or `[debug] crash_dumps = false`).
+- **Directory override:** `--debug-dump-dir <DIR>` > `HARDDAYSENGINE_DEBUG_DUMP_DIR` >
+  `[debug] dump_dir` in `config.toml` > `./debug-dumps`.
+- **No ADF data (`contains_adf_data: false`):** Every field is selected via a strict allowlist of
+  environment/OpenGL/SDL metadata, host display/pacing/audio/input state, the last 60 `InputFrame`s,
+  the non-reversible SHA-256 digest of `program`+`mog`, and numeric/enum simulation state. No raw
+  disk bytes, asset filenames, decoded strings, executable tables, disk palettes, pixels, or audio
+  samples are ever written, so dumps are safe to attach to issue reports.

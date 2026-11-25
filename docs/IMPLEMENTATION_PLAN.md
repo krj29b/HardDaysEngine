@@ -693,6 +693,26 @@ completely unchanged. Layering stays strictly `cli -> app -> render -> assets ->
   *Accept:* full quality gate green, full GL suite green, real-disk Classic vs. HD replay hashes
   identical, contact sheets reviewed, and zero game data committed.
 
+### Phase 20: Runtime debug state snapshots
+
+Add on-demand (`F12`) and automatic crash runtime state snapshots modeled on the structured JSON
+diagnostic conventions of Phase 16, strictly excluding all Amiga disk data (ADR-001, ADR-073).
+
+- **T20.1 On-demand (`F12`) and crash runtime state snapshots (`docs/ARCHITECTURE.md` §13.14,
+  `app/debug_dump.py`, `app/config.py`, `app/input.py`, `app/game.py`, `cli/main.py`):**
+  implement `DebugDumpSettings`, `DebugDumpContext`, `DebugDumpController`, `build_debug_dump`,
+  and atomic `write_debug_dump` with an explicit no-ADF-data allowlist (`schema_version: 1`,
+  `contains_adf_data: false`). Intercept `F12` pre-router (works in every scene and overlay without
+  affecting `InputFrame`, `ReplayRecording`, `GameSession`, or `state_hash()`), capture automatic
+  crash dumps on unhandled exceptions without masking the original error, add `[debug]` config and
+  `--debug-dump-dir` / `--[no-]crash-dumps` CLI flags, and document in `README.md` and
+  `docs/INPUT_AND_DIAGNOSTICS.md`.
+  *Accept:* unit tests verify schema, strict no-ADF-data allowlist across scenes/subscreens/combat,
+  `F12` pre-router consumption and replay-hash invariance, crash-dump creation without masking
+  exceptions, atomic writes, collision naming, config/CLI precedence, and a `@pytest.mark.adf` test
+  verifying zero leaked disk strings/filenames/palettes/tables from real disks; full quality gate
+  passes.
+
 ## 6. Multi-agent (`/teamwork`) ownership rules
 
 To prevent merge conflicts when running a swarm of parallel agents:
